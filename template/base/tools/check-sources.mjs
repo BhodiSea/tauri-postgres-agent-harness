@@ -4,7 +4,7 @@
 // tree in `pnpm validate` + CI so unsourced decision sites are caught on every PR, not just
 // during an edit. Keep the DECISION regex and the 3-line window in lockstep with the hook.
 // SOURCE: docs/harness/README.md (the gate is the enforcement; provenance) [corpus: harness/doctrine]
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
@@ -23,7 +23,11 @@ function trackedSourceFiles() {
     'packages/**/*.tsx',
     'packages/**/*.sql',
   ]
-  const out = execSync(`git ls-files ${globs.join(' ')}`, { encoding: 'utf8' })
+  // execFileSync, never a shell: sh expands `apps/**/*.ts` before git sees it,
+  // and any pattern with a shallow match collapses to just those files — the
+  // deep tree silently drops out of the scan (found when Windows cmd, which
+  // does not glob, scanned everything and flagged sites POSIX runs missed).
+  const out = execFileSync('git', ['ls-files', ...globs], { encoding: 'utf8' })
   return out
     .split('\n')
     .map((f) => f.trim())

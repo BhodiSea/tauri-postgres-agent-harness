@@ -29,10 +29,10 @@ export async function withUserContext<T>(
   fn: (tx: postgres.TransactionSql) => Promise<T>,
 ): Promise<T> {
   const result = await getDb().begin(async (tx) => {
-    // SOURCE: set_config('app.user_id', $1, true) is transaction-local (SET LOCAL) —
-    // the RLS identity GUC can never leak across pooled connections; policies read
-    // (select current_setting('app.user_id', true)::uuid) so the lookup runs once per
-    // statement as an initPlan instead of per row [corpus: postgres/rls-initplan]
+    // set_config(..., true) is transaction-local (SET LOCAL) — the RLS identity
+    // GUC can never leak across pooled connections; policies read
+    // (select current_setting('app.user_id', true)::uuid) once per statement.
+    // SOURCE: postgres GUC discipline [corpus: postgres/guc-set-local]
     await tx`select set_config('app.user_id', ${userId}, true)`
     return fn(tx)
   })

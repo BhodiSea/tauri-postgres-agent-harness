@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs'
+// SOURCE: jose is the reference JOSE implementation for Node — jwtVerify with
+// pinned algorithms + JWKS key resolvers is the verification path for both
+// auth modes [corpus: entra/jwt-verify]
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 
@@ -12,6 +15,11 @@ export const STUB_ISSUER = 'urn:app:dev-auth'
 export const STUB_AUDIENCE = 'urn:app:api'
 
 type Env = Readonly<Record<string, string | undefined>>
+
+// SOURCE: jose resolves signing keys through a JWKS key-getter; local (stub) and
+// remote (Entra) sets share the resolver shape, which is what lets both modes run
+// the byte-identical jwtVerify path below [corpus: entra/jwt-verify]
+type JwksKeyGetter = ReturnType<typeof createLocalJWKSet>
 
 // z.guid(), not z.uuid(): postgres accepts any 8-4-4-4-12 hex uuid, and the
 // seeded dev user (11111111-…) has no RFC-4122 variant bits — strict z.uuid()
@@ -46,11 +54,7 @@ function requireEnv(env: Env, name: string): string {
   return value
 }
 
-function buildVerifier(
-  getKey: ReturnType<typeof createLocalJWKSet>,
-  issuer: string,
-  audience: string,
-): TokenVerifier {
+function buildVerifier(getKey: JwksKeyGetter, issuer: string, audience: string): TokenVerifier {
   return async (token) => {
     // SOURCE: MS Entra ID access-token validation — pin issuer + audience and allow only
     // the expected asymmetric algorithms (never HS*/none); clockTolerance 300s absorbs
@@ -59,7 +63,7 @@ function buildVerifier(
       issuer,
       audience,
       algorithms: ['ES256', 'RS256'],
-      clockTolerance: 300,
+      clockTolerance: 300, // SOURCE: ±300s drift absorption [corpus: entra/jwt-verify]
     })
     // SOURCE: Entra puts the immutable directory object id in `oid` (`sub` is
     // app-pairwise); stub tokens carry the user uuid in `sub`. Either way the RLS
@@ -101,8 +105,8 @@ export function createTokenVerifier(env: Env): TokenVerifier {
   }
 
   const jwksPath = env['DEV_JWKS_PATH'] ?? '.dev-auth/jwks.json'
-  let localJwks: ReturnType<typeof createLocalJWKSet> | undefined
-  const getKey: ReturnType<typeof createLocalJWKSet> = (protectedHeader, token) => {
+  let localJwks: JwksKeyGetter | undefined
+  const getKey: JwksKeyGetter = (protectedHeader, token) => {
     if (localJwks === undefined) {
       let raw: string
       try {
@@ -113,6 +117,8 @@ export function createTokenVerifier(env: Env): TokenVerifier {
         )
       }
       const parsed: unknown = JSON.parse(raw)
+      // SOURCE: createLocalJWKSet mirrors the remote Entra key source so stub mode
+      // exercises the same verification path with local keys [corpus: entra/jwt-verify]
       localJwks = createLocalJWKSet(JwksFileDto.parse(parsed))
     }
     return localJwks(protectedHeader, token)

@@ -24,7 +24,7 @@ npx --yes github:BhodiSea/tauri-postgres-agent-harness update   # pull harness f
 npx --yes github:BhodiSea/tauri-postgres-agent-harness doctor   # integrity + wiring check
 ```
 
-Pin installs to a tag for reproducibility: `github:BhodiSea/tauri-postgres-agent-harness#v0.1.0`.
+Pin installs to a tag for reproducibility: `github:BhodiSea/tauri-postgres-agent-harness#v0.1.1`.
 This repo is also a **GitHub template** ("Use this template" → `pnpm bootstrap` consumes
 the checkout into a project in place), and its agents/commands/skill are installable as a
 **Claude Code plugin** (`/plugin marketplace add BhodiSea/tauri-postgres-agent-harness`).

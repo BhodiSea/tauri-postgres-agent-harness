@@ -1,5 +1,8 @@
 {
   "name": "tauri-postgres-agent-harness",
+  "metadata": {
+    "description": "Agent-side companion to the tauri-postgres-agent-harness: subagents, commands, and the vertical-slice skill for Tauri 2 + Hono + Postgres FORCE-RLS monorepos shipped as signed Windows executables."
+  },
   "owner": {
     "name": "BhodiSea"
   },

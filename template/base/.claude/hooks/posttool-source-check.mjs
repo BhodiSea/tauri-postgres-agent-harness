@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 import { readHookInput } from './lib/hookio.mjs'
 
-export const HARNESS_HOOK_VERSION = '0.1.0'
+export const HARNESS_HOOK_VERSION = '0.1.1'
 
 const input = await readHookInput()
 const file = String(input?.tool_input?.file_path ?? input?.tool_input?.path ?? '')

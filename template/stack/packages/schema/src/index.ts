@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
+// SOURCE: drizzle pgPolicy/pgRole declare RLS in the schema so the schema-rls
+// gate can assert every table carries policies [corpus: postgres/rls-force]
 import { pgPolicy, pgRole, pgTable, real, text, timestamp, uuid, vector } from 'drizzle-orm/pg-core'
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod'
 import { z } from 'zod'
@@ -15,12 +17,12 @@ export const EMBEDDING_DIM = 1024
 // docker-compose init SQL, never by migrations — hence `.existing()`.
 const appApi = pgRole('app_api').existing()
 
-// SOURCE: PostgreSQL row-security guidance — wrap current_setting() in a scalar
-// sub-select so the planner evaluates it once per statement (initPlan) instead of
-// per row. nullif(..., '') maps both no-identity shapes (GUC never set -> NULL;
-// pooled session after a SET LOCAL tx -> '') to NULL, which never equals an
-// owner_id — "no identity" fails closed instead of raising a 22P02 uuid-cast
-// error. [corpus: postgres/rls-initplan]
+// Wrap current_setting() in a scalar sub-select so the planner evaluates it once
+// per statement (initPlan) instead of per row. nullif(..., '') maps both
+// no-identity shapes (GUC never set -> NULL; pooled session after a SET LOCAL
+// tx -> '') to NULL, which never equals an owner_id — "no identity" fails closed
+// instead of raising a 22P02 uuid-cast error.
+// SOURCE: PostgreSQL row-security guidance [corpus: postgres/rls-initplan]
 const ownerIsCurrentUser = (ownerId: AnyPgColumn) =>
   sql`${ownerId} = (select nullif(current_setting('app.user_id', true), '')::uuid)`
 
@@ -53,12 +55,14 @@ export const notes = pgTable(
       to: appApi,
       using: ownerIsCurrentUser(table.ownerId),
     }),
+    // SOURCE: per-op owner policy — insert guards via WITH CHECK [corpus: harness/doctrine]
     pgPolicy('notes_insert_own', {
       as: 'permissive',
       for: 'insert',
       to: appApi,
       withCheck: ownerIsCurrentUser(table.ownerId),
     }),
+    // SOURCE: per-op owner policy — update guards read AND write rows [corpus: harness/doctrine]
     pgPolicy('notes_update_own', {
       as: 'permissive',
       for: 'update',
@@ -66,6 +70,7 @@ export const notes = pgTable(
       using: ownerIsCurrentUser(table.ownerId),
       withCheck: ownerIsCurrentUser(table.ownerId),
     }),
+    // SOURCE: per-op owner policy — delete scoped by USING [corpus: harness/doctrine]
     pgPolicy('notes_delete_own', {
       as: 'permissive',
       for: 'delete',

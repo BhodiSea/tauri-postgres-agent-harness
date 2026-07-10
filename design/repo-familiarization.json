@@ -1,0 +1,435 @@
+[
+ {
+  "summary": "I examined the entire `.claude/` machinery under `/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/` \u2014 all 5 hooks plus `lib/hookio.mjs`, `settings.json` and `settings.local.json.example`, `statusline.mjs`, the 7 subagents, 3 slash commands, 3 always-loaded rules, the `authoring-vertical-slice` skill (SKILL.md + 4 progressive-disclosure references + `scaffold-slice.mjs`), and the `CLAUDE.md` kernel. I also read the two load-bearing files the Stop hook and gate consume (`tools/harness.config.mjs`, `tools/validate.mjs`) because the hook contract is meaningless without them.\n\nThe architecture is a deterministic \"green gate\" enforcement kernel built on Claude Code's hook lifecycle. Hook I/O is centralized in `hookio.mjs`, which encodes a three-tier exit-code contract: `pass()` = exit 0 (proceed); `denyTool()` = exit 0 + JSON `hookSpecificOutput.permissionDecision:\"deny\"` (PreToolUse structured refusal with a machine-readable reason); `block()` = exit 2 + stderr (stderr is fed back to the model). PreToolUse hooks are gatekeepers: `pretool-bash-guard` is a regex tripwire that denies dangerous shell (`rm -rf`, force-push, `reset --hard`, `DROP TABLE`, fork bomb) and secret leaks (service-role key, `.env` reads, server-side `getSession`); `pretool-write-guard` blocks invariant-violating file *content* before it lands AND provides tamper-evidence (a root-anchored PROTECTED list of gate/config/CI files that require `HARNESS_ALLOW_SELF_EDIT=1` to touch). PostToolUse hooks are feedback: `posttool-fast-check` runs Biome `--write` on the single changed file (non-blocking), `posttool-source-check` flags decision sites lacking a `// SOURCE:` provenance comment (blocking, exit 2). The `stop-validate-gate` is the unbreakable finale: it runs `STOP_HOOK_STEPS` from the harness config directly (never through pnpm-script names) and exits 2 with the failures until the build is green.\n\nDefense-in-depth is layered: settings.json `permissions.deny` (Layer 1) protects the hooks, settings, `.mcp.json`, and `.harness/`; the write-guard's PROTECTED list (Layer 2) protects the gate runner, lint/architecture config, git hooks, and CI workflows; and CI re-runs `validate --min-floor` with a hardcoded FLOOR so a weakened config can only ADD steps, never weaken canonical ones. The three enforcement layers (Stop hook, `pnpm validate`, CI) all read the same `tools/harness.config.mjs` so \"done\" means the same everywhere. Subagents are specialists with tool/model restrictions (read-only reviewers get `Read/Grep/Glob` only + `disallowedTools: Write, Edit`; authors get Edit/Write; models tiered opus vs sonnet by task). Commands orchestrate via `!`-prefixed inline command substitution and `$1` args. The skill enforces a locked migration\u2192RLS\u2192DAL\u2192RSC\u2192test\u2192provenance\u2192gate order with lazy-loaded references.\n\nRoughly two-thirds of this is stack-agnostic (the hook contract, tamper-evidence layering, config-single-source-of-truth, CI floor mirroring, provenance gate, subagent/command/skill scaffolding, permission tiers). The remaining third is Next.js/Supabase-specific and must be re-mapped for the Tauri2+React19/Vite+Hono/Drizzle+self-hosted-Postgres stack: Supabase `getSession`/`getClaims`/`service_role`/RLS `auth.uid()` auth semantics \u2192 Entra ID OIDC + app-set Postgres session vars; the RSC/`use cache`/`proxy.ts`/CVE-2025-29927 model \u2192 a plain React SPA in a Tauri webview talking to a Hono server boundary; the flat `app/components/lib` root layout \u2192 the pnpm monorepo; Supabase CLI/MCP + `next build` gate steps \u2192 Drizzle migrations + Vite/Tauri builds; and the `supabase/functions` service-role carve-out disappears entirely.",
+  "transferable_patterns": [
+   {
+    "name": "Three-tier hook exit-code contract (shared I/O lib)",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/lib/hookio.mjs",
+    "how_it_works": "A tiny Node-only module (no jq/bash) with readHookInput() (drains stdin, JSON.parse, returns {} on empty/parse error), and three terminal helpers encoding the contract: pass()=exit 0 (proceed); denyTool(event,reason)=exit 0 + stdout JSON {hookSpecificOutput:{hookEventName,permissionDecision:'deny',permissionDecisionReason}} (PreToolUse structured refusal); block(reason)=stderr + exit 2 (feeds message back to model). Every hook imports these so the semantics are uniform.",
+    "adaptation_for_new_harness": "Copy verbatim \u2014 Node 22 built-ins only, zero deps, entirely stack-agnostic. It is the foundation every other hook builds on. Only change is cosmetic (hookEventName strings)."
+   },
+   {
+    "name": "PreToolUse bash guard as regex tripwire",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/pretool-bash-guard.mjs",
+    "how_it_works": "Matcher 'Bash'. Reads tool_input.command, iterates a RULES array of [regex,message]; first match calls denyTool. Blocks rm -rf (permuted flag order), git push --force/-f/--force-with-lease, git reset --hard, fork bomb, plus secret/invariant leaks. Header explicitly states it is a tripwire not a sandbox; the settings deny list is the primary control.",
+    "adaptation_for_new_harness": "Keep the destructive-shell rules verbatim. Swap the Supabase-specific rules (service_role, getSession, DROP TABLE) for stack rules: block reads of on-prem secret files, block dropping the privileged Postgres role, block bypassing FORCE RLS, block leaking Entra client secrets. The [regex,message] table pattern carries over unchanged."
+   },
+   {
+    "name": "PreToolUse write-guard: content-invariant blocking + two-layer tamper evidence",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/pretool-write-guard.mjs",
+    "how_it_works": "Matcher Edit|Write|MultiEdit. (1) Resolves file_path RELATIVE to CLAUDE_PROJECT_DIR so a PROTECTED[] list of root-anchored (^\u2026) regexes can match gate/config/CI files; if matched and HARNESS_ALLOW_SELF_EDIT!=='1', deny with a human-in-the-loop message. (2) Exempts harness's own dirs (.claude/, tests, sanctioned dirs) and non-source files, then concatenates all candidate new-content fields (content/new_string/new_str/replacement/edits[].new_string) and runs content checks (banned key, dangerouslySetInnerHTML, context-sensitive checks gated on isClient/isServerArea path heuristics), plus a positive requirement that DAL files start with import 'server-only'.",
+    "adaptation_for_new_harness": "The PROTECTED root-anchored tamper list is the crown jewel \u2014 re-point it at the new gate surface (drizzle config, biome.jsonc, eslint flat config, tsconfig, pnpm-workspace.yaml, lefthook.yml, .github/workflows, tauri.conf.json, the validate runner). Keep CLAUDE_PROJECT_DIR-relative resolution and the HARNESS_ALLOW_SELF_EDIT escape hatch verbatim. Replace the Supabase content checks with: no privileged DB role in app code, no Entra secret in client bundle, server-only wall for packages/schema/Drizzle repo modules, no direct DB import from apps/desktop."
+   },
+   {
+    "name": "PostToolUse provenance gate (blocking)",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/posttool-source-check.mjs",
+    "how_it_works": "Re-reads the just-written file from DISK, splits lines, and for lines matching a DECISION regex (RLS/auth/cache/tuning keywords) that are NOT comment lines, checks a 3-line lookback window for a `// SOURCE:` citation. Any decision site without one is collected; if the list is non-empty it writes them to stderr and exits 2, forcing the model to add citations and re-run /verify-citations.",
+    "adaptation_for_new_harness": "Directly transferable. Swap the DECISION keyword regex for the new stack's decision sites (Drizzle policy/RLS SQL, Entra token verification, pgvector index/distance choices, llama.cpp inference params, retry/timeout/rate-limit consts). The comment-line skip and 3-line lookback logic stay identical."
+   },
+   {
+    "name": "PostToolUse fast single-file formatter (non-blocking)",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/posttool-fast-check.mjs",
+    "how_it_works": "Runs `biome check --write --no-errors-on-unmatched --colors=off <file>` on the single changed file via execFileSync; on failure surfaces Biome's notes to stderr but ALWAYS exits 0. Keeps the edit loop fast; heavy checks (tsc/eslint/knip/depcruise/build) live only on the Stop gate.",
+    "adaptation_for_new_harness": "Copy as-is \u2014 the target stack already uses Biome. The 'fast per-file feedback, never block, defer heavy checks to Stop' split is a core performance pattern. Extend the extension allowlist for .rs (Tauri) if a rust formatter is wired similarly."
+   },
+   {
+    "name": "Unbreakable Stop gate driven by external config, with fallback + loop guard",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/hooks/stop-validate-gate.mjs",
+    "how_it_works": "Stop matcher ''. Dynamically imports STOP_HOOK_STEPS from ../../tools/harness.config.mjs (falls back to a core step and WARNS if the import fails \u2014 never skips). Runs each [name,cmd] via execSync with maxBuffer 64MB (avoids ENOBUFS false-fails on large build output), collects the last 4000 chars of each failure, and exits 2 with all failures on stderr until green. Loop-guarded by stop_hook_active (changes the header when re-entered) and bounded by CLAUDE_CODE_STOP_HOOK_BLOCK_CAP.",
+    "adaptation_for_new_harness": "Structurally identical. Point STEPS at the new gate (drizzle migrate check, tsc, biome, eslint, vitest, tauri build, pgvector RLS-isolation suite). Keep the config-import-with-fallback, 64MB buffer, loop guard, and block cap. Crucially keep invoking runners DIRECTLY (node tools/validate.mjs), not via pnpm-script names."
+   },
+   {
+    "name": "Single-source-of-truth gate config + CI floor mirroring",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/tools/harness.config.mjs, /Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/tools/validate.mjs",
+    "how_it_works": "harness.config.mjs exports VALIDATE_STEPS (what `pnpm validate` runs) and STOP_HOOK_STEPS (what Stop runs). validate.mjs runs them sequentially, stops on first failure. `--min-floor` merges a HARDCODED FLOOR (identical copies of canonical steps) so CI runs canonical commands even if the config was edited \u2014 a weakened config can ADD steps but never weaken the floor. The config file is itself write-guard-protected. All three layers (Stop hook, pnpm validate, CI) read the same config so 'done' is identical everywhere.",
+    "adaptation_for_new_harness": "This is the single most important transferable idea: one config, three consumers, plus a hardcoded CI floor that neutralizes config tampering. Re-implement wholesale with the new step commands. Keep --min-floor and --list flags."
+   },
+   {
+    "name": "Defense-in-depth permission tiers + deny-list self-protection",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/settings.json",
+    "how_it_works": "permissions has allow (read-only/local commands + read MCP tools + WebFetch domain allowlist), ask (network/remote-mutating ops), and deny (Layer-1 hard blocks: curl/wget/rm -rf/force-push/reset --hard/service_role, plus Read globs for .env*/~/.ssh, plus Edit+Write of .claude/hooks, settings.json, settings.local.json, .mcp.json, .harness/). defaultMode acceptEdits, disableBypassPermissionsMode 'disable', env sets the Stop block cap, and wires the hooks (with per-hook timeouts) and statusline.",
+    "adaptation_for_new_harness": "Port the three-tier allow/ask/deny structure and the self-protecting deny globs (hooks/settings/mcp config must be non-editable by the agent) verbatim. Replace allow entries with pnpm/drizzle/tauri/vitest commands, ask with deploy/signing/Entra ops, and WebFetch domains with the on-prem allowlist (likely internal docs + llama.cpp; drop Supabase/Vercel/Next domains). Keep disableBypassPermissionsMode:disable."
+   },
+   {
+    "name": "Specialist subagents with tool + model restriction",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/agents/*.md",
+    "how_it_works": "7 markdown agents with YAML frontmatter (name, description with 'MUST BE USED'/'PROACTIVELY' trigger language, tools, disallowedTools, model). Read-only reviewers (security-reviewer opus, torvalds-reviewer opus, accessibility-reviewer sonnet, citation-verifier sonnet) get Read/Grep/Glob (+WebFetch/MCP for the verifier) and explicit disallowedTools: Write,Edit; each reviews `git diff` vs base and ends with a fixed verdict token (PASS/FAIL, VERDICT: SHIP/BLOCK, CITATIONS: CLEAN/REJECTED). Authors (migration-rls-author, dal-author, test-author) get Edit/Write (and Bash except dal-author) and return file lists + exact commands.",
+    "adaptation_for_new_harness": "Pattern is fully stack-agnostic: least-privilege tool grants, model tiering by task difficulty, and machine-parseable verdict lines that a command/loop can gate on. Re-author the domain content: security-reviewer audits Postgres16 FORCE RLS + Entra OIDC + pgvector isolation; dal-author\u2192a Drizzle-repo/Hono-handler author; migration-rls-author\u2192Drizzle migration author; keep torvalds/accessibility/citation reviewers nearly as-is."
+   },
+   {
+    "name": "Slash commands with inline command substitution + arg templating",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/commands/{adr,new-feature,verify-citations}.md",
+    "how_it_works": "Markdown with frontmatter (description, argument-hint, allowed-tools, model). Bodies use `$1` for the argument and `!`-prefixed lines for inline shell substitution injected into the prompt (e.g. !`date +%Y%m%d`, !`git status --short`, !`git diff --name-only HEAD`). Header notes the command engine does NOT expand $(...), hence the ! form. new-feature.md orchestrates the whole vertical slice: invokes the skill, delegates layers to named subagents, requires reviewer verdicts, then /adr \u2192 /verify-citations.",
+    "adaptation_for_new_harness": "Directly transferable authoring pattern. Keep adr and verify-citations essentially as-is (provenance is stack-agnostic). Rewrite new-feature's delegation graph for the monorepo (schema pkg \u2192 Drizzle migration \u2192 Hono handler \u2192 React screen \u2192 tests) and swap the git substitution lines as needed."
+   },
+   {
+    "name": "Skill with progressive-disclosure references + idempotent scaffold script",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/skills/authoring-vertical-slice/",
+    "how_it_works": "SKILL.md defines a strict 6-step order and instructs the agent to read a per-layer reference file (references/*.md) only when reaching that layer (keeps context lean). scripts/scaffold-slice.mjs (Node built-ins only) validates a kebab-case feature name, then writes stub files only if absent \u2014 idempotent. Migration idempotency is special-cased (fresh-timestamp filenames never existsSync-match, so it scans for any *_<feature>.sql). The DAL stub deliberately omits the literal banned key token so the write-guard won't block later edits to it.",
+    "adaptation_for_new_harness": "Skill structure (locked order + lazy references + idempotent scaffolder) is fully reusable. Re-target the scaffold to monorepo paths (packages/schema, apps/server handlers/routes, apps/desktop screens, test files) and rewrite each reference for Drizzle/Hono/React/Tauri. Preserve the idempotency tricks and the 'avoid literal banned tokens in stubs' gotcha."
+   },
+   {
+    "name": "Always-loaded rules + advisory CLAUDE.md kernel",
+    "where": "/Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/.claude/rules/{security-invariants,provenance,rsc-client-split}.md, /Users/thomasnicklin/Desktop/next-supabase-agent-harness/template/base/CLAUDE.md",
+    "how_it_works": "CLAUDE.md is the <200-line project-memory kernel (stack, commands, the validate contract, security invariants, size limits, provenance, spec-first governance) and explicitly states it is ADVISORY \u2014 the Stop hook + CI are the real enforcement. rules/ files are short; security-invariants and provenance are 'always loaded', while rsc-client-split uses a `paths:` frontmatter scope but self-documents that paths scoping is buggy/unreliable and defers hard enforcement to hooks/lint.",
+    "adaptation_for_new_harness": "Keep the 'CLAUDE.md is advisory, hooks/CI enforce' philosophy and the always-loaded security+provenance rules. Rewrite invariants for the new stack (FORCE RLS via session var, Entra OIDC verification, no privileged role in app code, server/client boundary at the Hono API not RSC). Note the lesson that `paths:`-scoped rules are unreliable \u2014 put real invariants in always-loaded rules + hooks."
+   }
+  ],
+  "stack_specific": [
+   {
+    "name": "Supabase auth semantics: getSession ban vs getClaims/getUser",
+    "where": "pretool-bash-guard.mjs (getSession regex), pretool-write-guard.mjs (isServerArea getSession check), rules/security-invariants.md, CLAUDE.md, dal-author.md, security-reviewer.md",
+    "replacement_needed": "There is no Supabase cookie session. Replace with Entra ID OIDC: verify the JWT/access token server-side in Hono middleware (validate issuer/audience/signature against Entra JWKS), and ban trusting any unverified client-supplied identity. The 'never read the unverified session server-side' invariant maps to 'never trust an unvalidated OIDC token'."
+   },
+   {
+    "name": "service_role key ban + supabase/functions carve-out",
+    "where": "pretool-bash-guard.mjs, pretool-write-guard.mjs (service_role checks + supabase/functions exemption), settings.json deny (Bash(* service_role *)), all authoring agents, references",
+    "replacement_needed": "No Supabase service_role. Map to the privileged Postgres role/connection that could bypass FORCE RLS: ban it in app code (apps/desktop, apps/server request handlers), allow it only in a sanctioned migration/admin path governed by an ADR. The supabase/functions Deno carve-out disappears \u2014 replace with whichever narrow admin surface (e.g. a migration runner) is the sanctioned home, if any."
+   },
+   {
+    "name": "RLS initPlan pattern (select auth.uid()) + app_metadata/auth.jwt()",
+    "where": "migration-rls-author.md, security-reviewer.md, skills/.../references/migration-rls.md, rules/security-invariants.md, posttool-source-check DECISION regex",
+    "replacement_needed": "Self-hosted Postgres 16 has no Supabase auth.uid()/auth.jwt() helpers. Replace with an app-set session variable pattern (e.g. SET LOCAL app.current_tenant / current_setting('app.current_user')) applied by Hono per request after OIDC verification, still using ENABLE + FORCE ROW LEVEL SECURITY and per-operation policies. Cohort/tenant claims come from the verified Entra token, injected as a GUC, never from client-editable metadata."
+   },
+   {
+    "name": "Next.js RSC / 'use cache' / proxy.ts / CVE-2025-29927 model",
+    "where": "rules/rsc-client-split.md, skills/.../references/rsc-a11y.md, CLAUDE.md (Cache Components gotchas), security-reviewer.md, torvalds-reviewer.md, write-guard isClient heuristics",
+    "replacement_needed": "No App Router, no Server Components, no 'use cache', no proxy.ts middleware, no CVE-2025-29927. The desktop is a React 19 + Vite SPA in a Tauri webview; the trust boundary is the Hono API on Node 22. Replace 'authorize in the DAL not proxy.ts' with 'authorize in Hono handlers/middleware, never trust the desktop client'. The client/DAL import ban becomes 'apps/desktop must never import packages/schema DB modules directly \u2014 only call the Hono API'."
+   },
+   {
+    "name": "DAL server-only wall (lib/dal + import 'server-only')",
+    "where": "pretool-write-guard.mjs (DAL server-only requirement + client-imports-DAL ban), dal-author.md, references/dal-dto-serveronly.md, security-invariants.md",
+    "replacement_needed": "The `import 'server-only'` build-time wall is a Next.js/webpack construct that Vite/Tauri lack. Replace with an architectural boundary: DB/Drizzle access lives only in apps/server (or packages/schema consumed by the server), enforced by dependency-cruiser/ESLint-boundaries and the write-guard rejecting DB imports from apps/desktop. The DTO-narrowing rule (return shaped DTOs over the API, never raw rows) transfers directly."
+   },
+   {
+    "name": "Flat repo layout (app/ components/ lib/, @/* -> ./*, no src/)",
+    "where": "Every agent + reference + CLAUDE.md + scaffold-slice.mjs paths",
+    "replacement_needed": "Replace flat root layout with the pnpm monorepo: apps/desktop, apps/server, packages/schema, packages/importer, packages/eval. All hardcoded paths (lib/dal, app/<feature>/page.tsx, supabase/migrations, lib/dal/__tests__) and the @/* alias must be re-mapped to workspace package paths. depcruise/knip run across the whole workspace, not app/components/lib/proxy.ts."
+   },
+   {
+    "name": "Supabase CLI + Supabase MCP permissions",
+    "where": "settings.json allow (Bash(supabase ...), mcp__supabase__*), settings.local.json.example (SUPABASE_PROJECT_REF/ACCESS_TOKEN/DB_URL), enabledMcpjsonServers",
+    "replacement_needed": "No Supabase CLI or Supabase MCP on-prem. Replace the supabase start/db reset/gen types/migration commands with Drizzle equivalents (drizzle-kit generate/migrate, a local Postgres 16 container lifecycle) and drop mcp__supabase__* entirely. settings.local.json env becomes the self-hosted DB URL + Entra tenant/client config; CORPUS_INDEX_URL may stay if a local corpus MCP is reused."
+   },
+   {
+    "name": "pgTAP + supabase db reset RLS isolation testing",
+    "where": "test-author.md, migration-rls-author.md, references/tests.md, harness.config STOP_HOOK_STEPS (tests/rls/run-rls.mjs), settings allow (supabase test db)",
+    "replacement_needed": "Keep the cross-tenant fail-closed keystone test (tenant A JWT reads ZERO of tenant B rows) but run it against self-hosted Postgres 16 \u2014 either pgTAP against a locally-migrated DB (drizzle migrate + seed) or a Vitest+node-postgres harness that sets the session GUC and asserts isolation. The run-rls.mjs runner concept and its write-guard protection transfer."
+   },
+   {
+    "name": "WebFetch domain allowlist (Supabase/Next/Vercel/React)",
+    "where": "settings.json allow WebFetch(domain:...), citation-verifier.md external allowlist",
+    "replacement_needed": "On-prem/no-cloud: prune the external domains. Keep primary-source standards domains still relevant (postgresql.org, nodejs.org, owasp.org, w3.org, npmjs.com) and add Tauri/Vite/Drizzle/Hono/Entra docs domains; drop supabase.com/nextjs.org/vercel.com/react-specific ones as needed. Consider leaning harder on the internal corpus MCP since external fetch may be restricted."
+   },
+   {
+    "name": "next build gate step / Cache Components prerender check",
+    "where": "harness.config.mjs VALIDATE_STEPS ['build','pnpm exec next build'], validate.mjs FLOOR, CLAUDE.md (build catches prerender violations)",
+    "replacement_needed": "Replace `next build` with the two builds that matter here: Vite build for apps/desktop and `tauri build` producing the signed Windows .exe, plus a Hono/apps/server type-checked build. Add code-signing verification as an ask/CI step. The Cache Components prerender-violation rationale disappears."
+   },
+   {
+    "name": "Playwright + axe WCAG on app/ routes",
+    "where": "accessibility-reviewer.md, test-author.md, references/{tests,rsc-a11y}.md (pnpm test:a11y)",
+    "replacement_needed": "E2E must drive the Tauri webview, not a Next dev server \u2014 use tauri-driver/WebDriver (or Playwright against the built app's webview) with axe-core for WCAG 2.2 AA. The accessibility-reviewer rubric transfers unchanged; only the harness/runner and route paths change to the desktop screens."
+   },
+   {
+    "name": "Biome+Prettier(Tailwind sort) + depcruise app/components/lib target set",
+    "where": "posttool-fast-check.mjs, validate.mjs FLOOR (biome/eslint/knip/depcruise), harness.config architecture step, CLAUDE.md format command",
+    "replacement_needed": "Stack already standardizes on Biome + ESLint 9 flat, so keep those. Re-point depcruise/knip/eslint targets at the workspace packages instead of app components lib proxy.ts, add Rust/Tauri lint (clippy/fmt) if desired, and drop the Prettier Tailwind-class-sort step if Biome handles it (Tailwind v4). lefthook+commitlint already match the harness's lefthook.yml/commitlint pattern."
+   }
+  ],
+  "gotchas": [
+   "Exit-code semantics are NOT interchangeable: PreToolUse refusals must be exit 0 + JSON permissionDecision:'deny' (denyTool), while PostToolUse/Stop blocking is exit 2 + stderr (block). Using exit 2 for a PreToolUse deny, or JSON for a Stop block, breaks the contract. hookio.mjs is the canonical encoding \u2014 reuse it, don't reinvent.",
+   "The write-guard resolves file paths RELATIVE to CLAUDE_PROJECT_DIR precisely so the PROTECTED list can be root-anchored (^tools/validate.mjs$ etc.); without this a nested node_modules/x/tools/validate.mjs would false-match. Preserve the CLAUDE_PROJECT_DIR-relative resolution when porting.",
+   "Two DISTINCT tamper layers with different coverage: settings.json deny (Layer 1) protects .claude/hooks, settings*.json, .mcp.json, .harness/; the write-guard PROTECTED list (Layer 2) protects the gate runner/config/lint/CI/git-hook surface. The write-guard EXEMPTS all of .claude/, so the hooks themselves rely on the settings deny-list for protection \u2014 keep BOTH layers or a gap opens.",
+   "The Stop hook and STOP_HOOK_STEPS invoke runners DIRECTLY (node tools/validate.mjs, node tests/rls/run-rls.mjs, pnpm exec vitest) and NEVER via package.json script names \u2014 because redefining a script (e.g. \"validate\":\"true\") is an auto-accepted unguarded edit that would hollow out the gate. Direct invocation + write-guarding the runner files keeps the gate tamper-evident. Replicate this exactly.",
+   "CI runs validate.mjs --min-floor with a HARDCODED FLOOR duplicating the canonical steps, so editing harness.config.mjs can only ADD steps, never weaken the floor. The FLOOR array must be kept in lockstep with the config's canonical entries \u2014 that duplication is intentional, not a mistake to 'DRY away'. HARNESS_ALLOW_SELF_EDIT=1 is the only human-in-the-loop escape hatch for protected files, and the agent cannot set its own env.",
+   "stop-validate-gate uses execSync maxBuffer 64MB specifically because next build / db reset output exceeds the 1MB default and throws ENOBUFS, which would masquerade as a step FAILURE on an otherwise-green build. Any large-output build/test step in the new stack needs the same buffer bump. The loop is also bounded by CLAUDE_CODE_STOP_HOOK_BLOCK_CAP (8) and detects re-entry via stop_hook_active to change its message; if the config import fails it WARNS and falls back but never skips.",
+   "posttool-source-check reads the file from DISK after the write (not from tool_input), only flags DECISION keywords that appear in actual code (it skips lines starting with //, *, /*), and scans a 3-line lookback window for // SOURCE:. So an explanatory comment mentioning a keyword won't false-trigger, but a decision line whose citation is >3 lines above will be flagged.",
+   "scaffold-slice.mjs has two subtle correctness tricks: (1) migration idempotency can't use existsSync because each run mints a fresh YYYYMMDDHHMMSS filename, so it scans the migrations dir for any *_<feature>.sql; (2) the generated DAL stub deliberately AVOIDS writing the literal banned service-role token, because the write-guard would then deny the agent's later full-file Write of that same stub. Both patterns must be reproduced for the new stub set.",
+   "The bash-guard is explicitly a substring/regex TRIPWIRE, not a sandbox \u2014 obfuscated or base64'd commands evade it. It is defense-in-depth on top of the settings permission model (allow/ask/deny), which is the primary control. Don't treat the guard regexes as a security boundary on their own.",
+   "rules/rsc-client-split.md self-documents that its `paths:` frontmatter scoping is buggy/unreliable and defers hard enforcement to always-loaded rules + hooks/lint. Lesson for the new harness: put real invariants in always-loaded rules and hooks, not in path-scoped rule files. The write-guard's isServerArea/isClient checks (getSession only banned server-side, DAL-import only banned client-side) are context-sensitive by path heuristic \u2014 re-derive those heuristics for the monorepo boundary."
+  ]
+ },
+ {
+  "summary": "The gate chain is a single-source-of-truth quality system. `tools/harness.config.mjs` exports two arrays of `[name, shellCommand]` tuples: `VALIDATE_STEPS` (the static gate run by `pnpm validate`) and `STOP_HOOK_STEPS` (what must pass before an agent turn may end). `tools/validate.mjs` imports `VALIDATE_STEPS` and runs them sequentially with `spawnSync(cmd, {shell:true, stdio:'inherit'})`, breaking on the FIRST non-zero exit, printing a per-step \u2713/\u2717 summary, and exiting non-zero on any failure. The VALIDATE_STEPS order is: format (biome check) \u2192 types (tsc --noEmit) \u2192 lint (eslint) \u2192 provenance (check-sources.mjs) \u2192 route-boundaries \u2192 aliveness \u2192 dead-code (knip --strict) \u2192 architecture (depcruise) \u2192 build (next build), with two commented opt-in steps (styleguide, gated-routes). Three enforcement layers consume the same config so they cannot drift: (1) the Stop hook `stop-validate-gate.mjs` dynamically imports `STOP_HOOK_STEPS` from the config and runs each with `execSync` (64MB maxBuffer), exiting 2 with the last 4000 chars of failing output on stderr so the model must fix and continue \u2014 it invokes runners DIRECTLY (`node tools/validate.mjs`, `node tests/rls/run-rls.mjs`, `pnpm exec vitest`) never through package.json script names, so an agent can't redefine `validate` to `true`; (2) CI `quality-gate.yml` runs `node tools/validate.mjs --min-floor`; (3) lefthook git hooks run a fast subset pre-commit/pre-push. The `--min-floor` mechanism hardcodes a FLOOR array inside validate.mjs that is a verbatim copy of the canonical VALIDATE_STEPS; when `--min-floor` is passed, it runs FLOOR first, then any config-only extra steps whose names aren't already in the floor. Combined with the write-guard hook (which denies agent edits to harness.config.mjs, validate.mjs, all check-*.mjs, the lint/arch config surface, CI workflows, and the RLS runner unless `HARNESS_ALLOW_SELF_EDIT=1`), this means editing the config can only ADD gates, never weaken the non-negotiable floor.\n\nEach gate is a small standalone Node ESM script that exits 0/1. check-sources.mjs is the deterministic CI mirror of the PostToolUse `posttool-source-check.mjs` hook: both use an IDENTICAL `DECISION` regex (createPolicy|FORCE ROW LEVEL SECURITY|auth.uid()|getClaims|use cache|cacheLife|revalidate|maxRetries|timeoutMs|rateLimit) and a 3-line lookback window to require a `// SOURCE:` comment near every \"decision site\" in code (comments are skipped). The hook fires only during edits inside Claude Code; the gate re-runs the same heuristic over `git ls-files` on every PR. check-route-boundaries requires error.tsx + not-found.tsx for every route family (app root, route groups, UI-owning segments) with nearest-boundary inheritance semantics. check-aliveness-adoption and the two opt-in module gates (check-styleguide-manifest, check-gated-routes) all share a \"manifest + union-scan\" pattern: a data manifest file lists entries `{files, requires/label}`, the gate asserts every listed file exists and required import specifiers appear in the union of those files' sources, and (for styleguide/gated-routes) does a bidirectional check plus discovery scan so new gated surfaces are born accountable. check-types-drift regenerates Supabase types and diffs against the committed file, self-skipping only when no stack is reachable.\n\nThe RLS isolation suite is two independently-guarded layers behind `pnpm test:rls` \u2192 `tests/rls/run-rls.mjs`. Layer 1 is DB-backed pgTAP (`supabase db reset` with retry-once + `supabase test db`), run ONLY when `supabase/migrations` exists AND `supabase status` exits 0. Layer 2 is an SDK suite (`vitest run tests/rls`) that ALWAYS runs and self-skips via `rlsConfigured` (needs URL+anon+service keys AND \u22651 ISOLATION_TARGET). run-rls.mjs injects the local stack's URL+publishable+service keys from `supabase status -o env` (only setting vars not already present) so the SDK proof runs for real; it FAILS CLOSED in CI when migrations exist but the stack is unreachable (a skip there would be a false green). `client-factory.ts` defines `ISOLATION_TARGETS` (one entry per owner-scoped table), an admin client (service-role, seeding only), an anon client (RLS lens), `seedUser` (creates a GoTrue auth user + seeds one owned row so the positive control is non-vacuous), and `deleteUser` (FK cascade cleanup). `cross-tenant-isolation.test.ts` signs in as attacker A via a real GoTrue JWT and asserts: A sees its own row (positive control), A sees zero of victim B's rows on SELECT, cross-user UPDATE/DELETE affect zero rows (or error for append-only tables), and an INSERT smuggling B's id is rejected by WITH CHECK. The mid-turn `rls_verify` MCP server is a lighter probe: it connects via `pg` to SUPABASE_DB_URL inside a READ ONLY transaction that always ROLLBACKs, allow-lists table/column against information_schema before ever building SQL, confirms a seeded positive control (B owns \u22651 row, else SKIPPED-not-green), then `SET LOCAL ROLE authenticated` + sets request.jwt.claims to A and counts B's visible rows, returning ISOLATED/LEAK/SKIPPED \u2014 it never false-greens (any missing prerequisite returns SKIPPED, and CI's pnpm test:rls remains authoritative).\n\nThe provenance/citation pipeline runs end-to-end: authors write `// SOURCE: <authority> [corpus: <id>]` comments; the `corpus_search` MCP server does keyword lookup over a version-pinned `corpus/index.json` (returns `{id,version,url,snippet,sha256}` or honest NO_MATCH; `corpus_resolve` resolves an id) with a robust CORPUS_INDEX_URL override that ignores unexpanded `${...}` placeholders and http URLs and falls back to the local index rather than silently blanking; the PostToolUse hook flags missing citations live (exit 2); check-sources.mjs re-enforces in the gate + CI; a `/verify-citations` command + citation-verifier subagent (outside this slice) resolve ids through the corpus; and at release, the ci-provenance module emits SLSA L2 build provenance + SPDX SBOM via `actions/attest-build-provenance`/`attest-sbom` and VERIFIES the attestation in-CI. The opt-in modules each layer one concern: mutation (StrykerJS nightly full + per-PR incremental advisory \u226580%), ci-provenance (SLSA+SBOM on tags), ci-dast (Semgrep SAST + OWASP ZAP baseline), ci-lighthouse (perf+a11y budgets on public routes), gate-styleguide + gate-gated-routes (the two commented VALIDATE_STEPS with their manifests).",
+  "transferable_patterns": [
+   {
+    "name": "Config-as-single-source-of-truth gate list shared by hook + runner + CI",
+    "where": "template/base/tools/harness.config.mjs, tools/validate.mjs, .claude/hooks/stop-validate-gate.mjs, github/workflows/quality-gate.yml",
+    "how_it_works": "harness.config.mjs exports VALIDATE_STEPS and STOP_HOOK_STEPS as arrays of [name, shellCommand]. validate.mjs imports VALIDATE_STEPS and runs sequentially, break-on-first-failure, \u2713/\u2717 summary, non-zero exit. The Stop hook dynamically imports STOP_HOOK_STEPS from the SAME file (with a hardcoded fallback if the import fails). CI runs the same validate.mjs. One list, three consumers, so 'done' means the same thing in the editor, at commit, and in CI.",
+    "adaptation_for_new_harness": "Keep one tools/harness.config.mjs (or .ts run via tsx) at the monorepo root exporting the step lists. Replace step commands with the new stack: format\u2192'biome check .' + 'eslint .', types\u2192'tsc -b' across pnpm workspaces (apps/desktop, apps/server, packages/*), build\u2192'pnpm -r build' (Vite build for desktop, tsc/tsup for Hono server), plus 'cargo check'/'cargo clippy' + 'tauri build' for the Rust/Tauri side. The Stop hook and a CI job both invoke node tools/validate.mjs. Because there is no Next build, the build step becomes vite build + tauri build + drizzle migration-compile."
+   },
+   {
+    "name": "--min-floor: hardcoded verbatim copy of canonical steps that CI runs so a weakened config can't weaken CI",
+    "where": "template/base/tools/validate.mjs (FLOOR array + resolveSteps), github/workflows/quality-gate.yml (node tools/validate.mjs --min-floor)",
+    "how_it_works": "validate.mjs contains a FLOOR constant that duplicates the canonical VALIDATE_STEPS. With --min-floor it runs FLOOR first, then appends only config steps whose names are not already in the floor. CI always passes --min-floor. So even if someone edits harness.config.mjs to drop or hollow a step, CI still runs the original command for that step name; config edits can only ADD steps.",
+    "adaptation_for_new_harness": "Copy verbatim. Keep FLOOR = the non-negotiable subset (format/lint/types/build/provenance/rls). The mechanism is stack-agnostic \u2014 it is pure array merge by step name. Pair it with the write-guard so both the config file and validate.mjs are edit-protected; the FLOOR is the second line of defense if the guard is bypassed."
+   },
+   {
+    "name": "Direct-invocation Stop gate (no package.json script indirection) + exit-2 feedback loop",
+    "where": "template/base/.claude/hooks/stop-validate-gate.mjs, harness.config.mjs STOP_HOOK_STEPS",
+    "how_it_works": "STOP_HOOK_STEPS invoke runners directly ('node tools/validate.mjs', 'node tests/rls/run-rls.mjs', 'pnpm exec vitest run') never 'pnpm validate', because an agent can freely edit package.json to redefine a script to `true`. The hook execSyncs each step (64MB maxBuffer to survive large build/docker output), collects failures, and on any failure writes a header + last 4000 chars of each failure to stderr and exit(2), which feeds errors back to the model. Loop-guarded by input.stop_hook_active and bounded by CLAUDE_CODE_STOP_HOOK_BLOCK_CAP.",
+    "adaptation_for_new_harness": "Same hook, same direct invocation. STOP_HOOK_STEPS for the new stack: ['validate','node tools/validate.mjs'], ['rls-isolation','node tests/rls/run-rls.mjs'] (now against self-hosted Postgres 16 with FORCE RLS), ['unit','pnpm -r exec vitest run']. Raise maxBuffer similarly for tauri build / cargo output. Keep the fallback-to-core-gate-on-import-failure so a broken config never silently skips the gate."
+   },
+   {
+    "name": "Deterministic CI mirror of a live PostToolUse hook (identical regex + window)",
+    "where": "template/base/tools/check-sources.mjs vs .claude/hooks/posttool-source-check.mjs",
+    "how_it_works": "The provenance check exists twice with an intentionally identical DECISION regex and 3-line lookback: the hook fires on each edit inside Claude Code (fast, local); check-sources.mjs runs the same heuristic over `git ls-files` in validate + CI so the rule is enforced on every PR, not only during agent edits. Both skip comment lines and test/generated files. Header comments explicitly say 'keep in lockstep'.",
+    "adaptation_for_new_harness": "Keep both files. Update the DECISION regex to the new stack's decision sites: Drizzle policy/RLS builders (pgPolicy, sql`... USING`), Hono auth middleware, Entra OIDC token-validation constants (issuer, audience, jwks), llama.cpp inference params (temperature, n_ctx, timeout), retry/rate-limit consts. Replace the git-ls-files globs with the monorepo source globs (apps/**, packages/**). The dual-file lockstep pattern is the transferable idea."
+   },
+   {
+    "name": "Manifest + union-scan adoption gates (append-only data file + bidirectional checker)",
+    "where": "template/base/tools/aliveness-manifest.mjs + check-aliveness-adoption.mjs; modules/gate-styleguide/*; modules/gate-gated-routes/* (gated-routes-manifest.mjs + check-gated-routes.mjs)",
+    "how_it_works": "A pure-data manifest lists entries ({files, requires} or {file}). The checker asserts every listed file exists and that each required import specifier / declared primitive appears in the UNION of the entry's files' sources (so a primitive split across sibling files still passes). Styleguide and gated-routes add bidirectionality (every real ui file must be in the manifest and vice-versa) plus a discovery walk that flags any unlisted file matching a GATE_CALL regex \u2014 so a new gated surface must be registered or explicitly exempted with a reason. Regex gates are explicitly documented as heuristics, not proofs.",
+    "adaptation_for_new_harness": "Directly reusable as Node scripts. For the desktop app, an aliveness manifest asserts React 19 islands still import selection/keyboard/optimistic kit hooks; a gated-routes-style gate asserts Entra-role-gated screens render a designed RestrictedState instead of a blank redirect. Point the walk at apps/desktop/src instead of app/. The union-scan + discovery + exemption-map shape is stack-independent."
+   },
+   {
+    "name": "Two-layer, fail-closed, self-skipping RLS isolation suite with seeded positive control",
+    "where": "template/base/tests/rls/{run-rls.mjs,client-factory.ts,cross-tenant-isolation.test.ts}, template/stack/supabase/tests/notes_rls.test.sql",
+    "how_it_works": "Layer 1 pgTAP (structure: table exists, RLS ENABLED+FORCED, exactly N per-op policies) runs only when migrations exist AND a stack is reachable (with retry-once on flaky db reset). Layer 2 SDK suite mints real auth JWTs, then per owner-scoped target asserts: attacker sees own row (positive control, prevents vacuous pass on a deny-all DB), sees 0 victim rows on SELECT, UPDATE/DELETE touch 0 rows (or error if appendOnly), INSERT smuggling victim id is rejected by WITH CHECK. run-rls.mjs injects stack env from `status -o env`, only sets absent vars, and fails closed in CI when migrations exist but stack is down.",
+    "adaptation_for_new_harness": "On self-hosted Postgres 16 + FORCE RLS the pgTAP layer transfers almost verbatim (pgTAP runs against any Postgres via pg_prove or a psql harness \u2014 drop the supabase CLI wrapper, use a docker-compose'd postgres + `psql -f` or node-pg-migrate). The SDK layer becomes a Drizzle-client layer: instead of GoTrue JWTs, set the tenant via `SET LOCAL role` + `set_config('request.jwt.claims',...)` or your Entra-derived tenant claim, using two Drizzle connections (attacker/victim). Keep the positive-control seed and the fail-closed-in-CI guard. ISOLATION_TARGETS becomes a Drizzle-schema-driven list."
+   },
+   {
+    "name": "Never-false-green MCP probe: allow-list identifiers, READ ONLY + ROLLBACK, SKIPPED on any missing prerequisite",
+    "where": "template/base/tools/mcp/rls-verify-server.mjs",
+    "how_it_works": "A stdio MCP server exposes rls_verify(table,tenantColumn,tenantA,tenantB). It refuses to interpolate any identifier not present in information_schema.columns (then double-quotes it), runs inside BEGIN; SET TRANSACTION READ ONLY; ... ROLLBACK, requires a seeded baseline (tenantB owns \u22651 row) or returns SKIPPED to avoid vacuous ISOLATED, drops to the RLS-subject role (SET LOCAL ROLE authenticated, never superuser), impersonates A via request.jwt.claims, and counts B's visible rows. Every failure path (no DB url, missing pg, unknown identifier, query error) returns SKIPPED(reason); only a completed probe returns ISOLATED/LEAK.",
+    "adaptation_for_new_harness": "Reuse the whole safety discipline for a Hono/Drizzle stack. Point it at the self-hosted Postgres connection string (env var renamed from SUPABASE_DB_URL). Replace 'SET LOCAL ROLE authenticated' + request.jwt.claims with whatever RLS-subject role + tenant-claim mechanism the on-prem app uses (e.g. a 'app_user' role + set_config for the Entra tenant/oid). Keep the MCP server as an SDK-standard @modelcontextprotocol/sdk stdio server wired in mcp.json; it is Node, independent of Tauri."
+   },
+   {
+    "name": "Corpus-grounded provenance with resilient override handling",
+    "where": "template/base/tools/mcp/corpus-search-server.mjs + corpus/index.json + mcp.json",
+    "how_it_works": "corpus_search / corpus_resolve MCP tools do keyword scoring over a version-pinned JSON corpus of {id,title,url,version,text,sha256}; return high-signal hits or honest NO_MATCH \u2014 the doctrine is 'never invent a source'. loadIndex() treats CORPUS_INDEX_URL as a FILE path, strips file://, and deliberately ignores an unexpanded ${...} placeholder or http(s) value (a real bug they hit where MCP hosts pass the template literal through), always falling back to the bundled index so a bad override never silently blanks the corpus. Stage-1 keyword match is behind a stable contract so it can be swapped for pgvector embeddings later.",
+    "adaptation_for_new_harness": "The new stack HAS pgvector + local llama.cpp, so implement Stage-2 directly: keep the identical tool contract but back corpus_search with pgvector similarity over embeddings generated by the local llama.cpp embedding endpoint, stored in the self-hosted Postgres. Keep corpus/index.json as the seed/source-of-truth and the fallback. Preserve the placeholder-ignoring override logic verbatim \u2014 it is a real-world footgun fix."
+   },
+   {
+    "name": "SLSA L2 build provenance + SBOM with in-CI attestation verification",
+    "where": "template/modules/ci-provenance/github/workflows/provenance.yml",
+    "how_it_works": "On tag push, builds, packages the artifact, runs actions/attest-build-provenance (GitHub OIDC \u2192 Fulcio/Sigstore/Rekor) and anchore/sbom-action (SPDX) + actions/attest-sbom, then VERIFIES the attestation in-CI with `gh attestation verify` in a 5-attempt retry loop (attestation can lag). Header documents the honest limit: L2 proves build-path not source integrity (cites the Shai-Hulud stolen-OIDC incident); path to L3 is an isolated reusable workflow + SHA-pinned actions. All actions are already SHA-pinned; concurrency cancel-in-progress:false so a release attestation is never cancelled.",
+    "adaptation_for_new_harness": "For a signed Windows .exe this is the natural home for code-signing provenance. Keep attest-build-provenance over the built .exe/.msi (Tauri bundle) and the SBOM, and additionally attest the Authenticode-signed installer. Since it is on-prem/no-cloud you may run this on a self-hosted runner; keep the in-CI verify-the-attestation step and the SHA-pinning. Add cargo-auditable / cargo-sbom for the Rust side alongside the JS SBOM."
+   },
+   {
+    "name": "Two-tier CWV/a11y budgets with error-vs-warn split on public routes only",
+    "where": "template/modules/ci-lighthouse/{lighthouse.yml,lighthouserc.json}",
+    "how_it_works": "Lighthouse CI builds+starts the app and asserts an assertMatrix scoped by matchingUrlPattern: accessibility/performance minScore 0.95 and LCP/CLS as ERROR (block), FCP/TBT/JS-byte size as WARN (lab\u2260prod, localhost transfer size isn't gzip-accurate). Only public routes are lab-tested; authed surfaces are covered by field RUM/web-vitals beacons. Placeholder public env lets next build render without a backend.",
+    "adaptation_for_new_harness": "A Tauri desktop app has no public web routes, so Lighthouse largely doesn't apply \u2014 but the error-vs-warn budget philosophy transfers to any perf gate (e.g. bundle-size budgets on the Vite output, or startup-time budgets on the packaged app). Keep the 'hard-fail on the few objective metrics, warn on the environment-sensitive ones' split. If a web admin surface exists on the Hono server, point lighthouserc at it."
+   },
+   {
+    "name": "Fast/slow tiered git hooks via lefthook (Biome-last ordering to avoid formatter fights)",
+    "where": "template/base/lefthook.yml",
+    "how_it_works": "lefthook (single Go binary) runs pre-commit on staged files only (Prettier for Tailwind class sort at priority 1, then Biome authoritative at priority 2 with stage_fixed, then gitleaks that self-skips if the binary is absent), commit-msg (commitlint), and pre-push whole-repo (typecheck, eslint, knip, cspell) in parallel. Deliberately NOT parallel at pre-commit and ordered \u2014 running Prettier and Biome in parallel let Prettier's double-quote defaults re-stage over Biome and produce files that fail biome check in CI.",
+    "adaptation_for_new_harness": "The task already specifies lefthook + commitlint. Reuse this file. Since the new stack is Biome + ESLint 9 flat (no Prettier/Tailwind-class-sort described the same way \u2014 Tailwind v4), you can drop the Prettier priority-1 step and let Biome be sole formatter (simpler, no ordering hazard). Add pre-commit steps for `cargo fmt --check`/`clippy` on the Rust side and Drizzle-schema lint. Keep gitleaks self-skip and the pre-commit(staged)/pre-push(whole)/CI(authority) tiering."
+   },
+   {
+    "name": "Composable flat-config ESLint layer as a function (default-install vs retrofit spread)",
+    "where": "template/base/eslint.config.mjs + eslint/harness.eslint.mjs.tmpl",
+    "how_it_works": "harness.eslint.mjs exports harnessEslint(options) returning a spreadable flat-config array; the default install does `export default harnessEslint()`, retrofits do `[...harnessEslint(), ...yourBlocks]`. It layers js.recommended + next configs + typescript-eslint strictTypeChecked/stylisticTypeChecked + jsx-a11y strict (recalibrated for scrollable regions) + eslint-plugin-boundaries (architecture) + security/no-secrets/no-unsanitized + house size limits (max-lines 200, max-lines-per-function 50 on app code only) + server/client invariant blocks (getSession ban, service_role ban, dangerouslySetInnerHTML ban, DAL import rules), with carefully scoped overrides because no-restricted-syntax options do not array-merge across flat blocks.",
+    "adaptation_for_new_harness": "Keep the function-returning-array pattern for ESLint 9 flat config. Drop the Next/Supabase-specific blocks; replace with: React 19 + react-hooks + jsx-a11y for apps/desktop, Hono/node rules for apps/server, boundaries edges for the monorepo (packages/schema must not import apps; importer/eval isolation). Replace getSession/service_role bans with Entra-OIDC bans (e.g. no verifying tokens without checking issuer/audience, no raw DB connection in the desktop client) and Drizzle rules (no raw sql without RLS context). Keep the size limits and the 'Biome formats, ESLint lints' division. Per-package tsconfigRootDir via projectService."
+   }
+  ],
+  "stack_specific": [
+   {
+    "name": "next build as the final validate step",
+    "where": "harness.config.mjs VALIDATE_STEPS build step + validate.mjs FLOOR + quality-gate.yml",
+    "replacement_needed": "Replace with Vite build (apps/desktop), Hono server build (tsc/tsup), and `tauri build` for the signed .exe; the comment about 'build catches Cache Components prerender violations' has no analog \u2014 instead the build step catches Rust/TS type + bundler errors. Consider a separate cargo check/clippy floor step."
+   },
+   {
+    "name": "depcruise app components lib proxy.ts architecture command",
+    "where": "harness.config.mjs, dependency-cruiser.js, quality-gate.yml, package.json arch script",
+    "replacement_needed": "Repoint dependency-cruiser at the monorepo package roots (apps/desktop/src, apps/server/src, packages/schema, packages/importer, packages/eval). Replace the no-service-role-anywhere / no-client-to-dal / kernel-no-bespoke forbidden edges with monorepo boundaries: packages/schema must not import apps; desktop must not import server internals except via shared packages; importer/eval isolation."
+   },
+   {
+    "name": "Supabase client wrappers (lib/supabase/{client,server,proxy}.ts) and getClaims/getSession invariants",
+    "where": "eslint harness.eslint.mjs server-invariants block, pretool-write-guard.mjs checks, corpus/index.json entries, CLAUDE.md",
+    "replacement_needed": "No Supabase. Replace with Entra ID OIDC token validation invariants (verify issuer/audience/signature via JWKS; never trust unverified claims) and Drizzle DAL rules. proxy.ts (Next middleware) has no analog \u2014 Hono middleware is the request layer, and the 'proxy is not an auth boundary' rule maps to 'Hono edge middleware does optimistic checks; authorize in the DAL/route handler'."
+   },
+   {
+    "name": "service_role key bans across ESLint, dependency-cruiser, write-guard, bash-guard, settings deny",
+    "where": "eslint no-restricted-syntax/properties, dependency-cruiser no-service-role-anywhere, pretool-write-guard checks, settings.json deny 'Bash(* service_role *)'",
+    "replacement_needed": "Self-hosted Postgres with FORCE RLS has no service_role concept. Replace with a ban on the privileged/superuser DB connection string in app/desktop code (only the migration + seed tooling may use it), and a ban on bypassing RLS by connecting as a BYPASSRLS/owner role. Keep the tests/**-only carve-out for seeding."
+   },
+   {
+    "name": "supabase CLI orchestration (db reset, test db, status -o env, gen types, start)",
+    "where": "tests/rls/run-rls.mjs, tests/a11y/run-a11y.mjs, tools/check-types-drift.mjs, tests/migrations/apply-rollback.mjs, quality-gate.yml",
+    "replacement_needed": "Replace `supabase start/status/db reset` with docker-compose up of Postgres 16 + pgvector and a Drizzle migration apply (`drizzle-kit migrate` / push). `supabase status -o env` env injection becomes reading a local .env or docker connection string. `supabase gen types` drift check becomes a Drizzle schema\u2192types drift check (drizzle-kit generate + git diff, or comparing generated types to committed). pgTAP still runs via pg_prove/psql against the compose Postgres."
+   },
+   {
+    "name": "supabase gen types drift gate (check-types-drift.mjs)",
+    "where": "template/base/tools/check-types-drift.mjs, quality-gate.yml runtime job",
+    "replacement_needed": "Drizzle is schema-first (TS is the source of truth), so 'generated types drift' inverts: instead verify migrations are in sync with the schema (`drizzle-kit generate` produces no new migration = no drift) and/or that the committed SQL snapshot matches. Self-skip logic (no stack \u2192 skip, stack up \u2192 real failure) transfers directly."
+   },
+   {
+    "name": "eslint-config-next + Next 16 App Router flat configs",
+    "where": "eslint/harness.eslint.mjs.tmpl (nextVitals, nextTs, react-compiler rules registered by next)",
+    "replacement_needed": "Drop eslint-config-next. Register react + react-hooks + jsx-a11y plugins directly for the React 19 + Vite desktop app (Next auto-registered these; now you must). Keep the note that jsx-a11y strict is layered without re-registering the plugin only if some other config registers it; otherwise register once."
+   },
+   {
+    "name": "Playwright a11y net driving a Next server (webServer: next build && next start)",
+    "where": "template/base/playwright.config.ts, tests/a11y/run-a11y.mjs",
+    "replacement_needed": "A Tauri desktop app isn't a localhost web server. Replace Playwright webServer with either Playwright-driving-the-Hono-admin-surface, or Tauri's WebDriver (tauri-driver + WebdriverIO) for desktop E2E/a11y. The service-role user seeding via admin API becomes seeding via the privileged migration connection or a test-only Entra stub."
+   },
+   {
+    "name": "@supabase/supabase-js and @supabase/ssr dependencies + client-factory",
+    "where": "tests/rls/client-factory.ts, package.json.tmpl deps",
+    "replacement_needed": "Replace supabase-js clients (admin/anon/signInWithPassword) with Drizzle/pg clients holding different Postgres roles/tenant claims, plus an Entra OIDC test-token minter (or a local JWKS stub) to simulate tenant A vs B. createAdminClient\u2192privileged seed connection; createAnonClient\u2192RLS-subject-role connection."
+   },
+   {
+    "name": "SLSA provenance targeting a .next tarball with Vercel-built-elsewhere caveat",
+    "where": "template/modules/ci-provenance/github/workflows/provenance.yml",
+    "replacement_needed": "Subject becomes the signed Windows .exe/.msi Tauri bundle (plus SBOM for both npm and cargo deps). Drop the 'Vercel runs its own build pipeline' framing (on-prem, no cloud). May run on a self-hosted GitHub runner or an on-prem CI; keep OIDC-based attestation only if the on-prem CI supports Sigstore, else substitute an internal signing/attestation flow."
+   },
+   {
+    "name": "NEXT_PUBLIC_SUPABASE_* placeholder env in CI jobs",
+    "where": "quality-gate.yml, lighthouse.yml, provenance.yml env blocks",
+    "replacement_needed": "Replace with the desktop/server build's required env (e.g. VITE_* public config, Hono server config, local Postgres DSN for test jobs). There is no publishable-key concept; Entra client/tenant IDs are the public config."
+   },
+   {
+    "name": "Biome domains next/react and Tailwind v4 at-rule exemptions",
+    "where": "template/base/biome.jsonc",
+    "replacement_needed": "Keep Biome as formatter/linter but set domains for react (desktop) and remove the 'next' domain; keep the Tailwind v4 noUnknownAtRules:off (Tailwind v4 is in the new stack too). The database.types.ts / supabase generated-file exclusions become the Drizzle generated migration/snapshot exclusions."
+   }
+  ],
+  "gotchas": [
+   "Gate ORDER is load-bearing and cheap-to-expensive: format \u2192 types \u2192 lint \u2192 provenance \u2192 route-boundaries \u2192 aliveness \u2192 dead-code(knip) \u2192 architecture(depcruise) \u2192 build. validate.mjs breaks on the FIRST failure, so fast checks fail fast; keep the ordering when porting. STOP_HOOK_STEPS runs validate THEN rls-isolation THEN unit \u2014 a superset, not a duplicate.",
+   "--min-floor works by step NAME, not by command: FLOOR is merged first, and config steps are appended ONLY if their name isn't already in the floor. If you rename a canonical step in the config but not in FLOOR, CI will run BOTH (the floor's original command and the renamed config step). Names must stay identical between VALIDATE_STEPS and FLOOR.",
+   "The Stop hook and pre-commit both invoke runners DIRECTLY (node tools/validate.mjs, not `pnpm validate`) specifically so an agent can't neuter the gate by redefining a package.json script to `true`. Never route the Stop gate through a script name. package.json scripts exist only for human/CI ergonomics and are themselves not write-guard-protected.",
+   "check-sources.mjs and posttool-source-check.mjs MUST keep an identical DECISION regex and identical 3-line lookback window, or the live hook and the CI gate disagree (a decision site passes on edit but fails in CI or vice-versa). Both deliberately skip lines that START with //, *, or /* so a comment merely mentioning a keyword isn't flagged.",
+   "Every DB-dependent gate self-skips when no stack is reachable BUT fails closed in CI once migrations exist: run-rls.mjs exits 1 if CI + migrations present + stack unreachable, because a skip there would be a false green on the headline security gate. Preserve this asymmetry (skip pre-schema, hard-fail once there's something to test).",
+   "The RLS suites are non-vacuous by construction: both the SDK test and the rls_verify MCP probe require a SEEDED POSITIVE CONTROL (the victim owns \u22651 row / the attacker sees its own row) before asserting isolation \u2014 otherwise a deny-all or empty table reads as 'isolated' and hides a disabled-RLS bug. Any port must seed victim rows first and assert the attacker sees its own data.",
+   "rls_verify allow-lists table/column against information_schema.columns BEFORE building any SQL string and double-quotes the validated identifier; it never interpolates a raw name. It also runs READ ONLY + always ROLLBACK, and drops to the RLS-subject role (SET LOCAL ROLE authenticated) \u2014 probing as the login/superuser role would bypass policies and false-green. Every failure returns SKIPPED, never a green.",
+   "corpus-search-server.loadIndex deliberately ignores a CORPUS_INDEX_URL that is an unexpanded '${...}' placeholder or an http(s) URL, and falls back to the bundled index if an override path is unreadable \u2014 this fixes a real bug where MCP hosts pass the mcp.json env template literally and silently blanked the corpus. Don't 'simplify' this away.",
+   "The write-guard hook is the tamper-evidence layer: it denies agent Edit/Write to harness.config.mjs, validate.mjs, all check-*.mjs, tests/rls/run-rls.mjs, the whole lint/arch config surface, tsconfig, CI workflows, settings, and .mcp.json unless HARNESS_ALLOW_SELF_EDIT=1. This is what makes 'config can only ADD gates' true. settings.json deny-list is layer 1; the write-guard is layer 2; --min-floor is layer 3. Port all three together or the guarantee breaks.",
+   "ESLint flat-config no-restricted-syntax options do NOT array-merge across blocks, so the server-invariant and client-invariant rules live in mutually-exclusive file globs and the a11y scrollable-region recalibration is a single-rule override; house size limits (max-lines 200 / max-lines-per-function 50) apply to app code only and are turned OFF for tests. Biome's noNoninteractiveTabindex is disabled so it doesn't fight the ESLint jsx-a11y recalibration, and useLiteralKeys is off because it conflicts with tsconfig noPropertyAccessFromIndexSignature (process.env['X']). These cross-linter reconciliations must be carried over deliberately."
+  ]
+ },
+ {
+  "summary": "This slice is the packaging-and-doctrine layer of the harness: the zero-dependency Node installer (`installer/cli.mjs` + `commands/{init,update,doctor,enable}.mjs` + `lib/`), the two publish channels (npx/GitHub-template installer and the `.claude-plugin/` Claude Code plugin), the harness's own CI that proves the product works (`.github/workflows/{selftest,hygiene,lint,release,scorecard}.yml` + `scripts/{check-syntax,hygiene}.mjs` + `tests/`), the CI the template ships INTO projects (`template/base/github/workflows/*` + CODEOWNERS + renovate + zizmor), the doctrine docs, and the reference notes app under `template/stack/`.\n\nThe installer is a template-tree walker plus a manifest. `lib/copy.mjs#planTree` walks `template/{base,stack,modules/<name>}`, strips `.tmpl`, applies top-level dotless renames (`lib/layout.mjs#RENAMES`: `github`\u2192`.github`, `gitignore`\u2192`.gitignore`, etc.), and renders `{{PLACEHOLDER}}` tokens (`lib/placeholders.mjs`). Every installed file is classified by `lib/manifest.mjs#fileMode` into one of three ownership modes \u2014 `owned` (harness upgrades it), `seeded` (written once, project owns forever), `config` (seeded but hash-tracked for drift) \u2014 and recorded in `.harness/manifest.json` with a SHA-256 over the POST-render content. `init` detects bootstrap vs retrofit (`lib/detect.mjs`); on retrofit it merges `package.json` never-clobbering (`lib/merge-package-json.mjs`: a colliding `validate` script keeps the project's body and the harness version lands at `harness:validate`; existing dep ranges are kept, older majors flagged never downgraded), parks conflicting root configs as `<base>.harness.<ext>` siblings, skips all stack app code except an additive-seed allowlist, and rejects `src/` layouts. `update` upgrades only unmodified `owned` files, parks drift under `.harness/pending/` (unless `--force`), never rewrites `package.json`, never touches `seeded`. `doctor` re-hashes the tree read-only with CI exit codes (0 clean / 1 broken / 2 drift) and checks gate wiring. `enable`/`disable` flip module files and update the manifest.\n\nBootstrap-green-out-of-the-box is the release acceptance test, enforced by `selftest.yml`: a `bootstrap` matrix (Node 22/24) runs `init --yes` into a temp dir, `pnpm install`, then THE GATE (`pnpm validate` \u2014 all nine gates including `next build`), the unit suite, and a doctrine assertion that the RLS suite FAILS CLOSED in CI when migrations exist without a live stack; a `retrofit` job plants conflicts and asserts non-clobber semantics from the JSON report; `hook-contracts` and `installer-unit` jobs run the `tests/` node:test suites; a `runtime` job spins up a real Supabase stack and proves the RLS/pgTAP suite actually runs (not self-skips). The gate chain is a single source of truth (`template/base/tools/harness.config.mjs`) consumed identically by the Stop hook, `pnpm validate`, and CI, and CI runs `tools/validate.mjs --min-floor` which merges a HARDCODED floor so a locally-weakened config can add gates but never remove the non-negotiable ones. Release is tag-driven (`release.yml`): verify the CHANGELOG has a `## [x.y.z]` section, `npm pack`, `actions/attest-build-provenance` (SLSA L2) on the tarball, `gh release create`. The reference `template/stack/` notes app demonstrates the whole doctrine end-to-end (Supabase FORCE-RLS `notes` table with four per-operation initPlan policies + pgTAP + SDK cross-tenant isolation with a non-vacuous positive control, a server-only DAL returning DTOs, an optimistic-only `proxy.ts`, `getClaims()` everywhere, and a resolving `// SOURCE:` citation on every decision site).",
+  "transferable_patterns": [
+   {
+    "name": "Manifest-based file ownership with three modes + SHA-256 drift detection",
+    "where": "installer/lib/manifest.mjs, installer/lib/layout.mjs (SEEDED_PREFIXES/SEEDED_FILES/CONFIG_FILES), installer/commands/{init,update,doctor}.mjs",
+    "how_it_works": "Every installed file is classified owned/seeded/config by path; init writes .harness/manifest.json with a sha256 of the rendered content. update upgrades only unmodified owned files, seeded are write-once, config is seeded-but-hash-tracked. doctor re-hashes read-only and reports drift with exit 0/1/2. Hashing over post-render content means per-project placeholder values never read as drift.",
+    "adaptation_for_new_harness": "Carries almost verbatim. For the pnpm monorepo, key the manifest paths per workspace (apps/desktop, apps/server, packages/*). Ownership classes stay: harness configs (biome, eslint, tsconfig, drizzle.config, tauri.conf.json, vite.config) = owned/config; app scaffolding = seeded. doctor's wiring checks retarget from Supabase/Next files to Hono+Drizzle+Tauri equivalents."
+   },
+   {
+    "name": "Merge-never-clobber retrofit semantics",
+    "where": "installer/lib/merge-package-json.mjs, installer/commands/init.mjs (CONFLICTABLE + RETROFIT_ADDITIVE handling), installer/lib/layout.mjs",
+    "how_it_works": "On retrofit, a colliding package.json script keeps the project's body and the harness version lands at harness:<name>; dep ranges are kept (older majors flagged via a cheap major-version rangeCovers, never downgraded); packageManager/engines set only if absent. Conflicting root configs land as <base>.harness.<ext> siblings with a conflict report; stack app code is skipped unless on an additive-seed allowlist and absent.",
+    "adaptation_for_new_harness": "Directly reusable. In a monorepo, run the package.json merge per-workspace and also reconcile pnpm-workspace.yaml and the root package.json. Extend CONFLICTABLE with vite.config.ts, drizzle.config.ts, tauri.conf.json, biome.jsonc, eslint.config.js."
+   },
+   {
+    "name": "Dotless template storage + top-level RENAMES map",
+    "where": "installer/lib/layout.mjs#RENAMES, installer/lib/copy.mjs#planTree/walk, tests/installer/lifecycle.test.mjs (npm pack test)",
+    "how_it_works": "Files that install to dot-paths are STORED dotless (github/, gitignore, mcp.json) because npm-packlist strips .gitignore/.npmrc and treats nested .gitignore as pack-ignore, and dotless template workflows can never execute in the harness's own Actions. RENAMES only applies at the tree top level. .claude/ is the ONE dotted exception, verified to survive npm pack. A lifecycle test asserts critical dotless paths ship in npm pack --dry-run.",
+    "adaptation_for_new_harness": "Carries verbatim. Same npm-pack/self-execution hazards apply. Keep .claude/ dotted; store the shipped .github/ dotless. Add any new dotfiles (.node-version, .npmrc) to RENAMES."
+   },
+   {
+    "name": "Placeholder registry with bidirectional closure enforcement",
+    "where": "installer/lib/placeholders.mjs (PLACEHOLDERS + render + TOKEN_RE), installer/lib/prompts.mjs, scripts/hygiene.mjs (closure), tests/installer/placeholders.test.mjs",
+    "how_it_works": "A central registry declares each {{TOKEN}} with a prompt and a context-derived default. render() only substitutes registered tokens (unknown ones left intact for doctor/hygiene to flag) and deliberately does NOT match GitHub Actions ${{ }}. hygiene.mjs enforces closure both ways: every token used in template/ must be registered and every registered token must be used. --yes takes defaults, --set VAR=value overrides, else readline prompts (zero-dep).",
+    "adaptation_for_new_harness": "Reuse as-is. Swap the token set: keep PROJECT_NAME/PROJECT_SLUG/GITHUB_OWNER/SECURITY_OWNERS/DEFAULT_BRANCH; add ENTRA_TENANT_ID/ENTRA_CLIENT_ID, POSTGRES_DB_NAME, WINDOWS_SIGNING_SUBJECT, LLAMA_MODEL_PATH as needed. Keep the closure gate \u2014 it is what keeps the shipped artifact generic."
+   },
+   {
+    "name": "Single-source gate config + hardcoded CI floor (--min-floor) with direct-invocation tamper-evidence",
+    "where": "template/base/tools/harness.config.mjs (VALIDATE_STEPS/STOP_HOOK_STEPS), template/base/tools/validate.mjs (FLOOR + resolveSteps), template/base/github/workflows/quality-gate.yml, template/base/.claude/settings.json",
+    "how_it_works": "One config declares the ordered [name, cmd] gate steps consumed by the Stop hook, pnpm validate, and CI. CI runs `validate.mjs --min-floor`, which merges a DUPLICATED hardcoded FLOOR ahead of config extras so editing the config can add gates but never weaken the non-negotiable ones. STOP_HOOK_STEPS invoke runners DIRECTLY (node tools/validate.mjs), never a package.json script name, so an agent can't redefine `validate` to `true`.",
+    "adaptation_for_new_harness": "Carries directly and is the core doctrine. Swap step commands: format=biome, types=tsc max-strict, lint=eslint flat, build=vite build + tauri build (cargo), plus drizzle schema checks and RLS tests. Keep FLOOR as a lockstep duplicate of the universal steps; keep direct invocation."
+   },
+   {
+    "name": "Selftest matrix as the release acceptance test (bootstrap-green + retrofit-non-clobber + hook contracts)",
+    "where": ".github/workflows/selftest.yml, tests/installer/lifecycle.test.mjs, tests/hooks/hook-contract.test.mjs",
+    "how_it_works": "Every PR/tag runs: installer-unit (syntax + hygiene + lifecycle tests), hook-contracts (pipe hook-event JSON to stdin, assert exit codes/deny behavior), a bootstrap matrix that init's into a temp dir and requires `pnpm validate` green out of the box, a retrofit job that plants conflicts and asserts non-clobber from the JSON report, and a runtime job with a live DB. This matrix IS the acceptance gate \u2014 the product's promise is proven, not asserted.",
+    "adaptation_for_new_harness": "Reuse the whole matrix shape. The runtime job swaps supabase/setup-cli + `supabase start` for a Postgres 16 + pgvector service container and Drizzle migrations; hook-contract tests point at the new guard hooks; the bootstrap job additionally builds the Tauri app (headless) to prove the desktop scaffold compiles."
+   },
+   {
+    "name": "Leaked-string hygiene gate (shipped artifact must be generic)",
+    "where": "scripts/hygiene.mjs (LEAK_PATTERNS + ALLOWLIST), .github/workflows/hygiene.yml, CONTRIBUTING.md",
+    "how_it_works": "Walks template/ and fails if any source-project identifier (org names, real GitHub handle, absolute /Users/ paths) or credential shape (JWT header.payload, Supabase sbp_/sb_secret_ tokens, non-local Postgres connection strings with creds) appears. A per-file ALLOWLIST permits deliberate mentions. Fails loudly if template/ is missing (a gate that scans nothing is a false green).",
+    "adaptation_for_new_harness": "Reuse the walker. Replace the leak patterns for the new org's identifiers and the new secret shapes: Entra client secrets, on-prem Postgres DSNs, Windows code-signing cert thumbprints, llama.cpp model paths. Keep the fail-if-empty guard."
+   },
+   {
+    "name": "Fail-closed runtime test runner (CI must not self-skip when the schema exists)",
+    "where": "template/base/tests/rls/run-rls.mjs, .github/workflows/selftest.yml (bootstrap + runtime jobs), template/base/tests/rls/client-factory.ts + cross-tenant-isolation.test.ts",
+    "how_it_works": "The RLS runner self-skips honestly before a schema/stack exists, but `if (CI && haveMigrations && !reachable) exit 1` \u2014 in CI a skip on the headline gate would be a false green. The SDK isolation suite carries a non-vacuous POSITIVE control (seed each user a row so a deny-all DB can't pass every assertion vacuously). selftest asserts both the fail-closed path (nonzero + 'failing closed') and the real-run path ('running pgTAP checks' + '[rls] OK').",
+    "adaptation_for_new_harness": "Central to keep: self-hosted Postgres 16 with FORCE RLS means the same isolation doctrine applies. Replace Supabase CLI/GoTrue with raw Postgres roles + Drizzle-seeded fixtures and Entra-minted (or test-signed) JWTs; keep the CI fail-closed guard and the positive control."
+   },
+   {
+    "name": "Supply-chain-hardened shipped CI (SHA-pinned actions, harden-runner, CI-for-the-CI)",
+    "where": "template/base/github/workflows/{quality-gate,codeql,gitleaks,osv-scan,actions-lint}.yml, template/base/github/zizmor.yml, template/base/renovate.json, .github/workflows/{lint,scorecard}.yml",
+    "how_it_works": "Every action pinned by full commit SHA with a version comment; step-security/harden-runner (egress audit) on every job that can host it; persist-credentials:false; actionlint + zizmor lint the workflows themselves; CodeQL security-extended, gitleaks full-history, OSV-Scanner (reusable workflows pinned by SHA, kept current by Renovate), OpenSSF Scorecard. Template workflows are stored dotless so they never run in the harness repo; lint.yml stages them into .fixtures for actionlint.",
+    "adaptation_for_new_harness": "Reuse wholesale. On-prem changes little at the CI layer; add Rust/cargo-audit and cargo-deny for the Tauri crate, and a Windows signing/attestation job. Keep the dotless-storage-then-stage trick for actionlint."
+   },
+   {
+    "name": "Read-only doctor with CI-friendly exit codes and wiring probes",
+    "where": "installer/commands/doctor.mjs",
+    "how_it_works": "Re-hashes every manifested file, reports missing owned/config as errors and seeded/drift as warnings, and independently probes that the wiring still holds: package.json still runs the validate entrypoint, .claude/settings.json still wires the four guard hooks, harness.config.mjs still exports non-empty step arrays, and CLAUDE.md/CODEOWNERS have no unrendered {{placeholders}}. Exit 0 clean / 1 broken / 2 attention.",
+    "adaptation_for_new_harness": "Carries directly; retarget the wiring probes to the new stack's entrypoints (Hono server bootstrap, Drizzle config, tauri.conf.json signing block) and the new hook set."
+   },
+   {
+    "name": "Opt-in module system (enable/disable) with file-drop vs uncomment-a-step distinction",
+    "where": "installer/commands/enable.mjs, installer/lib/layout.mjs (MODULES/TIERS), template/modules/*, template/base/docs/harness/gates-catalog.md",
+    "how_it_works": "enable copies a module's tree, records each file's module tag in the manifest; disable removes them unless locally modified. ci-* and mutation modules are pure file-drops (live on landing); the two validate-chain gate modules additionally require a human to uncomment their step in the write-guard-protected harness.config.mjs (HARNESS_ALLOW_SELF_EDIT=1), and enable prints that hint. Tiers (core/standard/strict) are named module bundles.",
+    "adaptation_for_new_harness": "Reuse. New modules could be ci-windows-signing, ci-sbom (SLSA on the .exe), mutation, gate-* for desktop-specific invariants; keep the file-drop vs config-uncomment split and the tier bundles."
+   },
+   {
+    "name": "Dual-channel packaging: npx/GitHub-template installer + Claude Code plugin manifest",
+    "where": ".claude-plugin/plugin.json, .claude-plugin/marketplace.json, package.json (bin + files + bootstrap script), installer/commands/init.mjs (--consume path)",
+    "how_it_works": "The deterministic layer (hooks/gates/CI) ships via the installer (npx github:owner/repo, pinned to a tag) or GitHub-template `--consume` (installs in place then deletes installer/template/scripts/tests/.claude-plugin). The agent layer (subagents/commands/skill) ALSO ships as a Claude Code plugin whose plugin.json points agents/commands/skills at template/base/.claude/*, so the same source feeds both channels. plugin.json's description explicitly states the deterministic layer can't ship in a plugin.",
+    "adaptation_for_new_harness": "Reuse both channels unchanged in shape. The plugin.json/marketplace.json point at the same template/base/.claude tree; the installer bin + files list + bootstrap/--consume flow are stack-agnostic."
+   }
+  ],
+  "stack_specific": [
+   {
+    "name": "Target detection (next dependency + src/ rejection + single-root layout)",
+    "where": "installer/lib/detect.mjs, installer/commands/init.mjs",
+    "replacement_needed": "detect() keys on a `next` dependency and hard-rejects src/ because every gate/glob assumes root-level app/ + lib/. The new harness is a pnpm MONOREPO (apps/desktop, apps/server, packages/schema|importer|eval), so detection must recognize pnpm-workspace.yaml + a Tauri/Vite/Hono signature instead of `next`, and the whole single-root assumption (app/, lib/, proxy.ts everywhere) must be re-expressed as workspace-relative paths."
+   },
+   {
+    "name": "Supabase CLI runtime job + pgTAP + GoTrue-minted JWTs",
+    "where": ".github/workflows/selftest.yml (runtime job), template/base/github/workflows/quality-gate.yml (runtime job), template/base/tests/rls/*, template/stack/supabase/*",
+    "replacement_needed": "Replace supabase/setup-cli + `supabase start`/`supabase db reset`/`supabase test db` + `supabase status -o env` with a self-hosted Postgres 16 + pgvector service container, Drizzle migrations, and pgTAP (or a Drizzle-driven RLS harness). JWT minting via GoTrue admin API becomes Entra ID OIDC tokens (or locally test-signed tokens) plus explicit Postgres role/SET-based session context for FORCE RLS."
+   },
+   {
+    "name": "next build gate (Cache Components prerender) + NEXT_PUBLIC_* placeholder env",
+    "where": "template/base/tools/harness.config.mjs (build step), template/base/tools/validate.mjs (FLOOR), quality-gate.yml/selftest.yml env blocks, template/stack/next.config.ts",
+    "replacement_needed": "The `next build` step exists specifically to catch Cache Components prerender violations. Replace with `vite build` + `tauri build`/`cargo build` (which catch Rust/bundling failures and signing config errors instead). The NEXT_PUBLIC_SUPABASE_URL/PUBLISHABLE_KEY placeholder env that lets `next build` run backend-less becomes whatever build-time env the Vite/Tauri build needs (likely none, or a Postgres DSN for server tests)."
+   },
+   {
+    "name": "The reference stack app (Next App Router + Supabase clients + proxy.ts)",
+    "where": "template/stack/app/*, template/stack/proxy.ts, template/stack/lib/supabase/{client,server,anon,proxy}.ts, template/stack/lib/dal/notes.ts, template/stack/package.json.tmpl, template/stack/vercel.json",
+    "replacement_needed": "The notes app demonstrates doctrine via Next RSC + Server Actions + @supabase/ssr cookie clients + proxy.ts optimistic redirect. Rebuild as: a React 19 + Vite + Tailwind v4 + shadcn desktop UI (apps/desktop) talking to a Hono API (apps/server) whose Drizzle DAL is the authorization boundary and enforces FORCE RLS via a request-scoped Postgres session, with Entra OIDC replacing Supabase auth. Drop vercel.json; add tauri.conf.json + the signed-.exe pipeline."
+   },
+   {
+    "name": "Supabase auth security invariants (getSession/getClaims/service_role)",
+    "where": "template/base/docs/harness/README.md (security invariants + Edge-Function carve-out), template/base/.claude/rules/security-invariants.md, template/base/CLAUDE.md, README.md",
+    "replacement_needed": "The non-negotiables are Supabase-specific: never server-side getSession(), always getClaims(), never SUPABASE_SERVICE_ROLE_KEY, proxy.ts CVE-2025-29927. Re-express for Entra OIDC (validate ID/access tokens against Entra JWKS, never trust unverified claims; app_roles from Entra, not user-editable attributes) and a self-hosted Postgres privileged role (the service_role analogue that bypasses RLS) that is banned outside a governed migration/admin path. RLS itself (ENABLE + FORCE + initPlan) carries directly to Postgres 16."
+   },
+   {
+    "name": "CONFLICTABLE / additive-seed config lists (Next+Supabase file names)",
+    "where": "installer/lib/layout.mjs (CONFLICTABLE, RETROFIT_ADDITIVE, SEEDED_FILES/PREFIXES)",
+    "replacement_needed": "These lists enumerate Next/Supabase-shaped paths (eslint.config.mjs, next.config.ts, lib/supabase/*, supabase/, vercel.json). Rewrite for the new stack: vite.config.ts, tauri.conf.json, drizzle.config.ts, apps/*/package.json, packages/schema/*, plus keep the shared ones (biome.jsonc, tsconfig.json, lefthook.yml, commitlint.config, playwright.config)."
+   },
+   {
+    "name": "SLSA build-provenance attestation over an npm tarball / .next build",
+    "where": ".github/workflows/release.yml, template/modules/ci-provenance/github/workflows/provenance.yml",
+    "replacement_needed": "release.yml attests a `npm pack` tarball; the ci-provenance module attests a .next tarball + SPDX SBOM. For a signed Windows .exe the attestation subject becomes the signed .exe/MSI, and the release adds Authenticode signing (and ideally attests the signing). The gh-release + CHANGELOG-section gate carries unchanged."
+   },
+   {
+    "name": "Local llama.cpp inference vs remote-model corpus grounding",
+    "where": "template/base/docs/harness/README.md (provenance pipeline / corpus), docs/security/approved-tools.md, template/base/.claude/settings.json (WebFetch allowlist, MCP servers)",
+    "replacement_needed": "The provenance corpus + WebFetch doc-domain allowlist assume online docs and a hosted model. For on-prem + local llama.cpp, the version-pinned local corpus (no network) fits even better, but the WebFetch allowlist may be removed entirely and MCP servers must be fully local/offline; approved-tools policy tightens to no-egress."
+   }
+  ],
+  "gotchas": [
+   "Manifest hashes are computed over POST-render content (installer/lib/manifest.mjs), so per-project placeholder substitutions never register as drift in doctor/update \u2014 hash after rendering, not before.",
+   "RENAMES apply ONLY at the tree top level (copy.mjs: name mapped only when relInstall===''); nested gitignore/github names are left literal. .claude/ is the single dotted directory shipped as-is (verified to survive npm pack); everything else dot-pathed is stored dotless.",
+   "File permission bit is decided purely by content.startsWith('#!') \u2192 0o755 else 0o644 (init.mjs/update.mjs/enable.mjs write()). Shebang hooks/scripts must keep their shebang or they lose the exec bit.",
+   "Placeholder resolution order is load-bearing: PLACEHOLDERS is iterated in declaration order (NAME, SLUG, OWNER, SECURITY_OWNERS, BRANCH) and later defaults read earlier ANSWERS (PROJECT_SLUG derives from answers.PROJECT_NAME; SECURITY_OWNERS from answers.GITHUB_OWNER). Reordering breaks the derived defaults. render() also must NOT match GitHub Actions ${{ }} \u2014 TOKEN_RE is /{{([A-Z0-9_]+)}}/ (uppercase, no leading $).",
+   "The --min-floor FLOOR in tools/validate.mjs is a hand-DUPLICATED copy of the canonical VALIDATE_STEPS and must be kept in lockstep manually; it deliberately OMITS the project-shaped gates (route-boundaries, aliveness) and keeps only the universally-passing ones (format, types, lint, provenance, dead-code, architecture, build) so CI's floor never blocks a fresh install.",
+   "The Stop gate invokes runners DIRECTLY (STOP_HOOK_STEPS = node tools/validate.mjs / node tests/rls/run-rls.mjs / vitest), never `pnpm validate`, precisely so an agent editing package.json (an auto-accepted, unguarded edit) cannot hollow out the gate. Preserve direct invocation when porting.",
+   "update() never rewrites package.json \u2014 it was merged only at init; it only emits NOTES about new/changed upstream scripts. Seeded files are never overwritten by update; owned files upgrade only when the on-disk hash equals the recorded hash, otherwise the incoming version is parked under .harness/pending/<path> (unless --force). retrofit skips ALL stack files except RETROFIT_ADDITIVE ones that are absent.",
+   "RLS runner fail-closed contract: run-rls.mjs exits 1 when CI && migrations exist && stack unreachable (a skip there is a false green), but self-skips green locally in the same state. selftest's bootstrap job asserts the nonzero exit AND greps for 'failing closed'; the runtime job asserts it actually ran ('running pgTAP checks' + '[rls] OK'). The cross-tenant suite needs a seeded POSITIVE control or a deny-all DB passes every assertion vacuously.",
+   "Template CI workflows live under template/*/github/workflows/ stored dotless SPECIFICALLY so GitHub never executes them in the harness repo's own Actions; lint.yml copies them into .fixtures/tpl/.github/workflows/ to actionlint them. OSV reusable workflows and the semgrep container job are pinned by SHA-with-version-comment and canNOT host harden-runner (documented exception).",
+   "Release gates on an exact CHANGELOG section: release.yml greps for `## [<tag-without-v>]` and awk-extracts that block as the release notes \u2014 a missing/misnamed section fails the release. The stack ships a default_grants migration timestamped BEFORE the first table migration to restore public-schema GRANTs that newer Postgres images drop (otherwise every API call fails with permission-denied before RLS is even consulted)."
+  ]
+ }
+]

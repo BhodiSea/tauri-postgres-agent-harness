@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+# Rust build output (reference app + consuming-project scratch)
+target/
+# Local gate stamps
+.harness/*.ok
+# Scratch fixtures created by local selftest runs
+.fixtures/

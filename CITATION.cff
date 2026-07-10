@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: >-
+  If you use this harness in research on AI-assisted software engineering,
+  deterministic agent guardrails, or provenance-verified code generation,
+  please cite it as below.
+type: software
+title: tauri-postgres-agent-harness
+abstract: >-
+  A deterministic agent harness for Tauri 2 + React 19 + Hono + Drizzle /
+  Postgres 16 pnpm monorepos shipped as signed Windows executables: Claude
+  Code hooks that gate turn completion on a green validation chain,
+  security-invariant lint rules and pre-write guards, row-level-security
+  isolation tests against real Postgres, Tauri capability/CSP policy gates,
+  an inline-citation provenance pipeline, and supply-chain-hardened CI across
+  both the npm and crates ecosystems.
+authors:
+  - name: Cogvera Labs
+repository-code: 'https://github.com/BhodiSea/tauri-postgres-agent-harness'
+license: Apache-2.0

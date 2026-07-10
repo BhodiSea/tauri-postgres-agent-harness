@@ -77,17 +77,35 @@ try {
 // resulting git diff means committed bindings are stale.
 const libSrc = existsSync(`${CRATE}/src/lib.rs`) ? readFileSync(`${CRATE}/src/lib.rs`, 'utf8') : ''
 if (/fn\s+export_bindings/.test(libSrc)) {
+  let exported = true
   try {
     run(`cargo test --locked --manifest-path ${MANIFEST} export_bindings`)
   } catch (e) {
-    fail(GATE, `bindings export test failed:\n${(e.stderr?.toString() ?? e.message).slice(-1500)}`)
+    const errText = e.stderr?.toString() ?? e.message
+    // Windows loader quirk, not a bindings problem: the test exe links the full
+    // tauri/wry/WebView2 runtime (the commands live in the lib) but has no
+    // embedded app manifest, and some Windows loaders then die at load time with
+    // STATUS_ENTRYPOINT_NOT_FOUND before any test code runs. Bindings generation
+    // is platform-independent and this drift check runs fail-closed on Linux CI
+    // for every PR — skip loudly here rather than blocking every Windows dev box.
+    if (process.platform === 'win32' && /0xc0000139|STATUS_ENTRYPOINT_NOT_FOUND/.test(errText)) {
+      exported = false
+      process.stdout.write(
+        `${GATE}: SKIP bindings-export sub-check — test exe cannot load on this Windows loader ` +
+          '(STATUS_ENTRYPOINT_NOT_FOUND); drift is enforced on Linux CI\n',
+      )
+    } else {
+      fail(GATE, `bindings export test failed:\n${errText.slice(-1500)}`)
+    }
   }
-  const drift = spawnSync('git', ['diff', '--quiet', '--', 'apps/desktop/src/ipc/bindings.ts'])
-  if (drift.status !== 0) {
-    fail(
-      GATE,
-      'apps/desktop/src/ipc/bindings.ts drifted from the Rust commands — the specta export rewrote it. Review and commit the regenerated bindings.',
-    )
+  if (exported) {
+    const drift = spawnSync('git', ['diff', '--quiet', '--', 'apps/desktop/src/ipc/bindings.ts'])
+    if (drift.status !== 0) {
+      fail(
+        GATE,
+        'apps/desktop/src/ipc/bindings.ts drifted from the Rust commands — the specta export rewrote it. Review and commit the regenerated bindings.',
+      )
+    }
   }
 }
 

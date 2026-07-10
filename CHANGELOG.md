@@ -35,6 +35,17 @@ unaffected (tarballs ship LF); the GitHub-template channel on Windows was not.
   explicitly (the validator rejects a bare directory path for `agents`);
   marketplace manifest gained a `metadata.description`. `claude plugin
   validate` passes clean.
+- **Fixed**: Windows path separators in the prompts and contracts gates —
+  `join()`/`relative()` output was compared against POSIX lock keys and
+  tsconfig reference paths, so every prompt read as "not in the lock" and
+  every project reference as missing. Both normalize to POSIX at the
+  comparison boundary now.
+- **Fixed**: the bindings-export sub-check of `rust-check` skips loudly on
+  Windows when the test executable dies at load with
+  `STATUS_ENTRYPOINT_NOT_FOUND` (the test binary links the full
+  tauri/wry/WebView2 runtime without an embedded app manifest — a loader
+  quirk, not a bindings problem). `cargo check --locked` still runs, and
+  drift stays fail-closed on Linux CI for every PR.
 
 ## [0.1.0] — 2026-07-10
 

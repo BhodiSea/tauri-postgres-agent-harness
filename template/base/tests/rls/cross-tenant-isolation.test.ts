@@ -104,7 +104,12 @@ if (!RLS_SUITE_READY) {
       // returns NULL and RLS matches nothing.
       await withUser(sql, USER_A, (tx) => tx`SELECT 1`)
       const guc = await sql`SELECT current_setting('app.user_id', true) AS v`
-      expect(guc[0]?.['v'] ?? null).toBeNull()
+      // Postgres reports "no identity" two ways: NULL on a session that never
+      // set the GUC, '' on one that ran SET LOCAL in a now-closed transaction.
+      // The policies map BOTH to NULL via nullif(..., '') — any other value
+      // here is a real cross-request identity leak.
+      const leaked = guc[0]?.['v'] ?? null
+      expect(leaked === null || leaked === '', `leaked identity: ${String(leaked)}`).toBe(true)
       for (const t of ISOLATION_TARGETS) {
         const rows = await sql`SELECT * FROM ${sql(t.table)}`
         expect(rows).toHaveLength(0)

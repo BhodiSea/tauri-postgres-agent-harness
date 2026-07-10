@@ -1,0 +1,361 @@
+# CI merge gate. pnpm + Corepack + rustup. The static job runs the SAME validate chain
+# the local Stop hook enforces (tools/validate.mjs) with HARNESS_REQUIRE_TOOLCHAINS=1,
+# so a CI pass and a local pass mean the same thing — and skips fail closed here.
+# Runtime jobs prove the two claims static analysis cannot: live RLS isolation against
+# real Postgres, and a browsable, WCAG-clean app shell (Playwright, mock IPC).
+# SOURCE: docs/harness/README.md (CI merge gate; skip-local / fail-closed-CI asymmetry)
+name: quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: ['{{DEFAULT_BRANCH}}']
+  schedule:
+    # Nightly: keeps the path-filtered desktop-windows job honest between desktop PRs.
+    - cron: '11 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Tauri v2 Linux build prerequisites (ubuntu-24.04 / webkit2gtk 4.1 ABI).
+  # One place, three jobs — drift between jobs would make "green" ambiguous.
+  WEBKIT_APT_PACKAGES: >-
+    libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
+    libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static floor — the full validate chain, toolchains REQUIRED (no silent skips).
+  # rust-fmt / rust-check / build all run for real: rustup + webkit deps present.
+  # ---------------------------------------------------------------------------
+  static:
+    name: static (validate floor)
+    runs-on: ubuntu-latest
+    env:
+      HARNESS_REQUIRE_TOOLCHAINS: '1'
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install webkit build prerequisites (pinned apt list)
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # intentional word-splitting of the package list
+          sudo apt-get install -y --no-install-recommends $WEBKIT_APT_PACKAGES
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install # resolves the channel + components from rust-toolchain.toml
+          rustup show active-toolchain
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Enable Corepack (pins pnpm from package.json#packageManager)
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # One entrypoint for the whole floor — identical steps to the local Stop hook, with
+      # the hardcoded FLOOR merged in so an edited config can never weaken CI.
+      # SOURCE: docs/harness/README.md (single validate entrypoint; CI floor)
+      - name: Validate (min floor, toolchains required)
+        run: node tools/validate.mjs --min-floor
+
+  # ---------------------------------------------------------------------------
+  # Unit + contract tests — Vitest (unit-node + unit-dom; the rls project
+  # self-skips politely here, the runtime-rls job below runs it for real).
+  # ---------------------------------------------------------------------------
+  unit:
+    name: unit (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit + contract tests
+        run: pnpm exec vitest run
+
+  # ---------------------------------------------------------------------------
+  # Runtime RLS — the headline isolation gate against REAL Postgres 16 + pgvector
+  # (same digest-pinned image as docker-compose.yml). run-rls.mjs fresh-applies all
+  # migrations, then runs the isolation suite; CI=true makes every skip fail closed.
+  # The job asserts the literal '[rls] OK' marker so a truncated run cannot green.
+  # ---------------------------------------------------------------------------
+  runtime-rls:
+    name: runtime (rls isolation, real postgres)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: '{{DB_NAME}}'
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d {{DB_NAME}}"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Same role bootstrap docker-compose runs on first boot: app_migrator owns the
+      # schema, app_api is NOSUPERUSER + NOBYPASSRLS (FORCE RLS applies, no escape hatch).
+      - name: Provision database roles (db/init/01-roles.sql)
+        run: psql 'postgres://postgres:postgres@127.0.0.1:5432/{{DB_NAME}}' -v ON_ERROR_STOP=1 -f db/init/01-roles.sql
+
+      - name: RLS isolation suite (migration fresh-apply + isolation matrix + catalog gate)
+        shell: bash
+        run: |
+          node tests/rls/run-rls.mjs 2>&1 | tee rls-output.log
+          # Belt and braces: the exit code gates above; the marker proves the runner
+          # reached its final line (a wedged/truncated run cannot count as green).
+          grep -F '[rls] OK' rls-output.log
+
+  # ---------------------------------------------------------------------------
+  # Rust lane — clippy as errors, host-crate tests, cargo-deny (deny.toml at the
+  # repo root), and capabilities-vs-schema validation: the committed capability
+  # file must validate against the schema tauri-build regenerates from the crate.
+  # ---------------------------------------------------------------------------
+  rust:
+    name: rust (clippy + test + deny + capabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install webkit build prerequisites (pinned apt list)
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # intentional word-splitting of the package list
+          sudo apt-get install -y --no-install-recommends $WEBKIT_APT_PACKAGES
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Clippy (all targets, warnings are errors)
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: Host crate tests (includes the specta bindings export test)
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+
+      # The export test above regenerates src/ipc/bindings.ts; any diff = committed
+      # bindings drifted from the #[tauri::command] surface.
+      - name: Specta bindings drift (committed vs regenerated)
+        run: git diff --exit-code -- apps/desktop/src/ipc/bindings.ts
+
+      - name: cargo-deny (advisories, licenses, bans, sources — deny.toml)
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
+        with:
+          manifest-path: apps/desktop/src-tauri/Cargo.toml
+          command: check
+
+      # tauri-build (run by cargo above) regenerates gen/schemas/*.json from the crate's
+      # actual permission surface. Validating the COMMITTED capability file against the
+      # FRESH schema catches a capability that names permissions the crate no longer has.
+      # Cheap here because the build script already ran; if the schema is absent that is
+      # itself a failure — this job exists to produce it.
+      - name: Capabilities vs fresh schema (ajv, draft-07)
+        shell: bash
+        run: |
+          schema=apps/desktop/src-tauri/gen/schemas/desktop-schema.json
+          if [ ! -f "$schema" ]; then
+            echo "::error::$schema was not generated by tauri-build — cannot validate capabilities"
+            exit 1
+          fi
+          corepack enable
+          pnpm dlx ajv-cli@5.0.0 validate --spec=draft7 --strict=false \
+            -s "$schema" -d 'apps/desktop/src-tauri/capabilities/*.json'
+
+  # ---------------------------------------------------------------------------
+  # Playwright fast lane — chromium against `vite dev`, NO Tauri binary: the IPC
+  # bridge is mocked (e2e/mock-ipc.ts) and /healthz is stubbed per spec. Covers the
+  # axe WCAG 2.2 AA scan and the degraded-network state. playwright.config.ts owns
+  # the webServer (vite dev on :1420 with a stub VITE_API_ORIGIN).
+  # ---------------------------------------------------------------------------
+  e2e-fast:
+    name: e2e fast lane (playwright, mock IPC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser (chromium)
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: e2e specs (a11y axe wcag22aa + degraded network)
+        run: pnpm exec playwright test
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Windows debug build — the artifact this repo actually ships. Expensive, so:
+  # per-PR only when apps/desktop/** (or the lockfile/workspace) changed, plus the
+  # nightly schedule and manual dispatch as the unconditional net.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: changed paths
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            desktop:
+              - 'apps/desktop/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'rust-toolchain.toml'
+
+  desktop-windows:
+    name: desktop build (windows, debug)
+    needs: [changes]
+    # Runs when: nightly/dispatch (always), or a PR that touched the desktop surface.
+    # `!cancelled()` lets it run even though `changes` is skipped outside PRs.
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' && needs.changes.outputs.desktop == 'true'))
+    runs-on: windows-latest
+    steps:
+      # Windows agent supports the audit policy (no egress blocking on Windows runners).
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Tauri debug build (NSIS bundle, embedded offline WebView2)
+        run: pnpm --filter desktop exec tauri build --debug
+
+      - name: Upload debug installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-debug-installer
+          path: apps/desktop/src-tauri/target/debug/bundle/nsis/*.exe
+          retention-days: 7

@@ -18,7 +18,7 @@ fn app_version() -> String {
 
 /// Structured-log contract for webview render-process failures.
 ///
-/// As of tauri 2.11 the safe API surface does NOT expose WebView2's
+/// As of tauri 2.11 the safe API surface does NOT expose `WebView2`'s
 /// `ProcessFailed` (verified against 2.11.5 docs: `tauri::WebviewEvent` has
 /// only `DragDrop`, and `RunEvent` has no crash variant). Wiring the real
 /// handler needs `Webview::with_webview` + the `webview2-com` crate's
@@ -34,9 +34,16 @@ pub fn log_webview_process_failure(webview_label: &str, detail: &str) {
     );
 }
 
+/// The single source of truth for the typed IPC surface: every `#[tauri::command]`
+/// is registered here, and BOTH the runtime invoke handler and the exported
+/// TypeScript bindings derive from it — they cannot drift from each other.
+fn specta_builder() -> Builder<tauri::Wry> {
+    Builder::<tauri::Wry>::new().commands(collect_commands![app_version])
+}
+
 /// Builds and runs the tauri application.
 pub fn run() {
-    let specta_builder = Builder::<tauri::Wry>::new().commands(collect_commands![app_version]);
+    let specta_builder = specta_builder();
 
     // Debug builds re-export the committed TS bindings on boot; the CI rust
     // lane recompiles and fails on drift from the Rust signatures.
@@ -87,4 +94,24 @@ fn export_bindings(builder: &Builder<tauri::Wry>) {
             "../src/ipc/bindings.ts",
         )
         .expect("failed to export TypeScript bindings to ../src/ipc/bindings.ts");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regenerates `../src/ipc/bindings.ts` from the Rust command signatures.
+    /// The rust-check gate runs `cargo test export_bindings` and then fails on
+    /// any git diff — when the IPC surface changes, commit the regenerated file.
+    // SOURCE: tauri-specta v2 committed-bindings doctrine [corpus: tauri/specta-bindings]
+    #[test]
+    #[allow(clippy::expect_used)] // test-only: a silent export failure would ship drifted IPC bindings
+    fn export_bindings() {
+        specta_builder()
+            .export(
+                specta_typescript::Typescript::default(),
+                "../src/ipc/bindings.ts",
+            )
+            .expect("failed to export TypeScript bindings to ../src/ipc/bindings.ts");
+    }
 }

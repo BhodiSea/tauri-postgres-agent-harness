@@ -1,0 +1,37 @@
+# ci-windows-release module — release automation. release-please maintains a running
+# release PR from conventional commits; merging it bumps every version surface in
+# lockstep (root + apps/desktop + apps/server + tauri.conf.json — the version-sync
+# gate would fail anything less), tags vX.Y.Z, and creates the GitHub release that
+# release-windows.yml then builds, signs, and attaches the installer to.
+# Config: release-please-config.json + release-please-manifest.json (repo root).
+# SOURCE: docs/harness/gates-catalog.md (ci-windows-release module)
+name: release-please
+
+on:
+  push:
+    branches: ['{{DEFAULT_BRANCH}}']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release PR / tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: release-please-manifest.json

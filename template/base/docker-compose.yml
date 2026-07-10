@@ -12,7 +12,9 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: '{{DB_NAME}}'
     ports:
-      - '127.0.0.1:5432:5432'
+      # HARNESS_DB_PORT: override when a resident Postgres already owns 5432;
+      # tests/rls/run-rls.mjs honours the same variable for its default DSNs.
+      - '127.0.0.1:${HARNESS_DB_PORT:-5432}:5432'
     volumes:
       - ./db/init:/docker-entrypoint-initdb.d:ro
       - db-data:/var/lib/postgresql/data

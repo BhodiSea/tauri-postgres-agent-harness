@@ -39,7 +39,10 @@ export function createSkewMiddleware(serverVersion: string): MiddlewareHandler<A
   return skewGuard
 }
 
-/** True when `handler` is a middleware minted by {@link createSkewMiddleware}. */
+/**
+ * True when `handler` is a middleware minted by {@link createSkewMiddleware}.
+ * @public consumed by the route-coverage unit test (skew.test.ts)
+ */
 export function isSkewMiddleware(handler: unknown): boolean {
   return typeof handler === 'function' && guards.has(handler)
 }

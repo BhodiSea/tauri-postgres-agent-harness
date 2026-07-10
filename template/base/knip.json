@@ -8,41 +8,54 @@
         "tests/rls/*.mjs",
         "tests/rls/**/*.test.ts",
         "tests/migrations/*.mjs",
-        "eslint.config.mjs"
+        "eslint.config.mjs",
+        "playwright.config.ts",
+        "e2e/**/*.spec.ts"
       ],
-      "project": ["tools/**/*.mjs", "tests/**/*.{mjs,ts}", "*.{mjs,ts}"],
+      "project": ["tools/**/*.mjs", "tests/**/*.{mjs,ts}", "e2e/**/*.ts", "*.{mjs,ts}"],
       "ignoreBinaries": ["drizzle-kit"]
     },
     "apps/desktop": {
       "entry": [
-        "src/main.tsx",
+        "src/main.tsx!",
         "vite.config.ts",
         "src/**/*.test.{ts,tsx}",
         "tests/unit/**/*.test.{ts,tsx}"
       ],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "*.ts"],
+      "project": ["src/**/*.{ts,tsx}!", "tests/**/*.{ts,tsx}", "*.ts"],
       "ignore": ["src/ipc/bindings.ts"]
     },
     "apps/server": {
       "entry": [
-        "src/index.ts",
+        "src/index.ts!",
+        "src/crash/*.ts!",
         "scripts/*.{ts,mjs}",
         "src/**/*.test.ts",
         "tests/unit/**/*.test.ts"
       ],
-      "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs}", "tests/**/*.ts"]
+      "project": ["src/**/*.ts!", "scripts/**/*.{ts,mjs}", "tests/**/*.ts"]
     },
     "packages/schema": {
-      "entry": ["src/index.ts", "drizzle.config.ts", "src/**/*.test.ts", "tests/unit/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts", "*.ts"]
+      "entry": [
+        "src/index.ts!",
+        "drizzle.config.ts",
+        "src/**/*.test.ts",
+        "tests/unit/**/*.test.ts"
+      ],
+      "project": ["src/**/*.ts!", "tests/**/*.ts", "*.ts"]
     },
     "packages/importer": {
-      "entry": ["src/index.ts", "src/**/*.test.ts", "tests/unit/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "entry": ["src/index.ts!", "src/**/*.test.ts", "tests/unit/**/*.test.ts"],
+      "project": ["src/**/*.ts!", "tests/**/*.ts"]
     },
     "packages/eval": {
-      "entry": ["src/index.ts", "src/**/*.test.ts", "tests/unit/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "entry": [
+        "src/index.ts!",
+        "src/adapters/*.ts!",
+        "src/**/*.test.ts",
+        "tests/unit/**/*.test.ts"
+      ],
+      "project": ["src/**/*.ts!", "tests/**/*.ts"]
     }
   }
 }

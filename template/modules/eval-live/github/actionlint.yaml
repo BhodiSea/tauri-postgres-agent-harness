@@ -1,0 +1,6 @@
+# actionlint configuration (eval-live module). The live-eval lane targets a
+# self-hosted runner labeled `gpu`; declare the label so the actions-lint
+# workflow keeps passing with this module enabled.
+self-hosted-runner:
+  labels:
+    - gpu

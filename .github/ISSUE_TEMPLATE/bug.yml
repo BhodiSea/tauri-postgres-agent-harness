@@ -1,0 +1,25 @@
+name: Bug report
+description: Something in the installer, hooks, or gates is broken
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Harness version
+      description: From .harness/manifest.json → harnessVersion
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options: [installer, hooks, validate gates, CI workflows, template app, MCP servers, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Exact commands + output. For installer bugs include the `--report json` output.
+    validations:
+      required: true

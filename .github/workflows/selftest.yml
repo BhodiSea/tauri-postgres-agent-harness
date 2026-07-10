@@ -1,0 +1,487 @@
+# Self-test: prove the installer + template produce a working, gate-green
+# Tauri 2 + Hono + Postgres monorepo on every change. This matrix IS the
+# release acceptance test. The canary job additionally proves every headline
+# gate CAN fail — a gate that cannot go red is deleted.
+name: selftest
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: '30 3 * * *' # nightly full acceptance (incl. tauri-build-smoke)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  installer-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - run: node scripts/check-syntax.mjs
+      - run: node scripts/hygiene.mjs
+      - run: node --test "tests/**/*.test.mjs"
+
+  hook-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      # Includes the malformed-stdin fail-closed cases: guards must exit 2 on
+      # unparseable hook input, never fail open.
+      - run: node --test "tests/hooks/*.test.mjs"
+
+  # One deliberate violation per gate DIRECTION; each must turn the matching
+  # gate red on an otherwise-green scaffold. Baseline-pass first so a failure
+  # is attributable to the injection, not to a broken fixture.
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Scaffold canary fixture (committed git baseline for the diff-based gates)
+        run: |
+          node installer/cli.mjs init --dir "$RUNNER_TEMP/canary" --yes \
+            --set PROJECT_NAME="Canary App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+          cd "$RUNNER_TEMP/canary"
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'scaffold baseline'
+      - name: Baseline — all four canary gates PASS on the clean scaffold
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          # GITHUB_BASE_REF belongs to the harness checkout, not this scaffold
+          # repo — unset it so the migrations gate diffs against the scaffold's
+          # own HEAD instead of a ref that does not exist here.
+          env -u GITHUB_BASE_REF node tools/check-tauri-policy.mjs
+          env -u GITHUB_BASE_REF node tools/check-migrations.mjs
+          env -u GITHUB_BASE_REF node tools/check-sources.mjs
+          env -u GITHUB_BASE_REF node tools/check-rls-manifest.mjs
+      - name: 'Canary 1: weaken tauri.conf CSP to null → tauri-policy must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          node -e 'const fs=require("node:fs");const f="apps/desktop/src-tauri/tauri.conf.json";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.app.security.csp=null;fs.writeFileSync(f,JSON.stringify(j,null,2))'
+          if env -u GITHUB_BASE_REF node tools/check-tauri-policy.mjs; then
+            echo '::error::CANARY: tauri-policy PASSED with a null CSP — the gate cannot fail'; exit 1
+          fi
+          git checkout -q -- .
+          echo 'canary OK: tauri-policy went red'
+      - name: 'Canary 2: edit an existing migration → migrations must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          echo 'ALTER TABLE notes ADD COLUMN sneaky text;' >> packages/schema/drizzle/0000_init.sql
+          if env -u GITHUB_BASE_REF node tools/check-migrations.mjs; then
+            echo '::error::CANARY: migrations PASSED after editing a committed migration — the gate cannot fail'; exit 1
+          fi
+          git checkout -q -- .
+          echo 'canary OK: migrations went red'
+      - name: 'Canary 3: strip SOURCE citations from decision sites → provenance must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          sed -i '/SOURCE:/d' packages/schema/drizzle/0000_init.sql
+          if env -u GITHUB_BASE_REF node tools/check-sources.mjs; then
+            echo '::error::CANARY: provenance PASSED with uncited decision sites — the gate cannot fail'; exit 1
+          fi
+          git checkout -q -- .
+          echo 'canary OK: provenance went red'
+      - name: 'Canary 4: remove FORCE RLS from the migration → schema-rls must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          sed -i '/FORCE ROW LEVEL SECURITY/d' packages/schema/drizzle/0000_init.sql
+          if env -u GITHUB_BASE_REF node tools/check-rls-manifest.mjs; then
+            echo '::error::CANARY: schema-rls PASSED without FORCE RLS — the gate cannot fail'; exit 1
+          fi
+          git checkout -q -- .
+          echo 'canary OK: schema-rls went red'
+      - name: Restore sanity — gates green again after the last restore
+        working-directory: ${{ runner.temp }}/canary
+        run: env -u GITHUB_BASE_REF node tools/check-rls-manifest.mjs
+
+  bootstrap-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Tauri Linux build deps (pinned webkit/gtk apt list)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Bootstrap a fresh project from the template
+        run: |
+          node installer/cli.mjs init --dir "$GITHUB_WORKSPACE/.selftest/boot" --yes \
+            --set PROJECT_NAME="Selftest App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+      - name: Git baseline + corepack (lefthook prepare and the diff-based gates need a repo)
+        working-directory: .selftest/boot
+        run: |
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'scaffold baseline'
+          corepack enable
+          corepack prepare --activate
+      # Resolving the store path is the cache CONFIG step: if it fails, the job
+      # hard-fails here (cache config error), never silently uncached.
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        working-directory: .selftest/boot
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        id: pnpm-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('template/base/pnpm-workspace.yaml', 'template/**/package.json.tmpl') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-node${{ matrix.node }}-
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .selftest/boot/apps/desktop/src-tauri
+          cache-on-failure: true
+      - name: Rust toolchain (installs the scaffold's rust-toolchain.toml pin)
+        working-directory: .selftest/boot
+        run: |
+          rustup toolchain install
+          rustup show
+      - name: pnpm install
+        working-directory: .selftest/boot
+        run: pnpm install --no-frozen-lockfile
+      # Soft assertion: on a re-run with an unchanged catalog the store cache
+      # should hit. A miss is a warning (first run / catalog bump are
+      # legitimate); a cache CONFIG error already failed the job above.
+      - name: Assert pnpm store cache effectiveness
+        if: steps.pnpm-cache.outputs.cache-hit != 'true'
+        run: echo "::warning title=pnpm store cache miss::⚠ pnpm store cache missed (key pnpm-store-${RUNNER_OS}-node${NODE_MAJOR}-…). Expected on the first run after a catalog change; investigate if this repeats on unchanged re-runs."
+        env:
+          NODE_MAJOR: ${{ matrix.node }}
+      - name: THE GATE — full validate must be green out of the box (CI floor, rust for real)
+        working-directory: .selftest/boot
+        env:
+          HARNESS_REQUIRE_TOOLCHAINS: '1'
+        run: node tools/validate.mjs --min-floor
+      - name: RLS runner FAILS CLOSED without a database (CI=true)
+        working-directory: .selftest/boot
+        run: |
+          # Doctrine: with migrations present and no reachable Postgres, a CI
+          # skip would be a false green on the headline isolation gate.
+          if CI=true node tests/rls/run-rls.mjs > rls-fail.log 2>&1; then
+            echo '::error::expected fail-closed without a database, got green'
+            cat rls-fail.log
+            exit 1
+          fi
+          grep -q 'failing closed' rls-fail.log
+          echo 'fail-closed proof: OK'
+      - name: Start the scaffold's pinned pgvector database
+        working-directory: .selftest/boot
+        run: docker compose up -d --wait db
+      - name: RLS isolation suite runs for real and is green
+        working-directory: .selftest/boot
+        run: |
+          set -o pipefail
+          CI=true node tests/rls/run-rls.mjs 2>&1 | tee rls.log
+          # Positive control: prove the DB-backed branch ran (fresh-apply), not
+          # a polite self-skip that would false-green a real leak.
+          grep -q '\[migrations\] OK' rls.log \
+            || { echo '::error::RLS suite did not fresh-apply migrations against the live database'; exit 1; }
+          grep -q '\[rls\] OK' rls.log \
+            || { echo '::error::RLS suite did not complete green'; exit 1; }
+
+  # The product promise: a stock Windows runner bootstraps to a green gate.
+  # Runs on EVERY PR — Windows is the ship target, not a nightly afterthought.
+  bootstrap-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Verify rustup is preinstalled on windows-latest
+        run: |
+          command -v rustup || { echo '::error::rustup missing on windows-latest — add an install step'; exit 1; }
+          rustup --version
+      - name: Bootstrap a fresh project from the template
+        run: |
+          node installer/cli.mjs init --dir "$GITHUB_WORKSPACE/.selftest/boot" --yes \
+            --set PROJECT_NAME="Selftest App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+      - name: Git baseline + corepack
+        working-directory: .selftest/boot
+        run: |
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'scaffold baseline'
+          corepack enable
+          corepack prepare --activate
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        working-directory: .selftest/boot
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-node22-${{ hashFiles('template/base/pnpm-workspace.yaml', 'template/**/package.json.tmpl') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-node22-
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .selftest/boot/apps/desktop/src-tauri
+          cache-on-failure: true
+      - name: Rust toolchain (installs the scaffold's rust-toolchain.toml pin)
+        working-directory: .selftest/boot
+        run: |
+          rustup toolchain install
+          rustup show
+      - name: pnpm install
+        working-directory: .selftest/boot
+        run: pnpm install --no-frozen-lockfile
+      - name: THE GATE — full validate on Windows (fail-closed toolchains)
+        working-directory: .selftest/boot
+        env:
+          HARNESS_REQUIRE_TOOLCHAINS: '1'
+        run: node tools/validate.mjs --min-floor
+      - name: Unit tests green (Stop-hook step 3)
+        working-directory: .selftest/boot
+        run: pnpm exec vitest run --silent
+
+  # Path filter feeding tauri-build-smoke: the full NSIS bundle is expensive,
+  # so it runs when the desktop surface changes, on demand, nightly, and on
+  # release tags.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: filter
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: |
+            desktop:
+              - 'template/stack/apps/desktop/**'
+              - 'template/base/rust-toolchain.toml'
+              - 'template/base/pnpm-workspace.yaml'
+              - 'installer/**'
+
+  tauri-build-smoke:
+    needs: changes
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.ref_type == 'tag' ||
+      needs.changes.outputs.desktop == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Bootstrap smoke fixture
+        run: |
+          node installer/cli.mjs init --dir "$GITHUB_WORKSPACE/.selftest/smoke" --yes \
+            --set PROJECT_NAME=SmokeApp \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+          cd "$GITHUB_WORKSPACE/.selftest/smoke"
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'scaffold baseline'
+          corepack enable
+          corepack prepare --activate
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .selftest/smoke/apps/desktop/src-tauri
+          cache-on-failure: true
+      - name: Rust toolchain (installs the scaffold's rust-toolchain.toml pin)
+        working-directory: .selftest/smoke
+        run: |
+          rustup toolchain install
+          rustup show
+      - name: pnpm install
+        working-directory: .selftest/smoke
+        run: pnpm install --no-frozen-lockfile
+      - name: Build debug NSIS bundle
+        working-directory: .selftest/smoke
+        run: pnpm --filter desktop exec tauri build --debug
+      - name: Assert installer artifact exists + size budget (fail >250MB, warn >180MB)
+        shell: pwsh
+        working-directory: .selftest/smoke
+        run: |
+          $exe = Get-ChildItem -Path 'apps/desktop/src-tauri/target/debug/bundle/nsis' -Filter '*-setup.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Get-ChildItem -Recurse 'apps/desktop/src-tauri/target/debug/bundle' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+            Write-Error 'tauri build produced no NSIS *-setup.exe'
+            exit 1
+          }
+          $mb = [math]::Round($exe.Length / 1MB, 1)
+          Write-Host "installer artifact: $($exe.Name) — $mb MB"
+          if ($mb -gt 250) { Write-Error "installer is $mb MB — exceeds the 250 MB hard budget"; exit 1 }
+          elseif ($mb -gt 180) { Write-Host "::warning title=installer size::⚠ installer is $mb MB (soft budget is 180 MB; offline WebView2 is the usual driver)" }
+          "SMOKE_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Silent install /S to a temp prefix, assert installed files, uninstall cleanly
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP 'smoke-install'
+          Start-Process -FilePath $env:SMOKE_EXE -ArgumentList '/S', "/D=$prefix" -Wait
+          $app = Join-Path $prefix 'SmokeApp.exe'
+          if (-not (Test-Path $app)) {
+            Get-ChildItem -Recurse $prefix -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+            Write-Error "silent install left no SmokeApp.exe under $prefix"
+            exit 1
+          }
+          $un = Get-ChildItem -Path $prefix -Filter 'uninstall*.exe' | Select-Object -First 1
+          if (-not $un) { Write-Error 'no uninstaller in the install prefix'; exit 1 }
+          Start-Process -FilePath $un.FullName -ArgumentList '/S' -Wait
+          # NSIS uninstallers hand off to a temp copy and return early — poll.
+          $deadline = (Get-Date).AddSeconds(90)
+          while ((Test-Path $app) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Seconds 3 }
+          if (Test-Path $app) { Write-Error 'silent uninstall left the app binary behind'; exit 1 }
+          Write-Host 'install/uninstall roundtrip: OK'
+
+  retrofit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Synthesize an existing pnpm monorepo with planted conflicts
+        run: |
+          mkdir -p "$RUNNER_TEMP/retro/apps/server/src"
+          cat > "$RUNNER_TEMP/retro/package.json" <<'EOF'
+          {"name":"existing","dependencies":{"hono":"^4.0.0"},"scripts":{"validate":"my-own-gate"}}
+          EOF
+          printf "# their workspace\npackages:\n  - 'apps/*'\n" > "$RUNNER_TEMP/retro/pnpm-workspace.yaml"
+          echo 'export default []' > "$RUNNER_TEMP/retro/eslint.config.mjs"
+          echo '{"name":"server"}' > "$RUNNER_TEMP/retro/apps/server/package.json"
+          echo 'export const theirs = true' > "$RUNNER_TEMP/retro/apps/server/src/index.ts"
+      - name: Retrofit install (JSON report; conflicts exit 2 by design)
+        run: |
+          node installer/cli.mjs init --dir "$RUNNER_TEMP/retro" --yes --report json \
+            --set PROJECT_NAME="Retro App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner > "$RUNNER_TEMP/report.json" || true
+      - name: Assert non-clobber semantics + workspace MERGE (not suffix)
+        run: |
+          node - "$RUNNER_TEMP" <<'EOF'
+          const fs = require('node:fs')
+          const [tmp] = process.argv.slice(2)
+          const report = JSON.parse(fs.readFileSync(`${tmp}/report.json`, 'utf8'))
+          const pkg = JSON.parse(fs.readFileSync(`${tmp}/retro/package.json`, 'utf8'))
+          if (pkg.scripts.validate !== 'my-own-gate') throw new Error('clobbered their validate script')
+          if (pkg.scripts['harness:validate'] !== 'node tools/validate.mjs') throw new Error('missing harness:validate')
+          if (fs.readFileSync(`${tmp}/retro/eslint.config.mjs`, 'utf8') !== 'export default []\n') throw new Error('clobbered their eslint config')
+          if (!fs.existsSync(`${tmp}/retro/eslint.config.harness.mjs`)) throw new Error('missing harness eslint sibling')
+          const ws = fs.readFileSync(`${tmp}/retro/pnpm-workspace.yaml`, 'utf8')
+          if (!ws.startsWith('# their workspace')) throw new Error('workspace yaml header not preserved (clobbered?)')
+          if (!ws.includes("- 'apps/*'")) throw new Error('their workspace glob lost in merge')
+          if (!ws.includes("- 'packages/*'")) throw new Error('harness workspace glob not unioned in')
+          if (!ws.includes('catalog:')) throw new Error('harness catalog not merged in')
+          if (fs.existsSync(`${tmp}/retro/pnpm-workspace.harness.yaml`)) throw new Error('workspace yaml was suffixed instead of merged')
+          if (fs.readFileSync(`${tmp}/retro/apps/server/src/index.ts`, 'utf8') !== 'export const theirs = true\n') throw new Error('their app code modified')
+          if (fs.existsSync(`${tmp}/retro/apps/desktop`)) throw new Error('stack app code installed on retrofit')
+          if (!report.conflicts?.length) throw new Error('conflict report empty — planted conflicts not surfaced')
+          console.log('retrofit non-clobber + workspace merge: OK')
+          EOF
+
+  placeholder-residue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Bootstrap and grep for unrendered placeholders
+        run: |
+          node installer/cli.mjs init --dir "$RUNNER_TEMP/residue" --yes \
+            --set PROJECT_NAME="Residue App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+          cd "$RUNNER_TEMP/residue"
+          residue=$(grep -rIn -E '\{\{[A-Z_]*\}\}' . --exclude-dir=.git | grep -v '^\./\.harness/manifest\.json:' || true)
+          if [ -n "$residue" ]; then
+            echo "$residue"
+            echo '::error::unrendered {{PLACEHOLDER}} tokens leaked into the scaffold'
+            exit 1
+          fi
+          echo 'placeholder residue: none'

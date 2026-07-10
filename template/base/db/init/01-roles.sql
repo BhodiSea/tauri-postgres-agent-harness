@@ -14,6 +14,11 @@ CREATE ROLE app_migrator LOGIN PASSWORD 'postgres' NOSUPERUSER NOCREATEROLE CREA
 -- SOURCE: BUILD-SPEC §Database roles (app_api NOT superuser, subject to FORCE RLS) [corpus: postgres/rls-initplan]
 CREATE ROLE app_api LOGIN PASSWORD 'postgres' NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS;
 
+-- The RLS runner fresh-applies migrations by DROP/CREATE DATABASE as
+-- app_migrator; initdb created the database owned by postgres, so ownership
+-- must move or the drop fails with "must be owner of database" (42501).
+ALTER DATABASE "{{DB_NAME}}" OWNER TO app_migrator;
+
 -- pgvector: extension creation needs elevated rights, and migrations run as
 -- app_migrator — so the extension is provisioned here, up front.
 CREATE EXTENSION IF NOT EXISTS vector;

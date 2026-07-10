@@ -1,0 +1,25 @@
+name: Gate proposal
+description: Propose a new deterministic gate for the harness
+labels: [gate-proposal]
+body:
+  - type: textarea
+    id: invariant
+    attributes:
+      label: The invariant
+      description: What property must always hold, and what failure does it prevent?
+    validations:
+      required: true
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: Proposed mechanism
+      description: >-
+        Hook / ESLint rule / check script / CI job? Must be deterministic,
+        fast, and green on a fresh install (projects grow into gates).
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: A real bug or incident this gate would have caught.

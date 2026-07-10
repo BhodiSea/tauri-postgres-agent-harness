@@ -31,14 +31,17 @@ function deriveDbName() {
 }
 
 const db = deriveDbName()
+// HARNESS_DB_PORT mirrors the docker-compose port seam — dev machines routinely
+// have a resident Postgres on 5432, and the compose file honours the same var.
+const port = process.env['HARNESS_DB_PORT'] || '5432'
 // Local-dev defaults matching db/init/01-roles.sql: the documented 'postgres'
 // password on loopback only — never a real credential shape.
 const DATABASE_URL =
-  process.env['DATABASE_URL'] || `postgres://app_api:postgres@127.0.0.1:5432/${db}`
+  process.env['DATABASE_URL'] || `postgres://app_api:postgres@127.0.0.1:${port}/${db}`
 const MIGRATOR_DATABASE_URL =
-  process.env['MIGRATOR_DATABASE_URL'] || `postgres://app_migrator:postgres@127.0.0.1:5432/${db}`
+  process.env['MIGRATOR_DATABASE_URL'] || `postgres://app_migrator:postgres@127.0.0.1:${port}/${db}`
 
-async function reachable() {
+async function probe() {
   let postgres
   try {
     postgres = createRequire(path.join(repoRoot, 'apps/server/package.json'))('postgres')
@@ -54,6 +57,18 @@ async function reachable() {
   } finally {
     await sql.end({ timeout: 2 }).catch(() => {})
   }
+}
+
+// Bounded readiness loop: `docker compose up -d db` returns before first-boot
+// initdb + role bootstrap finishes, and a single probe would demote the headline
+// isolation suite to a polite skip. Worst case (no database at all) ≈ 25s, then
+// the usual skip/fail-closed logic applies.
+async function reachable() {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    if (await probe()) return true
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
+  return false
 }
 
 function run(cmd, args, extraEnv = {}) {

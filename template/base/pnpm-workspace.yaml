@@ -69,4 +69,7 @@ catalog:
   '@types/babel__core': ^7.20.5
   # ---- harness runtime (root tools/mcp + tests/rls) -----------------------------
   '@modelcontextprotocol/sdk': ^1.29.0
+  # ---- e2e (root playwright fast lane: e2e/** + playwright.config.ts) -----------
+  '@playwright/test': ^1.61.1
+  '@axe-core/playwright': ^4.12.1
 

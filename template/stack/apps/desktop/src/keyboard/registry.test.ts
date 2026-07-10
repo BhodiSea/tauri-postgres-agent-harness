@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { SHORTCUTS } from './registry'
 import type { Shortcut } from './registry'
+import { SHORTCUTS } from './registry'
 
 // SOURCE: WCAG 2.1.4 Character Key Shortcuts — if a shortcut uses only a
 // letter/punctuation/number/symbol character it must be remappable, disabled,

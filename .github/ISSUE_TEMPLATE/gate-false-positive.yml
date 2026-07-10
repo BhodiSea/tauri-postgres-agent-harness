@@ -1,0 +1,25 @@
+name: Gate false positive
+description: A gate (lint rule, hook, check script) blocks legitimate code
+labels: [gate-false-positive]
+body:
+  - type: input
+    id: gate
+    attributes:
+      label: Which gate
+      description: e.g. check-tauri-policy, check-rls-manifest, pretool-write-guard
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal code that is wrongly blocked
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why the code is legitimate
+      description: Gates here are deliberately strict — argue the invariant, not the inconvenience.
+    validations:
+      required: true

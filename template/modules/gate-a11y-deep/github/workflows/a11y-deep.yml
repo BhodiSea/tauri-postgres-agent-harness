@@ -1,0 +1,66 @@
+# gate-a11y-deep module — the full accessibility sweep: axe across the complete
+# WCAG 2.x tag set (incl. the 2.2 additions) plus a strict keyboard-traversal walk,
+# over EVERY route in e2e/a11y-routes.ts. Runs per-PR on UI changes and nightly.
+# The fast lane (quality-gate e2e-fast) keeps guarding the shell on every PR; this
+# lane guards the whole route surface. The workflow IS the gate.
+# The machine checks stop where judgement starts: docs/nvda-checklist.md is the
+# manual screen-reader pass required before each release.
+# SOURCE: docs/harness/gates-catalog.md (gate-a11y-deep module)
+name: a11y-deep
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'e2e/**'
+      - 'playwright.config.ts'
+  schedule:
+    # Nightly full sweep. 04:23 UTC.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a11y-deep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  a11y-deep:
+    name: axe (full tag set) + keyboard traversal, all routes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser (chromium)
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Deep a11y sweep (route manifest × full axe tags × keyboard walk)
+        run: pnpm exec playwright test e2e/a11y-deep.spec.ts
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: a11y-deep-traces
+          path: test-results/
+          retention-days: 7

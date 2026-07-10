@@ -6,7 +6,9 @@ export type TokenVerifier = (token: string) => Promise<{ userId: string }>
 
 // Stub-mode token identity. scripts/mint-dev-token.mjs signs with the SAME
 // values — keep them in sync or dev tokens stop verifying.
+/** @public consumed by the unit-test mint flow (verify.test.ts) */
 export const STUB_ISSUER = 'urn:app:dev-auth'
+/** @public consumed by the unit-test mint flow (verify.test.ts) */
 export const STUB_AUDIENCE = 'urn:app:api'
 
 type Env = Readonly<Record<string, string | undefined>>

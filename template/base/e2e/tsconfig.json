@@ -1,0 +1,19 @@
+{
+  // Standalone project for the Playwright e2e lane. typescript-eslint's
+  // projectService discovers it (typed strict lint over the specs); it is
+  // deliberately NOT referenced by the root solution build — Playwright
+  // transpiles specs itself, so `tsc -b` never compiles this directory.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // DOM lib: mock-ipc init scripts and page.evaluate callbacks run in the browser.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["./**/*.ts"]
+}

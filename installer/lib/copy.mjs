@@ -9,6 +9,11 @@ export function templateRoot() {
   return new URL('../../template/', import.meta.url).pathname
 }
 
+// Binary assets (icons, fonts, …) must round-trip byte-for-byte: decoding them
+// as UTF-8 replaces non-UTF-8 bytes with U+FFFD and corrupts the file, and
+// placeholder rendering makes no sense inside them. They are copied as Buffers.
+const BINARY_EXT = /\.(png|ico|icns|gif|jpe?g|webp|avif|bmp|woff2?|ttf|otf|eot|pdf|zip|bin)$/i
+
 // Walk one template tree ('base' | 'stack' | 'modules/<name>') and return
 // [{ storagePath, installPath, content }] with placeholders rendered.
 export function planTree(tree, answers) {
@@ -34,8 +39,10 @@ export function planTree(tree, answers) {
         continue
       }
       const installPath = join(relInstall, name.replace(/\.tmpl$/, ''))
-      const raw = readFileSync(abs, 'utf8')
-      out.push({ storagePath: join(tree, relInstall, entry), installPath, content: render(raw, answers) })
+      const content = BINARY_EXT.test(name)
+        ? readFileSync(abs) // Buffer, verbatim — no placeholder rendering
+        : render(readFileSync(abs, 'utf8'), answers)
+      out.push({ storagePath: join(tree, relInstall, entry), installPath, content })
     }
   }
 }

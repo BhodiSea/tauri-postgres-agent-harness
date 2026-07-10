@@ -1,0 +1,167 @@
+# ci-windows-e2e module — real-binary E2E on Windows via tauri-driver + WebdriverIO,
+# plus the enterprise-network simulations no fast lane can cover:
+#   - smoke job: build the debug binary, drive it over WebDriver (tauri-driver →
+#     msedgedriver), with APPDATA redirected to a deep >280-char path (long-path
+#     regression net) and a WebView2 kill/recover probe.
+#   - tls-inspection job: mitmproxy with its CA installed in the MACHINE store —
+#     the app must keep working behind an enterprise TLS-intercepting proxy
+#     (platform trust store, never a bundled root; see deny.toml's webpki-roots ban).
+# Nightly + manual: slow Windows runners, real binary. This workflow IS the gate.
+# SOURCE: docs/harness/gates-catalog.md (ci-windows-e2e module)
+name: e2e-windows
+
+on:
+  schedule:
+    # Nightly. 04:07 UTC.
+    - cron: '7 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: wdio smoke (redirected APPDATA, long paths, kill/recover)
+    runs-on: windows-latest
+    env:
+      # Redirect APPDATA into a deliberately deep tree: enterprises redirect
+      # profiles onto UNC/DFS paths and >260-char trees break naive Win32 IO.
+      # build.rs sets longPathAware; this run proves it end to end.
+      REDIRECTED_APPDATA_ROOT: C:\rd\${{ github.run_id }}
+    steps:
+      # Windows agent: audit-only egress policy (blocking is Linux-only).
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build debug binary (no bundle — WebDriver drives the exe directly)
+        run: pnpm --filter desktop exec tauri build --debug --no-bundle
+
+      - name: Install tauri-driver (pinned)
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      # msedgedriver must match the installed WebView2 runtime version exactly.
+      - name: Install matching msedgedriver
+        shell: pwsh
+        run: |
+          $wv2 = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue
+          if ($null -eq $wv2) {
+            $wv2 = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction Stop
+          }
+          $version = $wv2.pv
+          Write-Host "WebView2 runtime: $version"
+          $url = "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\edgedriver.zip"
+          Expand-Archive "$env:RUNNER_TEMP\edgedriver.zip" -DestinationPath "$env:RUNNER_TEMP\edgedriver" -Force
+          "$env:RUNNER_TEMP\edgedriver" >> $env:GITHUB_PATH
+
+      - name: Create redirected APPDATA at a >280-char path
+        shell: pwsh
+        run: |
+          $deep = $env:REDIRECTED_APPDATA_ROOT
+          # Build a path whose TOTAL length exceeds 280 chars (the classic MAX_PATH+ trap).
+          while ($deep.Length -lt 285) { $deep = Join-Path $deep ('seg' + 'x' * 20) }
+          New-Item -ItemType Directory -Path $deep -Force | Out-Null
+          # Prove basic IO works at that depth before blaming the app.
+          Set-Content -Path (Join-Path $deep 'probe.txt') -Value 'long-path probe'
+          if ((Get-Content (Join-Path $deep 'probe.txt')) -ne 'long-path probe') { exit 1 }
+          "APPDATA=$deep" >> $env:GITHUB_ENV
+          Write-Host "APPDATA redirected to $($deep.Length)-char path"
+
+      - name: Start tauri-driver
+        shell: pwsh
+        run: |
+          Start-Process tauri-driver -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+          Write-Host 'tauri-driver listening on 127.0.0.1:4444'
+
+      # WDIO toolchain via dlx (pinned): the harness does not force these devDeps on
+      # every project. For a durable setup, add them to the root package.json instead
+      # (see docs/modules/ci-windows-e2e/README.md) and switch this to `pnpm exec wdio`.
+      - name: WebdriverIO smoke suite (via tauri-driver)
+        shell: pwsh
+        run: |
+          pnpm --package=@wdio/cli@9 --package=@wdio/local-runner@9 `
+            --package=@wdio/mocha-framework@9 --package=@wdio/spec-reporter@9 `
+            --package=tsx dlx wdio run e2e-windows/wdio.conf.ts
+
+      # The smoke spec also performs the in-session WebView2 kill/recover probe; this
+      # step re-asserts from the OUTSIDE that no zombie WebView2 processes survived.
+      - name: WebView2 process hygiene after the run
+        shell: pwsh
+        run: |
+          $left = Get-Process -Name 'msedgewebview2' -ErrorAction SilentlyContinue
+          if ($null -ne $left) {
+            Write-Error "msedgewebview2 processes leaked past the session: $($left.Id -join ', ')"
+            exit 1
+          }
+          Write-Host 'no leaked WebView2 processes'
+
+  tls-inspection:
+    name: enterprise TLS-inspecting proxy (mitmproxy, machine store CA)
+    runs-on: windows-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install mitmproxy
+        run: pipx install mitmproxy
+
+      - name: Start mitmdump and trust its CA in the MACHINE store
+        shell: pwsh
+        run: |
+          Start-Process mitmdump -ArgumentList '--listen-port', '18080' -WindowStyle Hidden
+          # First connection materializes the CA; wait for the cert file.
+          $ca = Join-Path $env:USERPROFILE '.mitmproxy\mitmproxy-ca-cert.cer'
+          for ($i = 0; $i -lt 30 -and -not (Test-Path $ca); $i++) { Start-Sleep -Seconds 1 }
+          if (-not (Test-Path $ca)) { Write-Error 'mitmproxy CA never appeared'; exit 1 }
+          # Machine store, exactly like enterprise middleboxes deploy their roots.
+          certutil -addstore -f Root $ca
+
+      # The app (and anything using the OS trust store) must tolerate interception by
+      # a locally-trusted CA. rustls-platform-verifier / WinHTTP honor the machine
+      # store; a bundled-root stack (webpki-roots — banned in deny.toml) would fail here.
+      - name: Probe HTTPS through the intercepting proxy
+        shell: pwsh
+        run: |
+          $env:HTTPS_PROXY = 'http://127.0.0.1:18080'
+          $response = Invoke-WebRequest -Uri 'https://api.github.com/meta' -UseBasicParsing -TimeoutSec 30
+          if ($response.StatusCode -ne 200) { Write-Error "proxied HTTPS probe failed: $($response.StatusCode)"; exit 1 }
+          Write-Host 'HTTPS via the TLS-inspecting proxy: OK (CA honored from the machine store)'
+          # TODO(project): launch the built app with HTTPS_PROXY set and assert the
+          # /healthz indicator reaches the connected state against your staging API —
+          # that closes the loop on the app's own network stack under interception.

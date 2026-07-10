@@ -81,7 +81,9 @@ export async function update(opts) {
       continue
     }
 
-    const currentSha = sha256(readFileSync(dest, 'utf8'))
+    // Raw bytes, not utf8: hashing a lossy utf8 decode of a binary asset would
+    // never match the manifest sha recorded over the true file content.
+    const currentSha = sha256(readFileSync(dest))
     if (!recorded || currentSha === recorded.sha256) {
       if (currentSha === incomingSha) {
         report.skipped.push(ip)
@@ -128,5 +130,7 @@ export async function update(opts) {
 
 function write(dest, content) {
   mkdirSync(dirname(dest), { recursive: true })
-  writeFileSync(dest, content, { mode: content.startsWith('#!') ? 0o755 : 0o644 })
+  // Binary assets arrive as Buffers and are never executable.
+  const executable = typeof content === 'string' && content.startsWith('#!')
+  writeFileSync(dest, content, { mode: executable ? 0o755 : 0o644 })
 }

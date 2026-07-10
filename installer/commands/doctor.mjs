@@ -26,8 +26,11 @@ export async function doctor(opts) {
       continue
     }
     if (meta.mode === 'seeded') continue
-    const text = readFileSync(dest, 'utf8')
-    const current = sha256(text)
+    // Hash raw bytes (manifest hashes are computed over the written content —
+    // Buffers for binary assets); decode to text only for the hook-stamp probe.
+    const raw = readFileSync(dest)
+    const text = raw.toString('utf8')
+    const current = sha256(raw)
     if (current !== meta.sha256) {
       if (meta.mode === 'config') {
         warnings.push(`config tuned since install: ${ip} (expected — verify the change was human-approved)`)

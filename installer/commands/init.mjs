@@ -160,5 +160,7 @@ function write(dest, content) {
   mkdirSync(dirname(dest), { recursive: true })
   // Hooks/scripts with shebangs are invoked directly by Claude Code — they
   // need the executable bit, which writeFileSync would otherwise drop.
-  writeFileSync(dest, content, { mode: content.startsWith('#!') ? 0o755 : 0o644 })
+  // Binary assets arrive as Buffers and are never executable.
+  const executable = typeof content === 'string' && content.startsWith('#!')
+  writeFileSync(dest, content, { mode: executable ? 0o755 : 0o644 })
 }

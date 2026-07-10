@@ -1,5 +1,6 @@
 {
   "name": "{{PROJECT_SLUG}}",
+  "version": "0.1.0",
   "private": true,
   "repository": "github:{{GITHUB_OWNER}}/{{PROJECT_SLUG}}",
   "type": "module",
@@ -26,10 +27,12 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
+    "@axe-core/playwright": "catalog:",
     "@biomejs/biome": "catalog:",
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@playwright/test": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "postgres": "catalog:",
     "cspell": "catalog:",

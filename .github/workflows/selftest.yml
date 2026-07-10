@@ -326,6 +326,10 @@ jobs:
               - 'template/base/rust-toolchain.toml'
               - 'template/base/pnpm-workspace.yaml'
               - 'installer/**'
+              # the smoke job's own definition and checkout line-ending rules
+              # affect its result — edits to either must re-run it
+              - '.github/workflows/selftest.yml'
+              - '.gitattributes'
 
   tauri-build-smoke:
     needs: changes

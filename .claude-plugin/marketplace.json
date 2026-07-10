@@ -1,0 +1,13 @@
+{
+  "name": "tauri-postgres-agent-harness",
+  "owner": {
+    "name": "BhodiSea"
+  },
+  "plugins": [
+    {
+      "name": "tauri-postgres-agent-harness",
+      "source": ".",
+      "description": "Agent half of the harness: migration/RLS, DAL, and test authors; security, Torvalds-grade, accessibility, and Tauri-security reviewers; citation verifier; /adr, /new-feature, /verify-citations; the vertical-slice skill."
+    }
+  ]
+}

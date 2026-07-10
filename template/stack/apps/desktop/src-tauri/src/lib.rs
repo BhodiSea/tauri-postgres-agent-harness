@@ -45,7 +45,11 @@ pub fn run() {
     export_bindings(&specta_builder);
 
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().level(log::LevelFilter::Info).build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
@@ -60,7 +64,11 @@ pub fn run() {
         });
 
     app.run(|_app_handle, event| match event {
-        tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Destroyed,
+            ..
+        } => {
             log::info!(target: "app::lifecycle", "window destroyed label={label}");
         }
         tauri::RunEvent::Exit => {
@@ -74,6 +82,9 @@ pub fn run() {
 #[allow(clippy::expect_used)] // dev-only: a silent export failure would ship drifted IPC bindings
 fn export_bindings(builder: &Builder<tauri::Wry>) {
     builder
-        .export(specta_typescript::Typescript::default(), "../src/ipc/bindings.ts")
+        .export(
+            specta_typescript::Typescript::default(),
+            "../src/ipc/bindings.ts",
+        )
         .expect("failed to export TypeScript bindings to ../src/ipc/bindings.ts");
 }

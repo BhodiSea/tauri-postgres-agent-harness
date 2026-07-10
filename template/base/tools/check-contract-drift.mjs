@@ -10,12 +10,53 @@
 //      confusing type errors otherwise. Pure static check, no install needed.
 // SOURCE: docs/harness/README.md (contracts gate) [corpus: harness/doctrine]
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'contracts'
 const errs = []
+
+// tsconfig files are JSONC (TypeScript allows // and /* */ comments and trailing
+// commas). Strip them before JSON.parse. String-aware so a `//` inside a string
+// value (e.g. a path) is preserved.
+function parseJsonc(text) {
+  let out = ''
+  let inStr = false
+  let strCh = ''
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    const next = text[i + 1]
+    if (inStr) {
+      out += c
+      if (c === '\\') {
+        out += next ?? ''
+        i++
+      } else if (c === strCh) inStr = false
+      continue
+    }
+    if (c === '"' || c === "'") {
+      inStr = true
+      strCh = c
+      out += c
+      continue
+    }
+    if (c === '/' && next === '/') {
+      while (i < text.length && text[i] !== '\n') i++
+      out += '\n'
+      continue
+    }
+    if (c === '/' && next === '*') {
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
+      i++
+      continue
+    }
+    out += c
+  }
+  // drop trailing commas before } or ]
+  return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
+}
 
 // ---- 2. tsconfig references sync (run first: static, always possible) ----
 const pkgDirs = []
@@ -40,7 +81,7 @@ for (const dir of pkgDirs) {
     errs.push(`${dir}: missing tsconfig.json (every workspace package is a TS project)`)
     continue
   }
-  const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf8'))
+  const tsconfig = parseJsonc(readFileSync(tsconfigPath, 'utf8'))
   const refs = new Set((tsconfig.references ?? []).map((r) => relative(dir, join(dir, r.path))))
   for (const dep of wanted) {
     const expected = relative(dir, dep)
@@ -52,7 +93,7 @@ for (const dir of pkgDirs) {
   }
 }
 if (existsSync('tsconfig.json')) {
-  const solution = JSON.parse(readFileSync('tsconfig.json', 'utf8'))
+  const solution = parseJsonc(readFileSync('tsconfig.json', 'utf8'))
   const refs = new Set((solution.references ?? []).map((r) => r.path.replace(/^\.\//, '')))
   for (const dir of pkgDirs) {
     if (!refs.has(dir)) errs.push(`tsconfig.json (solution): missing reference to ${dir}`)

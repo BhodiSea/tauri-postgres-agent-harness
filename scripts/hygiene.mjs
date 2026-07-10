@@ -35,8 +35,9 @@ const LEAK_PATTERNS = [
   /TAURI_SIGNING_PRIVATE_KEY\s*[:=]\s*["'][^"'$@{]/, // literal signing key (env refs allowed)
   /[A-Za-z0-9._~-]{2,}8Q~[A-Za-z0-9._~-]{20,}/, // Entra/Azure client-secret shape
   /\/[^\s"']+\.gguf/, // absolute model paths are deployment config, never template content
-  // Connection strings with credentials, except the documented local-dev default:
-  /postgres(?:ql)?:\/\/(?!postgres:postgres@(?:127\.0\.0\.1|localhost))[^\s'"]+:[^\s'"]+@/,
+  // Connection strings with credentials, except the documented local-dev
+  // convention: password literally 'postgres', loopback host only.
+  /postgres(?:ql)?:\/\/(?![a-z_]+:postgres@(?:127\.0\.0\.1|localhost))[^\s'"]+:[^\s'"]+@/,
 ]
 
 // Files allowed to mention a pattern (path suffix → patterns allowed there).

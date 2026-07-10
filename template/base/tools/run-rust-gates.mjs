@@ -9,7 +9,7 @@
 // SOURCE: docs/harness/README.md (rust gates; stamp) [corpus: harness/doctrine]
 import { execSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fail, inCI, ok, skipOrFail } from './lib/gate.mjs'
 
@@ -26,14 +26,21 @@ const cargoPresent = spawnSync('cargo', ['--version'], { stdio: 'ignore' }).stat
 if (!cargoPresent) skipOrFail(GATE, 'cargo not on PATH (install rustup to run Rust gates locally)')
 
 function run(cmd) {
-  execSync(cmd, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+  execSync(cmd, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
 }
 
 if (mode === 'fmt') {
   try {
     run(`cargo fmt --manifest-path ${MANIFEST} -- --check`)
   } catch (e) {
-    fail(GATE, `cargo fmt --check failed — run \`cargo fmt --manifest-path ${MANIFEST}\`:\n${(e.stdout?.toString() ?? '').slice(-1500)}`)
+    fail(
+      GATE,
+      `cargo fmt --check failed — run \`cargo fmt --manifest-path ${MANIFEST}\`:\n${(e.stdout?.toString() ?? '').slice(-1500)}`,
+    )
   }
   ok(GATE, 'rustfmt clean')
 }

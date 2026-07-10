@@ -13,6 +13,7 @@ export default tseslint.config(
     // Build outputs, generated code, and non-app surfaces owned by other gates.
     ignores: [
       '**/dist/**',
+      '**/dist-types/**', // composite tsc -b declaration output (runs before lint in the gate chain)
       '**/target/**',
       '**/coverage/**',
       '**/*.tsbuildinfo',

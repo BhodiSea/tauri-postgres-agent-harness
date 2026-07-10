@@ -40,6 +40,12 @@
       "enabled": true
     }
   },
+  "css": {
+    // Tailwind v4 is CSS-first: styles.css uses @theme / @apply etc.
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "assist": {
     "enabled": true,
     "actions": {

@@ -10,7 +10,7 @@
 //   5. WebView2 install mode stays offlineInstaller (enterprise/offline invariant)
 //   6. capabilities grant no remote-URL IPC, no shell/process execution, no ** fs scopes
 // SOURCE: docs/harness/README.md (tauri-policy gate) [corpus: tauri/isolation]
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'tauri-policy'
@@ -46,7 +46,6 @@ if (typeof csp !== 'string' || csp.length === 0) {
   if (!/connect-src/.test(csp)) errs.push('CSP must declare connect-src (pin the API origin)')
   if (/unsafe-eval/.test(csp)) errs.push("CSP must not allow 'unsafe-eval'")
 }
-
 // 3. dangerous* keys, recursively
 ;(function scan(obj, path) {
   if (obj === null || typeof obj !== 'object') return
@@ -94,7 +93,9 @@ if (existsSync(CAPS_DIR)) {
     if (cap.remote) errs.push(`capabilities/${f}: remote-URL capabilities are banned`)
     const perms = JSON.stringify(cap.permissions ?? [])
     if (/shell:allow-|process:allow-/.test(perms))
-      errs.push(`capabilities/${f}: shell/process execution permissions are banned — add a typed #[tauri::command] instead`)
+      errs.push(
+        `capabilities/${f}: shell/process execution permissions are banned — add a typed #[tauri::command] instead`,
+      )
     if (/fs:(allow|scope)[^"]*\*\*/.test(perms))
       errs.push(`capabilities/${f}: '**' filesystem scopes are banned — scope to specific app dirs`)
   }
@@ -103,4 +104,7 @@ if (existsSync(CAPS_DIR)) {
 }
 
 failures(GATE, errs)
-ok(GATE, 'isolation on, CSP pinned, identity locked, offline WebView2, least-privilege capabilities')
+ok(
+  GATE,
+  'isolation on, CSP pinned, identity locked, offline WebView2, least-privilege capabilities',
+)

@@ -7,7 +7,7 @@ import { fileMode, readManifest, sha256, writeManifest } from '../lib/manifest.m
 
 const GATE_MODULES_NEEDING_CONFIG = new Map([
   ['gate-styleguide', "uncomment the ['styleguide', ...] line in tools/harness.config.mjs"],
-  ['gate-gated-routes', "uncomment the ['gated-routes', ...] line in tools/harness.config.mjs"],
+  ['gate-perf-budget', "uncomment the ['perf-budget', ...] line in tools/harness.config.mjs"],
 ])
 
 export async function enable(opts, moduleName, on) {

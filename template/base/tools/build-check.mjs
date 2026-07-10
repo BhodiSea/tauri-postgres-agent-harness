@@ -5,14 +5,15 @@
 // import that sneaks past static analysis still shows up in the emitted JS.
 // SOURCE: docs/harness/README.md (build gate; desktop-bundle purity) [corpus: harness/doctrine]
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'build'
 const APP = 'apps/desktop'
 
-if (!existsSync(`${APP}/package.json`)) skipOrFail(GATE, `${APP} not found (no desktop surface yet)`)
+if (!existsSync(`${APP}/package.json`))
+  skipOrFail(GATE, `${APP} not found (no desktop surface yet)`)
 if (!existsSync('node_modules')) skipOrFail(GATE, 'node_modules missing — run pnpm install')
 
 try {

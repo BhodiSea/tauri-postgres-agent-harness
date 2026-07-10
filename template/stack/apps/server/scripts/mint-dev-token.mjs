@@ -10,7 +10,7 @@ import { randomUUID, webcrypto } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-const DEV_USER_ID = '11111111-1111-1111-1111-111111111111'
+const DEV_USER_ID = '11111111-1111-4111-8111-111111111111'
 const STUB_ISSUER = 'urn:app:dev-auth'
 const STUB_AUDIENCE = 'urn:app:api'
 const TOKEN_TTL_SECONDS = 8 * 60 * 60 // one working day; re-run to re-mint

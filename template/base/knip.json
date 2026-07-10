@@ -2,8 +2,15 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["tools/*.mjs", "tools/mcp/**/*.mjs", "tests/rls/*.mjs", "eslint.config.mjs"],
-      "project": ["tools/**/*.mjs", "tests/**/*.mjs", "*.{mjs,ts}"],
+      "entry": [
+        "tools/*.mjs",
+        "tools/mcp/**/*.mjs",
+        "tests/rls/*.mjs",
+        "tests/rls/**/*.test.ts",
+        "tests/migrations/*.mjs",
+        "eslint.config.mjs"
+      ],
+      "project": ["tools/**/*.mjs", "tests/**/*.{mjs,ts}", "*.{mjs,ts}"],
       "ignoreBinaries": ["drizzle-kit"]
     },
     "apps/desktop": {

@@ -69,9 +69,7 @@ async function rlsVerify(args) {
   // resolve it from the server package's context so the probe uses the app's own driver.
   let postgres
   try {
-    postgres = createRequire(new URL('../../apps/server/package.json', import.meta.url))(
-      'postgres',
-    )
+    postgres = createRequire(new URL('../../apps/server/package.json', import.meta.url))('postgres')
   } catch {
     return 'RLS: SKIPPED (the `postgres` driver is not installed — run pnpm install)'
   }

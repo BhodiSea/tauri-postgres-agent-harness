@@ -6,7 +6,7 @@
 // The lock file itself is write-guard-protected: updating it is a deliberate act.
 // SOURCE: docs/harness/README.md (prompt versioning) [corpus: llamacpp/json-schema]
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fail, failures, ok } from './lib/gate.mjs'
 

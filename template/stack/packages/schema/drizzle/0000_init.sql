@@ -21,23 +21,27 @@ ALTER TABLE "notes" ENABLE ROW LEVEL SECURITY;
 -- the policies. [corpus: harness/doctrine]
 ALTER TABLE "notes" FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
--- SOURCE: PostgreSQL row-security guidance — the owner check is wrapped in a
--- scalar sub-select so it evaluates once per statement (initPlan) instead of per
--- row. nullif(current_setting(..., true), '') maps BOTH no-identity shapes to
--- NULL — unset GUC returns NULL, but a pooled session that ever ran SET LOCAL
--- returns '' afterwards, which would make a bare ::uuid cast raise 22P02 instead
--- of cleanly denying. NULL never equals an owner_id, so "no identity" fails
--- closed. Four per-operation policies, never FOR ALL. [corpus: postgres/rls-initplan]
+-- The owner check is wrapped in a scalar sub-select so it evaluates once per
+-- statement (initPlan) instead of per row. nullif(current_setting(..., true), '')
+-- maps BOTH no-identity shapes to NULL — an unset GUC returns NULL, but a pooled
+-- session that ever ran SET LOCAL returns '' afterwards, which would make a bare
+-- ::uuid cast raise 22P02 instead of cleanly denying. NULL never equals an
+-- owner_id, so "no identity" fails closed. Four per-operation policies, never
+-- FOR ALL, so read and write intents can diverge later without a rewrite.
+-- SOURCE: PostgreSQL row security, initPlan sub-select pattern [corpus: postgres/rls-initplan]
 CREATE POLICY "notes_select_own" ON "notes" AS PERMISSIVE FOR SELECT TO "app_api"
 	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
+-- SOURCE: WITH CHECK validates the NEW row so a client cannot INSERT another user's owner_id [corpus: postgres/rls-force]
 CREATE POLICY "notes_insert_own" ON "notes" AS PERMISSIVE FOR INSERT TO "app_api"
 	WITH CHECK ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
+-- SOURCE: UPDATE needs both USING (rows visible to change) and WITH CHECK (result stays own) [corpus: postgres/rls-force]
 CREATE POLICY "notes_update_own" ON "notes" AS PERMISSIVE FOR UPDATE TO "app_api"
 	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid))
 	WITH CHECK ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
+-- SOURCE: DELETE USING restricts which rows the role may remove to its own [corpus: postgres/rls-force]
 CREATE POLICY "notes_delete_own" ON "notes" AS PERMISSIVE FOR DELETE TO "app_api"
 	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint

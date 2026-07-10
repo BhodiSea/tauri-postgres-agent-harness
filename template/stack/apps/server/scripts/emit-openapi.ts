@@ -26,6 +26,14 @@ if (!response.ok) {
   throw new Error(`openapi route returned ${String(response.status)}`)
 }
 const doc: unknown = await response.json()
-const target = new URL('../openapi.json', import.meta.url)
-writeFileSync(target, `${JSON.stringify(sortKeysDeep(doc), null, 2)}\n`)
-console.log(`wrote ${fileURLToPath(target)}`)
+const serialized = `${JSON.stringify(sortKeysDeep(doc), null, 2)}\n`
+
+// --stdout: print the document without touching disk — the contracts gate diffs
+// this against the committed file (regenerate-and-compare, no working-tree write).
+if (process.argv.includes('--stdout')) {
+  process.stdout.write(serialized)
+} else {
+  const target = new URL('../openapi.json', import.meta.url)
+  writeFileSync(target, serialized)
+  console.log(`wrote ${fileURLToPath(target)}`)
+}

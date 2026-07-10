@@ -31,10 +31,12 @@ function deriveDbName() {
 }
 
 const db = deriveDbName()
-// Local-dev defaults: trust auth on 127.0.0.1 only (no credentials to leak).
-const DATABASE_URL = process.env['DATABASE_URL'] || `postgres://app_api@127.0.0.1:5432/${db}`
+// Local-dev defaults matching db/init/01-roles.sql: the documented 'postgres'
+// password on loopback only — never a real credential shape.
+const DATABASE_URL =
+  process.env['DATABASE_URL'] || `postgres://app_api:postgres@127.0.0.1:5432/${db}`
 const MIGRATOR_DATABASE_URL =
-  process.env['MIGRATOR_DATABASE_URL'] || `postgres://app_migrator@127.0.0.1:5432/${db}`
+  process.env['MIGRATOR_DATABASE_URL'] || `postgres://app_migrator:postgres@127.0.0.1:5432/${db}`
 
 async function reachable() {
   let postgres

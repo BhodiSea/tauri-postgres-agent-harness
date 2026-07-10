@@ -1,7 +1,7 @@
 // Central keyboard-shortcut registry. Every shortcut in the app MUST be
 // declared here — ad-hoc key handlers bypass the WCAG 2.1.4 test below.
 
-export type Shortcut = {
+export interface Shortcut {
   readonly id: string
   /** Key combo, lowercase, `+`-joined. `mod` = Ctrl on Windows/Linux, Cmd on macOS. */
   readonly keys: string

@@ -6,10 +6,11 @@ packages:
   - apps/*
   - packages/*
 
-# pnpm >=10 skips dependency build scripts unless explicitly allowlisted.
-onlyBuiltDependencies:
-  - esbuild
-  - lefthook
+# pnpm 11 skips dependency build scripts unless explicitly approved here
+# (`allowBuilds`; the pnpm-10-era key was onlyBuiltDependencies).
+allowBuilds:
+  esbuild: true
+  lefthook: true
 
 catalog:
   # ---- toolchain --------------------------------------------------------------
@@ -63,3 +64,9 @@ catalog:
   '@tauri-apps/api': ^2.11.1
   '@tauri-apps/cli': 2.11.4 # exact per BUILD-SPEC (bundler/signing file-set regressions)
   '@tauri-apps/plugin-log': ^2.8.0
+  '@rolldown/plugin-babel': ^0.2.3 # React Compiler wiring for @vitejs/plugin-react v6
+  '@babel/core': ^8.0.1
+  '@types/babel__core': ^7.20.5
+  # ---- harness runtime (root tools/mcp + tests/rls) -----------------------------
+  '@modelcontextprotocol/sdk': ^1.29.0
+

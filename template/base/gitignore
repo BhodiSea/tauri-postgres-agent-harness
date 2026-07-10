@@ -1,6 +1,7 @@
 # deps / builds
 node_modules/
 dist/
+dist-types/
 # Rust build output (src-tauri/.gitignore is folded in here by convention)
 target/
 *.tsbuildinfo
@@ -13,8 +14,10 @@ coverage/
 # dev-only JWKS + minted tokens (apps/server/scripts/mint-dev-token.mjs)
 .dev-auth/
 
-# harness runtime state (gate stamps, caches)
-.harness/
+# harness runtime state (gate stamps, caches) — the install manifest stays
+# committed so `doctor` and CI can hash-verify harness-owned files
+.harness/*
+!.harness/manifest.json
 
 # editor/os noise
 .DS_Store

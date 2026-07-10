@@ -6,7 +6,7 @@
 // (the owner role; RLS-bypassing by design, which is exactly why the bash-guard
 // confines it to this runner and drizzle-kit).
 // SOURCE: docs/harness/README.md (migration discipline) [corpus: drizzle/migrations-append-only]
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'

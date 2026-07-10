@@ -3,7 +3,7 @@ import { type AppOptions, createApp } from '../app.js'
 import type { NotesDal } from '../types.js'
 import { isSkewMiddleware } from './skew.js'
 
-const USER_ID = '11111111-1111-1111-1111-111111111111'
+const USER_ID = '11111111-1111-4111-8111-111111111111'
 
 const emptyDal: NotesDal = {
   list: () => Promise.resolve([]),

@@ -5,7 +5,7 @@ import { type AppOptions, createApp } from './app.js'
 
 const baseOptions: AppOptions = {
   version: '0.1.0',
-  verifyToken: () => Promise.resolve({ userId: '11111111-1111-1111-1111-111111111111' }),
+  verifyToken: () => Promise.resolve({ userId: '11111111-1111-4111-8111-111111111111' }),
 }
 
 const authed = { authorization: 'Bearer test-token' }

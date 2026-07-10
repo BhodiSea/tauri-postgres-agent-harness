@@ -6,7 +6,7 @@
 // table cannot land without its RLS story. The runtime isolation suite (pnpm test:rls)
 // proves the policies actually isolate; this gate proves they exist.
 // SOURCE: docs/harness/README.md (schema-rls gate) [corpus: postgres/rls-force]
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { failures, ok, skipOrFail } from './lib/gate.mjs'
 
@@ -36,7 +36,9 @@ if (tables.size === 0) skipOrFail(GATE, 'no pgTable declarations found yet')
 //    cover tables created earlier).
 let sql = ''
 if (existsSync(MIGRATIONS_DIR)) {
-  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()) {
+  for (const f of readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()) {
     sql += `\n${readFileSync(join(MIGRATIONS_DIR, f), 'utf8')}`
   }
 }
@@ -59,7 +61,8 @@ for (const table of tables) {
   if (!new RegExp(`ALTER TABLE ${t} FORCE ROW LEVEL SECURITY`, 'i').test(norm)) {
     errs.push(`${table}: no FORCE ROW LEVEL SECURITY (owner would bypass policies)`)
   }
-  const hasAll = new RegExp(`CREATE POLICY [a-z0-9_]+ ON ${t}(?! FOR)`, 'i').test(norm) ||
+  const hasAll =
+    new RegExp(`CREATE POLICY [a-z0-9_]+ ON ${t}(?! FOR)`, 'i').test(norm) ||
     new RegExp(`CREATE POLICY [a-z0-9_]+ ON ${t} FOR ALL`, 'i').test(norm)
   for (const op of OPS) {
     if (hasAll) break

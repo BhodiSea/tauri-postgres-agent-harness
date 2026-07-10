@@ -7,13 +7,13 @@
 // SOURCE: docs/harness/README.md (RLS testing doctrine) [corpus: postgres/rls-force]
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  appSql,
   ISOLATION_TARGETS,
   RLS_SUITE_READY,
+  type Sql,
   USER_A,
   USER_B,
-  appSql,
   withUser,
-  type Sql,
 } from './db-context'
 
 if (!RLS_SUITE_READY) {
@@ -53,24 +53,33 @@ if (!RLS_SUITE_READY) {
     it.each(ISOLATION_TARGETS)('isolates user B rows in $table from user A', async (t) => {
       // POSITIVE CONTROL: A sees its OWN row. Without this, a deny-all database
       // would make every assertion below pass vacuously.
-      const own = await withUser(sql, USER_A, (tx) =>
-        tx`SELECT * FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_A}`,
+      const own = await withUser(
+        sql,
+        USER_A,
+        (tx) => tx`SELECT * FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_A}`,
       )
       expect(own.length).toBeGreaterThanOrEqual(1)
 
       // SELECT another user's rows → RLS hides them: no error, zero rows.
-      const read = await withUser(sql, USER_A, (tx) =>
-        tx`SELECT * FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
+      const read = await withUser(
+        sql,
+        USER_A,
+        (tx) => tx`SELECT * FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
       )
       expect(read).toHaveLength(0)
 
       // UPDATE / DELETE across users: statements match nothing (0 rows), no error.
-      const updated = await withUser(sql, USER_A, (tx) =>
-        tx`UPDATE ${tx(t.table)} SET title = 'pwned' WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
+      const updated = await withUser(
+        sql,
+        USER_A,
+        (tx) =>
+          tx`UPDATE ${tx(t.table)} SET title = 'pwned' WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
       )
       expect(updated.count).toBe(0)
-      const deleted = await withUser(sql, USER_A, (tx) =>
-        tx`DELETE FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
+      const deleted = await withUser(
+        sql,
+        USER_A,
+        (tx) => tx`DELETE FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
       )
       expect(deleted.count).toBe(0)
 
@@ -80,8 +89,10 @@ if (!RLS_SUITE_READY) {
       ).rejects.toMatchObject({ code: '42501' })
 
       // B still sees B's data untouched (title not 'pwned', row count intact).
-      const bOwn = await withUser(sql, USER_B, (tx) =>
-        tx`SELECT title FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
+      const bOwn = await withUser(
+        sql,
+        USER_B,
+        (tx) => tx`SELECT title FROM ${tx(t.table)} WHERE ${tx(t.ownerColumn)} = ${USER_B}`,
       )
       expect(bOwn.length).toBeGreaterThanOrEqual(1)
       for (const row of bOwn) expect(row['title']).not.toBe('pwned')
@@ -132,9 +143,7 @@ if (!RLS_SUITE_READY) {
     it('pgvector is installed at a patched version (>= 0.8.2)', async () => {
       const ext = await sql`SELECT extversion FROM pg_extension WHERE extname = 'vector'`
       expect(ext, 'vector extension installed').toHaveLength(1)
-      const [maj = 0, min = 0, pat = 0] = String(ext[0]?.['extversion'])
-        .split('.')
-        .map(Number)
+      const [maj = 0, min = 0, pat = 0] = String(ext[0]?.['extversion']).split('.').map(Number)
       // SOURCE: patched pgvector floor per security advisory [corpus: pgvector/hnsw]
       expect(maj * 10000 + min * 100 + pat).toBeGreaterThanOrEqual(802)
     })

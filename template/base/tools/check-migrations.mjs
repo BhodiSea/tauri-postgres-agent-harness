@@ -10,7 +10,7 @@
 //      pointing at an existing ADR
 // SOURCE: docs/harness/README.md (migration discipline) [corpus: drizzle/migrations-append-only]
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { failures, ok, skipOrFail } from './lib/gate.mjs'
 
@@ -44,13 +44,18 @@ for (const [status, file] of changedAgainst(base)) {
 }
 
 // 2 + 3. content rules over every migration
-for (const f of readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort()) {
+for (const f of readdirSync(DIR)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()) {
   const text = readFileSync(join(DIR, f), 'utf8')
   const code = text
     .split('\n')
     .filter((l) => !l.trim().startsWith('--'))
     .join('\n')
-  if (/\b(INSERT\s+INTO|UPDATE\s+[a-z"]|DELETE\s+FROM)\b/i.test(code) && !/--\s*harness-allow-dml:/.test(text)) {
+  if (
+    /\b(INSERT\s+INTO|UPDATE\s+[a-z"]|DELETE\s+FROM)\b/i.test(code) &&
+    !/--\s*harness-allow-dml:/.test(text)
+  ) {
     errs.push(
       `${DIR}/${f}: contains DML — schema migrations carry structure, not data. If this is deliberate reference data, add \`-- harness-allow-dml: <reason>\`.`,
     )

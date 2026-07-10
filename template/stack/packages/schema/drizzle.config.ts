@@ -4,12 +4,10 @@ import { defineConfig } from 'drizzle-kit'
 // role (schema owner); the runtime app_api role has zero DDL rights and stays
 // permanently subject to FORCE RLS. Never point this at DATABASE_URL.
 // [corpus: harness/doctrine]
-const url = process.env['MIGRATOR_DATABASE_URL']
-if (url === undefined || url === '') {
-  throw new Error(
-    'MIGRATOR_DATABASE_URL is not set — drizzle-kit must connect as the migrator role (see env.example).',
-  )
-}
+// Fall back to an empty string when unset (rather than throwing at import) so
+// static tooling — knip, editors — can load this config without the env; a real
+// drizzle-kit command then fails loudly at connect time. env.example documents it.
+const url = process.env['MIGRATOR_DATABASE_URL'] ?? ''
 
 export default defineConfig({
   dbCredentials: { url },

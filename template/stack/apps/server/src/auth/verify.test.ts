@@ -11,7 +11,7 @@ import {
   type TokenVerifier,
 } from './verify.js'
 
-const DEV_USER_ID = '11111111-1111-1111-1111-111111111111'
+const DEV_USER_ID = '11111111-1111-4111-8111-111111111111'
 
 interface MintOptions {
   iss?: string

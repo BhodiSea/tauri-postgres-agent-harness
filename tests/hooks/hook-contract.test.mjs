@@ -7,8 +7,9 @@ import { spawnSync } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const TEMPLATE = new URL('../../template/base/', import.meta.url).pathname
+const TEMPLATE = fileURLToPath(new URL('../../template/base/', import.meta.url))
 let proj
 
 before(() => {

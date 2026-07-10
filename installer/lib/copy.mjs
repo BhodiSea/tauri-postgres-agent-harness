@@ -2,11 +2,15 @@
 // .tmpl suffixes, applies top-level dotless renames, and renders placeholders.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { RENAMES } from './layout.mjs'
 import { render } from './placeholders.mjs'
 
 export function templateRoot() {
-  return new URL('../../template/', import.meta.url).pathname
+  // fileURLToPath, NOT URL.pathname: on Windows the latter yields /D:/… which
+  // readdirSync cannot open — the walker's error guard then produced a silent
+  // empty plan and `init` "succeeded" with 0 files (caught by bootstrap-windows CI).
+  return fileURLToPath(new URL('../../template/', import.meta.url))
 }
 
 // Binary assets (icons, fonts, …) must round-trip byte-for-byte: decoding them

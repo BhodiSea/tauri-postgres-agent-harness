@@ -6,8 +6,10 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname
+// fileURLToPath, not URL.pathname (which yields /D:/… on Windows)
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const failures = []
 const tmp = mkdtempSync(join(tmpdir(), 'nsah-syntax-'))
 let jsCount = 0

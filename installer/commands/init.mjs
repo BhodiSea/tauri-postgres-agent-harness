@@ -29,6 +29,11 @@ export async function init(opts) {
   }
 
   const plan = [...planTree('base', answers), ...planTree('stack', answers)]
+  // Fail loud, never fail open: an unreadable template tree must be an error,
+  // not a 0-file "successful" install (Windows URL.pathname regression class).
+  if (plan.length === 0) {
+    throw new Error('template tree resolved to zero files — installer packaging is broken')
+  }
   for (const m of modules) {
     const entries = planTree(`modules/${m}`, answers)
     for (const e of entries) e.module = m

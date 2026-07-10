@@ -17,9 +17,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const CLI = new URL('../../installer/cli.mjs', import.meta.url).pathname
-const TEMPLATE = new URL('../../template/', import.meta.url).pathname
+const CLI = fileURLToPath(new URL('../../installer/cli.mjs', import.meta.url))
+const TEMPLATE = fileURLToPath(new URL('../../template/', import.meta.url))
 
 const sha256 = (text) => createHash('sha256').update(text).digest('hex')
 
@@ -338,7 +339,7 @@ test('CI floor is in lockstep with VALIDATE_STEPS (a weakened config cannot weak
 
 test('npm pack ships every template path (dotless storage survives packing)', () => {
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
-    cwd: new URL('../..', import.meta.url).pathname,
+    cwd: fileURLToPath(new URL('../..', import.meta.url)),
     encoding: 'utf8',
   })
   const files = JSON.parse(out)[0].files.map((f) => f.path)

@@ -8,6 +8,10 @@
     "composite": true,
     "rootDir": ".",
     "outDir": "dist",
+    // Declaration-only: every consumer (tsx, vite, vitest) loads the TS source
+    // directly, so emitting runnable JS would only create a stale dist/ copy of
+    // the colocated tests for vitest to trip over.
+    "emitDeclarationOnly": true,
     // drizzle.config.ts reads process.env and the schema self-check test reads
     // the migration file from disk — both need the node ambient types.
     "types": ["node"]

@@ -1,0 +1,120 @@
+import { readFileSync } from 'node:fs'
+import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose'
+import { z } from 'zod'
+
+export interface AuthenticatedUser {
+  userId: string
+}
+
+export type TokenVerifier = (token: string) => Promise<AuthenticatedUser>
+
+// Stub-mode token identity. scripts/mint-dev-token.mjs signs with the SAME
+// values — keep them in sync or dev tokens stop verifying.
+export const STUB_ISSUER = 'urn:app:dev-auth'
+export const STUB_AUDIENCE = 'urn:app:api'
+
+type Env = Readonly<Record<string, string | undefined>>
+
+const UuidDto = z.uuid()
+
+const JwksFileDto = z.object({
+  keys: z.array(z.looseObject({ kty: z.string() })),
+})
+
+/**
+ * Boot-time guard, called from src/index.ts before the server binds a port.
+ * The stub verifier trusts locally minted keys, so reaching it in production
+ * would be an authentication bypass.
+ */
+export function assertAuthBootSafety(env: Env): void {
+  const mode = env['AUTH_MODE'] ?? 'stub'
+  // SOURCE: harness doctrine — a stub verifier reachable in production is an auth
+  // bypass; fail the boot loudly instead of logging a warning [corpus: harness/doctrine]
+  if (env['NODE_ENV'] === 'production' && mode !== 'entra') {
+    throw new Error(
+      'FATAL: AUTH_MODE=stub is forbidden when NODE_ENV=production — set AUTH_MODE=entra and configure ENTRA_TENANT_ID + API_AUDIENCE',
+    )
+  }
+}
+
+function requireEnv(env: Env, name: string): string {
+  const value = env[name]
+  if (value === undefined || value === '') {
+    throw new Error(`AUTH_MODE=entra requires ${name} to be set`)
+  }
+  return value
+}
+
+function buildVerifier(
+  getKey: ReturnType<typeof createLocalJWKSet>,
+  issuer: string,
+  audience: string,
+): TokenVerifier {
+  return async (token) => {
+    // SOURCE: MS Entra ID access-token validation — pin issuer + audience and allow only
+    // the expected asymmetric algorithms (never HS*/none); clockTolerance 300s absorbs
+    // client clock drift without widening the replay window [corpus: entra/jwt-verify]
+    const { payload } = await jwtVerify(token, getKey, {
+      issuer,
+      audience,
+      algorithms: ['ES256', 'RS256'],
+      clockTolerance: 300,
+    })
+    // SOURCE: Entra puts the immutable directory object id in `oid` (`sub` is
+    // app-pairwise); stub tokens carry the user uuid in `sub`. Either way the RLS
+    // identity must be a uuid — reject anything else [corpus: entra/jwt-verify]
+    const userId = UuidDto.parse(payload['oid'] ?? payload.sub)
+    return { userId }
+  }
+}
+
+/**
+ * Builds the token verifier for the configured AUTH_MODE. Both modes run the
+ * byte-identical jwtVerify path above — only the key source and the pinned
+ * issuer/audience differ.
+ *
+ * - `stub` (default): local JWKS minted by `scripts/mint-dev-token.mjs`
+ *   (`.dev-auth/jwks.json`, gitignored). Read lazily so importing the app —
+ *   e.g. for OpenAPI emission — needs no key material.
+ * - `entra`: remote JWKS from the tenant discovery endpoint.
+ */
+export function createTokenVerifier(env: Env): TokenVerifier {
+  const mode = env['AUTH_MODE'] ?? 'stub'
+  if (mode !== 'stub' && mode !== 'entra') {
+    throw new Error(`unknown AUTH_MODE: ${mode} (expected "stub" or "entra")`)
+  }
+
+  if (mode === 'entra') {
+    const tenantId = requireEnv(env, 'ENTRA_TENANT_ID')
+    const audience = env['API_AUDIENCE'] ?? env['ENTRA_CLIENT_ID']
+    if (audience === undefined || audience === '') {
+      throw new Error('AUTH_MODE=entra requires API_AUDIENCE (or ENTRA_CLIENT_ID) to be set')
+    }
+    // SOURCE: Entra v2.0 tokens — issuer is https://login.microsoftonline.com/{tenant}/v2.0
+    // and signing keys come from the tenant JWKS discovery endpoint; createRemoteJWKSet
+    // caches and re-fetches on unknown kid (key rollover) [corpus: entra/jwt-verify]
+    const getKey = createRemoteJWKSet(
+      new URL(`https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`),
+    )
+    return buildVerifier(getKey, `https://login.microsoftonline.com/${tenantId}/v2.0`, audience)
+  }
+
+  const jwksPath = env['DEV_JWKS_PATH'] ?? '.dev-auth/jwks.json'
+  let localJwks: ReturnType<typeof createLocalJWKSet> | undefined
+  const getKey: ReturnType<typeof createLocalJWKSet> = (protectedHeader, token) => {
+    if (localJwks === undefined) {
+      let raw: string
+      try {
+        raw = readFileSync(jwksPath, 'utf8')
+      } catch {
+        throw new Error(
+          `stub JWKS not found at ${jwksPath} — run \`pnpm --filter server mint-dev-token\` first`,
+        )
+      }
+      const parsed: unknown = JSON.parse(raw)
+      localJwks = createLocalJWKSet(JwksFileDto.parse(parsed))
+    }
+    return localJwks(protectedHeader, token)
+  }
+  return buildVerifier(getKey, STUB_ISSUER, env['API_AUDIENCE'] ?? STUB_AUDIENCE)
+}

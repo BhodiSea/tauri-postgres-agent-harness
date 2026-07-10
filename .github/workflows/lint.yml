@@ -30,10 +30,9 @@ jobs:
         run: |
           mkdir -p .fixtures/tpl/.github/workflows
           find template -path '*/github/workflows/*.yml' -exec cp {} .fixtures/tpl/.github/workflows/ \;
-          # actionlint resolves its config relative to each file's project root
-          # (the dir containing .github) — stage the shipped config alongside so
-          # custom self-hosted labels (eval-live's gpu runner) are declared here too
-          cp template/base/github/actionlint.yaml .fixtures/tpl/.github/actionlint.yaml
+          # NOTE: custom runner labels for these fixtures (eval-live's gpu box) are
+          # declared in the REPO ROOT .github/actionlint.yaml — actionlint resolves
+          # config from the project root (first .git walking up), not the fixture dir.
           ls .fixtures/tpl/.github/workflows
       - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
         with:

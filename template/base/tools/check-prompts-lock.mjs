@@ -7,8 +7,12 @@
 // SOURCE: docs/harness/README.md (prompt versioning) [corpus: llamacpp/json-schema]
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { fail, failures, ok } from './lib/gate.mjs'
+
+// Lock keys are POSIX paths; join() yields backslashes on Windows — normalize
+// discovered paths or every prompt reads as "not in the lock" there.
+const posix = (p) => p.split(sep).join('/')
 
 const GATE = 'prompts'
 const LOCK = 'tools/prompts.lock.json'
@@ -29,7 +33,7 @@ function walk(dir) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
     if (statSync(p).isDirectory()) out.push(...walk(p))
-    else out.push(p)
+    else out.push(posix(p))
   }
   return out
 }

@@ -11,11 +11,15 @@
 // SOURCE: docs/harness/README.md (contracts gate) [corpus: harness/doctrine]
 import { execSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'contracts'
 const errs = []
+
+// tsconfig reference paths are POSIX; join()/relative() yield backslashes on
+// Windows — normalize every compared path or the sync check false-fails there.
+const posix = (p) => p.split(sep).join('/')
 
 // tsconfig files are JSONC (TypeScript allows // and /* */ comments and trailing
 // commas). Strip them before JSON.parse. String-aware so a `//` inside a string
@@ -82,9 +86,11 @@ for (const dir of pkgDirs) {
     continue
   }
   const tsconfig = parseJsonc(readFileSync(tsconfigPath, 'utf8'))
-  const refs = new Set((tsconfig.references ?? []).map((r) => relative(dir, join(dir, r.path))))
+  const refs = new Set(
+    (tsconfig.references ?? []).map((r) => posix(relative(dir, join(dir, r.path)))),
+  )
   for (const dep of wanted) {
-    const expected = relative(dir, dep)
+    const expected = posix(relative(dir, dep))
     if (!refs.has(expected)) {
       errs.push(
         `${dir}/tsconfig.json: missing project reference to ${dep} (workspace dep ${relative('.', dep)}) — tsc -b cannot order the build without it`,
@@ -96,7 +102,7 @@ if (existsSync('tsconfig.json')) {
   const solution = parseJsonc(readFileSync('tsconfig.json', 'utf8'))
   const refs = new Set((solution.references ?? []).map((r) => r.path.replace(/^\.\//, '')))
   for (const dir of pkgDirs) {
-    if (!refs.has(dir)) errs.push(`tsconfig.json (solution): missing reference to ${dir}`)
+    if (!refs.has(posix(dir))) errs.push(`tsconfig.json (solution): missing reference to ${dir}`)
   }
 }
 

@@ -1,0 +1,39 @@
+{
+  "name": "tauri-postgres-agent-harness",
+  "version": "0.1.0",
+  "description": "Deterministic agent harness for Tauri 2 + React 19 + Hono + Drizzle/Postgres 16 pnpm monorepos shipped as signed Windows .exe: Claude Code hooks, security-invariant lint gates, RLS isolation tests against real Postgres, Tauri capability/CSP policy gates, provenance pipeline, and supply-chain-hardened CI across npm and crates — installable into any new or existing project.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BhodiSea/tauri-postgres-agent-harness.git"
+  },
+  "bin": {
+    "tauri-postgres-agent-harness": "installer/cli.mjs"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "installer",
+    "template",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "bootstrap": "node installer/cli.mjs init --consume",
+    "test": "node --test \"tests/**/*.test.mjs\""
+  },
+  "keywords": [
+    "claude-code",
+    "agent-harness",
+    "tauri",
+    "postgres",
+    "rls",
+    "hono",
+    "drizzle",
+    "windows",
+    "quality-gates",
+    "provenance",
+    "supply-chain"
+  ]
+}

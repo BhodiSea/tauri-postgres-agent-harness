@@ -393,12 +393,17 @@ jobs:
         run: |
           $prefix = Join-Path $env:RUNNER_TEMP 'smoke-install'
           Start-Process -FilePath $env:SMOKE_EXE -ArgumentList '/S', "/D=$prefix" -Wait
-          $app = Join-Path $prefix 'SmokeApp.exe'
-          if (-not (Test-Path $app)) {
+          # Tauri 2 names the installed binary after the Cargo bin (desktop.exe),
+          # not productName — assert on "an app exe that isn't the uninstaller".
+          $app = Get-ChildItem -Path $prefix -Filter '*.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+          if (-not $app) {
             Get-ChildItem -Recurse $prefix -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
-            Write-Error "silent install left no SmokeApp.exe under $prefix"
+            Write-Error "silent install left no app .exe under $prefix"
             exit 1
           }
+          Write-Host "installed app binary: $($app.Name)"
+          $app = $app.FullName
           $un = Get-ChildItem -Path $prefix -Filter 'uninstall*.exe' | Select-Object -First 1
           if (-not $un) { Write-Error 'no uninstaller in the install prefix'; exit 1 }
           Start-Process -FilePath $un.FullName -ArgumentList '/S' -Wait

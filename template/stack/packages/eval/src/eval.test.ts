@@ -25,7 +25,9 @@ const holdoutSchema = z.strictObject({
   ),
 })
 
-const holdoutRaw: unknown = JSON.parse(readFileSync(new URL('../fixtures/holdout.json', import.meta.url), 'utf8'))
+const holdoutRaw: unknown = JSON.parse(
+  readFileSync(new URL('../fixtures/holdout.json', import.meta.url), 'utf8'),
+)
 const holdout = holdoutSchema.parse(holdoutRaw)
 
 describe('holdout fixture integrity', () => {
@@ -45,14 +47,24 @@ describe('holdout fixture integrity', () => {
 
 describe('eval pipeline (deterministic fake — no live model calls)', () => {
   it('scores the fake provider against the holdout with exact per-axis P/R/F1', async () => {
-    const provider = new FakeInferenceProvider(new Map(holdout.items.map((item) => [item.input, item.canned])))
+    const recordings = new Map(
+      holdout.items.map((item): [string, unknown] => [item.input, item.canned]),
+    )
+    const provider = new FakeInferenceProvider(recordings)
     const prompt = loadExtractionPrompt()
     expect(prompt).toContain('extract.v1')
 
     const scored: ScoredItem[] = []
     for (const item of holdout.items) {
-      const result: ExtractionResult = await provider.chatJson(extractionResultSchema, prompt, item.input)
-      scored.push({ gold: item.gold, predicted: result.tags.map(({ axis, code }) => ({ axis, code })) })
+      const result: ExtractionResult = await provider.chatJson(
+        extractionResultSchema,
+        prompt,
+        item.input,
+      )
+      scored.push({
+        gold: item.gold,
+        predicted: result.tags.map(({ axis, code }) => ({ axis, code })),
+      })
     }
 
     expect(scoreItems(scored)).toEqual([
@@ -67,7 +79,15 @@ describe('eval pipeline (deterministic fake — no live model calls)', () => {
         f1: 2 / 3,
       },
       // hold-003 hallucinates an off-vocabulary axis → pure false positive
-      { axis: 'grade', truePositives: 0, falsePositives: 1, falseNegatives: 0, precision: 0, recall: 0, f1: 0 },
+      {
+        axis: 'grade',
+        truePositives: 0,
+        falsePositives: 1,
+        falseNegatives: 0,
+        precision: 0,
+        recall: 0,
+        f1: 0,
+      },
       // hold-001 RECALL hit; hold-002 predicts ANALYZE instead of APPLY
       {
         axis: 'skill',
@@ -92,10 +112,10 @@ describe('eval pipeline (deterministic fake — no live model calls)', () => {
   })
 
   it('rejects inputs that have no canned recording (a fake must never improvise)', async () => {
-    const provider = new FakeInferenceProvider(new Map())
-    await expect(provider.chatJson(extractionResultSchema, 'prompt', 'unrecorded input')).rejects.toThrow(
-      /no canned response/,
-    )
+    const provider = new FakeInferenceProvider(new Map<string, unknown>())
+    await expect(
+      provider.chatJson(extractionResultSchema, 'prompt', 'unrecorded input'),
+    ).rejects.toThrow(/no canned response/)
   })
 
   it('produces deterministic fixed-dimension fake embeddings', async () => {

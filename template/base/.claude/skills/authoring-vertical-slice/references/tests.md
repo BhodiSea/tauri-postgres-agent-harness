@@ -1,0 +1,66 @@
+# Tests reference
+
+Two vitest projects are defined in the root `vitest.config.ts` — `unit-node`
+(packages/**, apps/server; node) and `unit-dom` (apps/desktop; jsdom). Tests are
+colocated `*.test.ts(x)` or under `tests/unit/`. NEVER create a `vitest.workspace`
+file or call `defineWorkspace` — the write-guard denies it (single gate surface).
+
+## RLS isolation (the keystone)
+
+For every new user-scoped table, add one entry to `ISOLATION_TARGETS` in
+`tests/rls/db-context.ts`:
+
+```ts
+{
+  table: '<table>',
+  ownerColumn: 'owner_id',
+  seedRow: (ownerId) => ({ owner_id: ownerId, /* NOT NULL columns */ }),
+}
+```
+
+The existing suite (`tests/rls/cross-tenant-isolation.test.ts`) then asserts the full
+matrix per target: seeded POSITIVE CONTROL (user A sees its own row — a deny-all
+database must not pass), cross-user SELECT → 0 rows, UPDATE/DELETE → count 0, INSERT
+smuggling the other user's id → SQLSTATE 42501 (`WITH CHECK`), the pooled-connection
+GUC-leak probe (pool max=1 on purpose), and the pg_catalog gate (ENABLE + FORCE +
+per-op policies, no BYPASSRLS). Run: `pnpm test:rls` (needs `pnpm db:up`; it
+fresh-applies all migrations from zero first). Skips are loud locally and FAIL CLOSED
+in CI. Test bodies are editable; `tests/rls/run-rls.mjs` and
+`tests/migrations/migration-apply.mjs` are write-guard-protected.
+
+## Server units (unit-node)
+
+- Inject a fake DAL through `createApp({ notesDal })`-style options — routes depend
+  on the interface in `src/types.ts`, so no database is needed.
+- Cover: DTO mapping including the `undefined` branches `noUncheckedIndexedAccess`
+  forces; bad/missing token → bare 401; middleware coverage (walk `app.routes` and
+  assert every `/api/*` route sits behind skew + auth — see `middleware/skew.test.ts`);
+  SSE abort propagation in-process (client abort → producer stops — see
+  `app.sse.test.ts`); auth clock-skew boundaries (±4 min passes, ±6 min fails,
+  `clockTolerance: 300`).
+
+## Parsers (fast-check)
+
+Deterministic parsers get property tests plus one pinned fixture — see
+`packages/importer/src/parse.test.ts`: round-trip (`format(parse(x)) === x`-shaped)
+and quote/escape invariants over generated inputs. No live model calls anywhere;
+LLM-shaped code tests against `FakeInferenceProvider` from `@app/eval`.
+
+## Desktop (unit-dom)
+
+Testing Library for feature components (accessible-name queries, keyboard events).
+New shortcuts only need their `src/keyboard/registry.ts` entry — `registry.test.ts`
+structurally enforces WCAG 2.1.4 over the whole registry — but new key-handling
+LOGIC gets its own test.
+
+## Rules that keep the gate honest
+
+- Never edit a test and its implementation in the same turn to turn red green; if a
+  test is wrong, report it and stop.
+- Never weaken assertions, remove positive controls, or `.skip` a failing test.
+- Mutation-survivable assertions: specific values and fail-closed behaviour (0 rows,
+  exact SQLSTATE, exact DTO shape), not "it ran".
+- Annotate non-obvious fixtures (token minting, seeded users) with `// SOURCE:`.
+
+Commands: `pnpm test` · `pnpm test:rls` · `pnpm validate` (the Stop hook runs all
+three directly — done means green).

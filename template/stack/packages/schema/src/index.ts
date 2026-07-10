@@ -1,35 +1,28 @@
-import { sql } from 'drizzle-orm';
-import type { AnyPgColumn } from 'drizzle-orm/pg-core';
-import {
-  pgPolicy,
-  pgRole,
-  pgTable,
-  real,
-  text,
-  timestamp,
-  uuid,
-  vector,
-} from 'drizzle-orm/pg-core';
-import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
-import { z } from 'zod';
+import { sql } from 'drizzle-orm'
+import type { AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgPolicy, pgRole, pgTable, real, text, timestamp, uuid, vector } from 'drizzle-orm/pg-core'
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod'
+import { z } from 'zod'
 
 /**
  * Single source of truth for the pgvector embedding dimension. The
  * `notes.embedding` column, the DTOs derived below, and the hand-authored
  * migration in ./drizzle are all asserted against this value (schema.test.ts).
  */
-export const EMBEDDING_DIM = 1024;
+export const EMBEDDING_DIM = 1024
 
 // Runtime login role the API server connects as. Roles are created by the
 // docker-compose init SQL, never by migrations — hence `.existing()`.
-const appApi = pgRole('app_api').existing();
+const appApi = pgRole('app_api').existing()
 
 // SOURCE: PostgreSQL row-security guidance — wrap current_setting() in a scalar
 // sub-select so the planner evaluates it once per statement (initPlan) instead of
-// per row; missing_ok=true makes an unset app.user_id yield NULL, which can never
-// equal an owner_id, so "no identity" fails closed. [corpus: postgres/rls-initplan]
+// per row. nullif(..., '') maps both no-identity shapes (GUC never set -> NULL;
+// pooled session after a SET LOCAL tx -> '') to NULL, which never equals an
+// owner_id — "no identity" fails closed instead of raising a 22P02 uuid-cast
+// error. [corpus: postgres/rls-initplan]
 const ownerIsCurrentUser = (ownerId: AnyPgColumn) =>
-  sql`${ownerId} = (select current_setting('app.user_id', true)::uuid)`;
+  sql`${ownerId} = (select nullif(current_setting('app.user_id', true), '')::uuid)`
 
 /**
  * Demo domain table proving the whole RLS chain (see drizzle/0000_init.sql for
@@ -39,16 +32,16 @@ const ownerIsCurrentUser = (ownerId: AnyPgColumn) =>
 export const notes = pgTable(
   'notes',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    ownerId: uuid('owner_id').notNull(),
-    title: text('title').notNull(),
     body: text('body').notNull().default(''),
-    embedding: vector('embedding', { dimensions: EMBEDDING_DIM }),
-    sourceModel: text('source_model'),
-    sourceConfidence: real('source_confidence'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
+    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true })
       .notNull()
       .defaultNow(),
+    embedding: vector('embedding', { dimensions: EMBEDDING_DIM }),
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerId: uuid('owner_id').notNull(),
+    sourceConfidence: real('source_confidence'),
+    sourceModel: text('source_model'),
+    title: text('title').notNull(),
   },
   (table) => [
     // Four per-operation policies (never FOR ALL): each op stays independently
@@ -80,11 +73,11 @@ export const notes = pgTable(
       using: ownerIsCurrentUser(table.ownerId),
     }),
   ],
-).enableRLS();
+).enableRLS()
 
 /** Row shape the DAL returns (drizzle select + Zod parse at the DAL exit). */
-export const NoteDto = createSelectSchema(notes);
-export type Note = z.infer<typeof NoteDto>;
+export const NoteDto = createSelectSchema(notes)
+export type Note = z.infer<typeof NoteDto>
 
 /**
  * Client-supplied fields only: `owner_id` is injected by the DAL from the
@@ -92,15 +85,15 @@ export type Note = z.infer<typeof NoteDto>;
  */
 export const NewNoteInput = createInsertSchema(notes, {
   title: (schema) => schema.min(1),
-}).pick({ title: true, body: true });
-export type NewNote = z.infer<typeof NewNoteInput>;
+}).pick({ body: true, title: true })
+export type NewNote = z.infer<typeof NewNoteInput>
 
 /** Contract for GET /healthz — `{ ok: true, version }`, no auth. */
 export const HealthResponse = z.object({
   ok: z.literal(true),
   version: z.string(),
-});
-export type Health = z.infer<typeof HealthResponse>;
+})
+export type Health = z.infer<typeof HealthResponse>
 
 /**
  * Error envelope for JSON error responses. The version-skew middleware answers
@@ -108,5 +101,5 @@ export type Health = z.infer<typeof HealthResponse>;
  */
 export const ApiError = z.object({
   error: z.string(),
-});
-export type ApiErrorBody = z.infer<typeof ApiError>;
+})
+export type ApiErrorBody = z.infer<typeof ApiError>

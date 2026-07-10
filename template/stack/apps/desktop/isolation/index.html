@@ -1,0 +1,16 @@
+<!doctype html>
+<!--
+  Tauri isolation application. Loaded into a sandboxed iframe with per-launch
+  keys; every frontend -> core IPC message passes through the hook defined in
+  isolation.js before it reaches Rust. Deliberately dependency-free: nothing
+  here may come from node_modules.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Isolation</title>
+  </head>
+  <body>
+    <script src="isolation.js"></script>
+  </body>
+</html>

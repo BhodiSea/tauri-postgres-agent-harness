@@ -49,14 +49,21 @@ export function parseTable(text: string, options: TableOptions = {}): Table {
 export function serializeTable(table: Table, options: TableOptions = {}): string {
   const delimiter = options.delimiter ?? ','
   const records = [table.header, ...table.rows]
-  return records.map((cells) => `${cells.map((cell) => encodeCell(cell, delimiter)).join(delimiter)}\r\n`).join('')
+  return records
+    .map((cells) => `${cells.map((cell) => encodeCell(cell, delimiter)).join(delimiter)}\r\n`)
+    .join('')
 }
 
-// SOURCE: RFC 4180 §2 rules 5-7 — fields containing separators, quotes, or
-// line breaks are quoted; embedded quotes are escaped by doubling
-// [corpus: importer/rfc4180]
+// SOURCE: https://www.rfc-editor.org/rfc/rfc4180#section-2 (rules 5-7: fields
+// containing separators, quotes, or line breaks are quoted; embedded quotes
+// are escaped by doubling)
 function encodeCell(cell: string, delimiter: Delimiter): string {
-  if (cell.includes('"') || cell.includes(delimiter) || cell.includes('\n') || cell.includes('\r')) {
+  if (
+    cell.includes('"') ||
+    cell.includes(delimiter) ||
+    cell.includes('\n') ||
+    cell.includes('\r')
+  ) {
     return `"${cell.replaceAll('"', '""')}"`
   }
   return cell

@@ -1,0 +1,61 @@
+# Desktop host crate. Deliberately workspace-less: pnpm owns the monorepo;
+# cargo sees a single standalone package (the empty [workspace] table below
+# stops cargo from walking up in consuming repos that nest this deeper).
+[package]
+name = "desktop"
+version = "0.1.0"
+description = "{{PROJECT_NAME}} desktop host"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+# SOURCE: CVE-2026-42184 / GHSA-7gmj-67g7-phm9 — is_local_url() origin
+# confusion fixed in tauri 2.11.1; never float below it [corpus: tauri/csp]
+tauri = { version = "2.11.5", features = [] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+log = "0.4.33"
+tauri-plugin-log = "2.8.0"
+# tauri-specta rc line: EXACT pins — rc bumps change the emitted bindings.ts
+# byte layout and flap the drift gate. tauri-specta 2.0.0-rc.25 requires
+# specta =2.0.0-rc.25 (verified on crates.io).
+# SOURCE: tauri-specta v2 committed-bindings doctrine [corpus: tauri/specta-bindings]
+specta = "=2.0.0-rc.25"
+specta-typescript = "=0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+
+# A panic in a #[tauri::command] is a webview-reachable denial of service;
+# forbid (not deny) cannot be re-allowed by inner attributes.
+# SOURCE: Tauri 2 hardening checklist — manifest-enforced Rust hygiene
+# [corpus: tauri/rust-lints]
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"
+
+# SOURCE: Tauri app-size guide — strip + fat LTO + single codegen unit for the
+# shipped installer [corpus: tauri/release-profile]
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

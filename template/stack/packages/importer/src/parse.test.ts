@@ -9,12 +9,18 @@ import { parseTable, serializeTable } from './index.js'
 const trickyChar = fc.constantFrom('"', ',', '\t', '\r', '\n', 'x', 'é')
 const cellArb = fc.oneof(fc.string(), fc.string({ unit: trickyChar }))
 const delimiterArb = fc.constantFrom(',', '\t')
-const anyTextArb = fc.oneof(fc.string(), fc.string({ unit: trickyChar }), fc.string({ unit: 'binary' }))
+const anyTextArb = fc.oneof(
+  fc.string(),
+  fc.string({ unit: trickyChar }),
+  fc.string({ unit: 'binary' }),
+)
 
 // Well-formed tables: non-empty header, every row exactly header-width.
 const tableArb = fc.array(cellArb, { minLength: 1, maxLength: 4 }).chain((header) =>
   fc
-    .array(fc.array(cellArb, { minLength: header.length, maxLength: header.length }), { maxLength: 5 })
+    .array(fc.array(cellArb, { minLength: header.length, maxLength: header.length }), {
+      maxLength: 5,
+    })
     .map((rows): Table => ({ header, rows })),
 )
 
@@ -90,7 +96,9 @@ describe('parseTable examples', () => {
 
 describe('serializeTable examples', () => {
   it('quotes per RFC 4180 and terminates every record', () => {
-    expect(serializeTable({ header: ['a', 'b'], rows: [['1,5', 'plain']] })).toBe('a,b\r\n"1,5",plain\r\n')
+    expect(serializeTable({ header: ['a', 'b'], rows: [['1,5', 'plain']] })).toBe(
+      'a,b\r\n"1,5",plain\r\n',
+    )
   })
 
   it('escapes embedded quotes by doubling', () => {

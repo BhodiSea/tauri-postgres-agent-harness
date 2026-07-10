@@ -2,11 +2,7 @@ import { readFileSync } from 'node:fs'
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 
-export interface AuthenticatedUser {
-  userId: string
-}
-
-export type TokenVerifier = (token: string) => Promise<AuthenticatedUser>
+export type TokenVerifier = (token: string) => Promise<{ userId: string }>
 
 // Stub-mode token identity. scripts/mint-dev-token.mjs signs with the SAME
 // values — keep them in sync or dev tokens stop verifying.
@@ -15,7 +11,10 @@ export const STUB_AUDIENCE = 'urn:app:api'
 
 type Env = Readonly<Record<string, string | undefined>>
 
-const UuidDto = z.uuid()
+// z.guid(), not z.uuid(): postgres accepts any 8-4-4-4-12 hex uuid, and the
+// seeded dev user (11111111-…) has no RFC-4122 variant bits — strict z.uuid()
+// would reject it.
+const UuidDto = z.guid()
 
 const JwksFileDto = z.object({
   keys: z.array(z.looseObject({ kty: z.string() })),

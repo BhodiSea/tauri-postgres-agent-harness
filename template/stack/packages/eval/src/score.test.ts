@@ -25,7 +25,9 @@ describe('scoreItems', () => {
 
   it('scores a perfect prediction as 1/1/1', () => {
     const gold = [tag('subject', 'BIO')]
-    expect(scoreItems([{ gold, predicted: gold }])).toEqual([axisScore('subject', [1, 0, 0], [1, 1, 1])])
+    expect(scoreItems([{ gold, predicted: gold }])).toEqual([
+      axisScore('subject', [1, 0, 0], [1, 1, 1]),
+    ])
   })
 
   it('zero-division edge: gold with no predictions scores 0, not 1 (precision 0/0)', () => {

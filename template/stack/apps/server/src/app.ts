@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { NoteCreateDto, NoteDto } from '@app/schema'
+import { ApiError, HealthResponse, type NewNote, NewNoteInput, NoteDto } from '@app/schema'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
 import { streamSSE } from 'hono/streaming'
@@ -27,17 +27,17 @@ function readPackageVersion(): string {
   throw new Error('unable to locate the server package.json to read its version')
 }
 
-const HealthDto = z.object({ ok: z.literal(true), version: z.string() })
-const ErrorDto = z.object({ error: z.string() })
-const NoteParamsDto = z.object({ id: z.uuid() })
+// z.guid() matches the postgres uuid type (any 8-4-4-4-12 hex, no RFC variant check).
+const NoteParamsDto = z.object({ id: z.guid() })
 
 const healthRoute = createRoute({
   method: 'get',
   path: '/healthz',
   responses: {
     200: {
-      description: 'Liveness probe — no auth, no version gate; the desktop status indicator polls it',
-      content: { 'application/json': { schema: HealthDto } },
+      description:
+        'Liveness probe — no auth, no version gate; the desktop status indicator polls it',
+      content: { 'application/json': { schema: HealthResponse } },
     },
   },
 })
@@ -61,7 +61,7 @@ const createNoteRoute = createRoute({
   request: {
     body: {
       required: true,
-      content: { 'application/json': { schema: NoteCreateDto } },
+      content: { 'application/json': { schema: NewNoteInput } },
     },
   },
   responses: {
@@ -84,7 +84,7 @@ const getNoteRoute = createRoute({
     },
     404: {
       description: 'No such note visible to this user',
-      content: { 'application/json': { schema: ErrorDto } },
+      content: { 'application/json': { schema: ApiError } },
     },
   },
 })
@@ -98,7 +98,7 @@ const deleteNoteRoute = createRoute({
     204: { description: 'Note deleted' },
     404: {
       description: 'No such note visible to this user',
-      content: { 'application/json': { schema: ErrorDto } },
+      content: { 'application/json': { schema: ApiError } },
     },
   },
 })
@@ -165,7 +165,8 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   })
 
   app.openapi(createNoteRoute, async (c) => {
-    const note = await dal.create(c.get('userId'), c.req.valid('json'))
+    const input: NewNote = c.req.valid('json')
+    const note = await dal.create(c.get('userId'), input)
     return c.json(note, 201)
   })
 
@@ -185,14 +186,12 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   // (event streams do not fit request/response schemas), hence plain app.get.
   app.get('/api/events/demo', (c) =>
     streamSSE(c, async (stream) => {
-      let aborted = false
       stream.onAbort(() => {
         // SOURCE: SSE doctrine — client aborts MUST stop the producer; an orphaned
         // generator per dropped client is a slow server leak [corpus: harness/doctrine]
-        aborted = true
         onSseAbort?.()
       })
-      for (let tick = 1; tick <= SSE_DEMO_TICKS && !aborted; tick += 1) {
+      for (let tick = 1; tick <= SSE_DEMO_TICKS && !stream.aborted; tick += 1) {
         await stream.writeSSE({ event: 'tick', data: String(tick), id: String(tick) })
         await stream.sleep(sseTickMs)
       }
@@ -204,7 +203,8 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
     info: {
       title: 'server',
       version,
-      description: 'Notes API — the demo vertical slice. Regenerate openapi.json via `pnpm --filter server openapi:emit`.',
+      description:
+        'Notes API — the demo vertical slice. Regenerate openapi.json via `pnpm --filter server openapi:emit`.',
     },
   })
 

@@ -1,0 +1,22 @@
+# deps / builds
+node_modules/
+dist/
+# Rust build output (src-tauri/.gitignore is folded in here by convention)
+target/
+*.tsbuildinfo
+coverage/
+
+# env & local secrets — .env.example is the committed contract
+.env
+.env.*
+!.env.example
+# dev-only JWKS + minted tokens (apps/server/scripts/mint-dev-token.mjs)
+.dev-auth/
+
+# harness runtime state (gate stamps, caches)
+.harness/
+
+# editor/os noise
+.DS_Store
+*.log
+.eslintcache

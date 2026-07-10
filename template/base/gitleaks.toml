@@ -1,0 +1,27 @@
+# gitleaks.toml (installed as .gitleaks.toml) — secret scanning policy.
+# Extends the gitleaks default ruleset and adds the shapes this stack actually
+# handles: Tauri updater signing keys (minisign format) and Entra client secrets.
+title = "harness secret-scanning policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "tauri-updater-signing-key-assignment"
+description = "Tauri updater signing key or key password assigned a literal value"
+# Env-var *references* (e.g. ${TAURI_SIGNING_PRIVATE_KEY} in CI yaml) are fine; a
+# literal assignment of key material is never fine.
+regex = '''(?i)TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\s*[:=]\s*['"]?[A-Za-z0-9+/=._-]{8,}'''
+keywords = ["tauri_signing_private_key"]
+
+[[rules]]
+id = "minisign-secret-key-material"
+description = "minisign secret-key file header (the Tauri updater key format)"
+regex = '''(?i)minisign\s+encrypted\s+secret\s+key'''
+keywords = ["minisign"]
+
+[[rules]]
+id = "entra-client-secret"
+description = "Entra (Azure AD) client-secret value shape"
+regex = '''[A-Za-z0-9_~.]{3}8Q~[A-Za-z0-9_~.\-]{20,40}'''
+keywords = ["8q~"]

@@ -1,18 +1,4 @@
 {
-  "name": "@app/schema",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
-    "./drizzle.config": {
-      "types": "./drizzle.config.ts",
-      "default": "./drizzle.config.ts"
-    }
-  },
   "dependencies": {
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
@@ -22,5 +8,13 @@
     "@types/node": "catalog:",
     "drizzle-kit": "catalog:",
     "vitest": "catalog:"
-  }
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./drizzle.config": "./drizzle.config.ts"
+  },
+  "name": "@app/schema",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0"
 }

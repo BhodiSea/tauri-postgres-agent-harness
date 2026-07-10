@@ -23,20 +23,22 @@ ALTER TABLE "notes" FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
 -- SOURCE: PostgreSQL row-security guidance — the owner check is wrapped in a
 -- scalar sub-select so it evaluates once per statement (initPlan) instead of per
--- row; current_setting(..., true) yields NULL when app.user_id is unset, which
--- never equals an owner_id, so "no identity" fails closed. Four per-operation
--- policies, never FOR ALL. [corpus: postgres/rls-initplan]
+-- row. nullif(current_setting(..., true), '') maps BOTH no-identity shapes to
+-- NULL — unset GUC returns NULL, but a pooled session that ever ran SET LOCAL
+-- returns '' afterwards, which would make a bare ::uuid cast raise 22P02 instead
+-- of cleanly denying. NULL never equals an owner_id, so "no identity" fails
+-- closed. Four per-operation policies, never FOR ALL. [corpus: postgres/rls-initplan]
 CREATE POLICY "notes_select_own" ON "notes" AS PERMISSIVE FOR SELECT TO "app_api"
-	USING ("owner_id" = (select current_setting('app.user_id', true)::uuid));
+	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
 CREATE POLICY "notes_insert_own" ON "notes" AS PERMISSIVE FOR INSERT TO "app_api"
-	WITH CHECK ("owner_id" = (select current_setting('app.user_id', true)::uuid));
+	WITH CHECK ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
 CREATE POLICY "notes_update_own" ON "notes" AS PERMISSIVE FOR UPDATE TO "app_api"
-	USING ("owner_id" = (select current_setting('app.user_id', true)::uuid))
-	WITH CHECK ("owner_id" = (select current_setting('app.user_id', true)::uuid));
+	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid))
+	WITH CHECK ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
 CREATE POLICY "notes_delete_own" ON "notes" AS PERMISSIVE FOR DELETE TO "app_api"
-	USING ("owner_id" = (select current_setting('app.user_id', true)::uuid));
+	USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "notes" TO "app_api";

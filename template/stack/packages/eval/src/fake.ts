@@ -22,7 +22,9 @@ export class FakeInferenceProvider implements InferenceProvider {
     const raw = this.#canned.get(input)
     if (raw === undefined) {
       return Promise.reject(
-        new Error(`FakeInferenceProvider: no canned response for input starting "${input.slice(0, 40)}"`),
+        new Error(
+          `FakeInferenceProvider: no canned response for input starting "${input.slice(0, 40)}"`,
+        ),
       )
     }
     return Promise.resolve(schema.parse(raw))

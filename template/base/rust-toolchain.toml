@@ -1,0 +1,6 @@
+# Pinned Rust toolchain for the Tauri host crate (apps/desktop/src-tauri).
+# Pinning by version (not "stable") keeps local dev, CI, and cargo-deny advisories
+# evaluating the same compiler. Bump deliberately; Renovate cooldown applies.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]

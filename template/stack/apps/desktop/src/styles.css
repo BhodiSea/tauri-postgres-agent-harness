@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — Tailwind v4 CSS-first theme (no tailwind.config file).
+ * Near-monochrome dark canvas (hue 240, chroma <= 0.008) with ONE cyan-teal
+ * accent (hue 200). OKLCH keeps lightness steps perceptually uniform.
+ *
+ * WCAG 2.2 AA contrast (SC 1.4.3 text >= 4.5:1, SC 1.4.11 non-text >= 3:1),
+ * computed from these exact OKLCH values:
+ *   ink       on canvas  15.8:1   on surface  14.4:1
+ *   ink-muted on canvas   7.8:1   on surface   7.1:1
+ *   accent    on canvas  10.9:1   on surface   9.9:1
+ * All text tokens clear AA (and AAA) on both backgrounds; accent doubles as a
+ * non-text indicator color at >= 3:1. `edge` is decorative only (1.5:1) and
+ * must never carry meaning on its own.
+ * SOURCE: WCAG 2.2 SC 1.4.3 / 1.4.11 contrast minimums [corpus: wcag/contrast-aa]
+ */
+@theme {
+  --color-canvas: oklch(0.16 0.006 240);
+  --color-surface: oklch(0.21 0.006 240);
+  --color-edge: oklch(0.32 0.008 240);
+  --color-ink: oklch(0.93 0.005 240);
+  --color-ink-muted: oklch(0.72 0.01 240);
+  --color-accent: oklch(0.8 0.12 200);
+}
+
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+}

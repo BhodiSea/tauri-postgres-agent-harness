@@ -1,0 +1,47 @@
+# deny.toml — cargo-deny policy for the desktop host crate.
+# Invoke from the repo root (deny.toml lives here, beside the JS license gate's
+# allowlist, so all supply-chain policy is in one place):
+#   cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml check
+
+[graph]
+all-features = true
+
+[advisories]
+# cargo-deny v2 semantics: vulnerability/unsound/unmaintained advisories are
+# errors by default. Keep yanked releases fatal too. Exceptions go in an
+# `ignore` entry WITH a written justification and an expiry — a permanently
+# silenced advisory trains the team to ignore red.
+yanked = "deny"
+
+[licenses]
+# Permissive-only allowlist (BUILD-SPEC). Anything else — including UNKNOWN —
+# fails; add a reviewed per-crate exception rather than widening the list.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "ISC",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+]
+
+[bans]
+multiple-versions = "warn"
+deny = [
+  # Version floor: tauri < 2.11.1 predates the hardened webview/IPC releases this
+  # template's security posture (strict CSP + isolation pattern + least-privilege
+  # capabilities) is designed around. Renovate keeps us current; this floor keeps
+  # a downgrade from ever sneaking through a lockfile edit.
+  # SOURCE: harness design gate-chain (cargo-deny floor tauri>=2.11.1) [corpus: tauri/isolation]
+  { crate = "tauri@<2.11.1", reason = "below the harness security-baseline floor for the webview/IPC hardening fixes" },
+  # Bundled Mozilla trust roots silently break enterprise TLS interception and
+  # ignore OS certificate policy; use the platform verifier instead.
+  { crate = "webpki-roots", reason = "use the OS trust store (rustls-platform-verifier); bundled roots bypass enterprise policy" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,0 +1,66 @@
+{
+  // Biome = formatter + import organizer ONLY (BUILD-SPEC §Lint). The linter is OFF:
+  // ESLint (typescript-eslint strictTypeChecked et al.) is the single lint owner, so
+  // the two tools can never disagree about the same rule.
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true // dist/, target/, coverage/ etc. come from .gitignore
+  },
+  "files": {
+    "includes": [
+      "**",
+      // Generated-but-committed artifacts: byte-stability matters more than style.
+      "!**/apps/desktop/src/ipc/bindings.ts",
+      "!**/apps/server/openapi.json",
+      "!**/packages/schema/drizzle",
+      "!**/packages/schema/drizzle/**",
+      // Harness-owned hook/tool internals are not project code.
+      "!**/.claude",
+      "!**/.claude/**"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "json": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": false
+  },
+  "overrides": [
+    {
+      // tsconfig files are JSONC by TypeScript convention.
+      "includes": ["**/tsconfig.json", "**/tsconfig.*.json", "tsconfig.base.json"],
+      "json": {
+        "parser": {
+          "allowComments": true,
+          "allowTrailingCommas": true
+        }
+      }
+    }
+  ]
+}

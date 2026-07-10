@@ -1,0 +1,16 @@
+{
+  // Inherits the max-strict shared flag set (owned by the root config).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Composite so apps/server and apps/desktop can project-reference this
+    // package: `tsc -b` then redirects `@app/schema` imports (which resolve to
+    // ./src/index.ts via the exports map) to the declarations emitted here.
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    // drizzle.config.ts reads process.env and the schema self-check test reads
+    // the migration file from disk — both need the node ambient types.
+    "types": ["node"]
+  },
+  "include": ["src", "drizzle.config.ts"]
+}

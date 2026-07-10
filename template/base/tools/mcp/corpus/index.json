@@ -1,0 +1,154 @@
+[
+  {
+    "id": "harness/doctrine",
+    "sha256": "",
+    "text": "The Stop hook, `pnpm validate`, and CI all execute the same config-driven gate chain (tools/harness.config.mjs). Done means green gate. The gate surface is write-guard-protected; CI re-runs a hardcoded floor so a weakened local config cannot weaken CI.",
+    "title": "Harness doctrine: one gate config, three enforcement layers, tamper evidence",
+    "url": "docs/harness/README.md",
+    "version": "0.1.0"
+  },
+  {
+    "id": "postgres/rls-force",
+    "sha256": "",
+    "text": "Row security policies restrict which rows a command can return or modify. FORCE ROW LEVEL SECURITY also applies policies to the table owner. Policies are per-command (SELECT/INSERT/UPDATE/DELETE); USING filters reads, WITH CHECK validates writes.",
+    "title": "PostgreSQL row security policies; FORCE ROW LEVEL SECURITY; USING vs WITH CHECK",
+    "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html",
+    "version": "16"
+  },
+  {
+    "id": "postgres/rls-initplan",
+    "sha256": "",
+    "text": "Wrapping a stable function call as (select current_setting('app.user_id', true)) lets Postgres evaluate it once per statement as an initPlan instead of once per row — orders of magnitude faster on large tables. The second argument true returns NULL instead of erroring when the GUC is unset, so unauthenticated sessions match no rows rather than failing.",
+    "title": "RLS performance: wrap current_setting() in (select ...) for an initPlan",
+    "url": "https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET",
+    "version": "16"
+  },
+  {
+    "id": "postgres/guc-set-local",
+    "sha256": "",
+    "text": "SET LOCAL (or set_config(name, value, true)) scopes a setting to the current transaction. Session-scoped GUCs (set_config(..., false)) leak across pooled connections: the next request on the same connection inherits the previous user's identity. RLS identity GUCs must therefore always be transaction-local, set inside the same transaction as the query.",
+    "title": "Transaction-local GUCs: SET LOCAL / set_config(..., true) — pooling identity leak otherwise",
+    "url": "https://www.postgresql.org/docs/current/sql-set.html",
+    "version": "16"
+  },
+  {
+    "id": "postgres/recursive-cycle",
+    "sha256": "",
+    "text": "A recursive query over graph data with cycles will loop indefinitely unless terminated. Use the SQL-standard CYCLE clause (Postgres 14+) or carry a visited-path array and test against it in the recursive term.",
+    "title": "WITH RECURSIVE over graphs needs a CYCLE clause or visited guard",
+    "url": "https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE",
+    "version": "16"
+  },
+  {
+    "id": "pgvector/hnsw",
+    "sha256": "",
+    "text": "HNSW indexes give better query performance than IVFFlat at the cost of slower builds and more memory, and can be created on an empty table (IVFFlat needs training data). Distance opclass must match the query operator (vector_cosine_ops for <=>). Declare the column with a fixed dimension so inserts are type-checked.",
+    "title": "pgvector index selection: HNSW vs IVFFlat; opclass must match the query operator",
+    "url": "https://github.com/pgvector/pgvector#hnsw",
+    "version": "0.8"
+  },
+  {
+    "id": "entra/jwt-verify",
+    "sha256": "",
+    "text": "Access tokens from Microsoft Entra ID must be validated server-side: verify the signature against the tenant JWKS (discovery: https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration), and pin issuer (tenant-specific), audience (your API's Application ID URI / client id), and allowed algorithms. Never trust an unverified token or one validated only client-side.",
+    "title": "Entra ID access-token validation: JWKS + pinned iss/aud/alg",
+    "url": "https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens",
+    "version": "v2.0"
+  },
+  {
+    "id": "jose/clock-tolerance",
+    "sha256": "",
+    "text": "jwtVerify accepts clockTolerance to absorb clock skew between the token issuer and the verifying server when checking exp/nbf/iat. Keep it small (minutes, not hours): 300 seconds absorbs typical enterprise clock drift without materially extending token lifetime.",
+    "title": "jose jwtVerify clockTolerance: bounded skew allowance for exp/nbf",
+    "url": "https://github.com/panva/jose/blob/main/docs/jwt/verify/interfaces/JWTVerifyOptions.md",
+    "version": "6"
+  },
+  {
+    "id": "tauri/isolation",
+    "sha256": "",
+    "text": "The isolation pattern injects a sandboxed <iframe> between the frontend and Tauri Core: every IPC message passes through the isolation application, which can verify and reject unexpected messages before they reach the host. Recommended whenever the frontend includes any third-party code. Configured via app.security.pattern { use: 'isolation', options.dir }.",
+    "title": "Tauri isolation pattern: intercept and verify IPC before it reaches Core",
+    "url": "https://tauri.app/security/isolation/",
+    "version": "2"
+  },
+  {
+    "id": "tauri/csp",
+    "sha256": "",
+    "text": "tauri.conf.json app.security.csp is applied to all app windows; Tauri appends nonces/hashes for its own injected scripts. A null CSP disables the protection entirely. connect-src must enumerate the API origins the webview may reach; keep default-src 'self' and never add remote script sources.",
+    "title": "Tauri CSP: committed policy, connect-src pinned to the API origin, never null",
+    "url": "https://tauri.app/security/csp/",
+    "version": "2"
+  },
+  {
+    "id": "tauri/capabilities",
+    "sha256": "",
+    "text": "Capabilities grant permissions to windows/webviews; grant the least privilege the window needs. Remote-URL capabilities extend IPC to remote content and should not be used for local-first apps. Prefer adding a typed #[tauri::command] over granting shell/process/fs plugin permissions.",
+    "title": "Tauri capabilities: least privilege per window; no remote IPC; commands over broad plugin grants",
+    "url": "https://tauri.app/security/capabilities/",
+    "version": "2"
+  },
+  {
+    "id": "tauri/webview2-offline",
+    "sha256": "",
+    "text": "webviewInstallMode offlineInstaller embeds the ~127MB WebView2 installer so installation needs no network — required for locked-down/offline enterprise targets. downloadBootstrapper is smaller but silently fails on machines without egress; skip assumes a preinstalled runtime.",
+    "title": "WebView2 install modes: offlineInstaller for enterprise/offline targets",
+    "url": "https://tauri.app/distribute/windows-installer/#webview2-installation-options",
+    "version": "2"
+  },
+  {
+    "id": "tauri/updater-signing",
+    "sha256": "",
+    "text": "Updater artifacts are signed with a minisign keypair; the public key ships in tauri.conf.json and the private key must exist only in CI secrets. A leaked private key lets an attacker ship arbitrary 'updates' to every install.",
+    "title": "Tauri updater signing: minisign keypair; private key never leaves CI secrets",
+    "url": "https://tauri.app/plugin/updater/",
+    "version": "2"
+  },
+  {
+    "id": "windows/code-signing",
+    "sha256": "",
+    "text": "Windows executables should be Authenticode-signed; unsigned or fresh-certificate binaries trip SmartScreen reputation warnings. Azure Trusted Signing provides managed certificates with short-lived keys and integrates with signtool in CI; EV certificates grant faster reputation. Verify with signtool verify /pa /all after signing.",
+    "title": "Windows code signing: Authenticode, SmartScreen reputation, Azure Trusted Signing",
+    "url": "https://learn.microsoft.com/en-us/azure/trusted-signing/",
+    "version": "2026"
+  },
+  {
+    "id": "react/compiler",
+    "sha256": "",
+    "text": "React Compiler memoizes automatically at build time; code must follow the Rules of React (components/hooks pure, no conditional hooks). Adopt with an exact-pinned babel-plugin-react-compiler and the eslint-plugin-react-hooks compiler rules so violations fail lint instead of silently deoptimizing.",
+    "title": "React Compiler: build-time auto-memoization, Rules-of-React enforced by lint",
+    "url": "https://react.dev/learn/react-compiler",
+    "version": "19"
+  },
+  {
+    "id": "wcag/character-key-shortcuts",
+    "sha256": "",
+    "text": "WCAG 2.1.4 (Character Key Shortcuts, Level A): if a keyboard shortcut uses only a single printable character, users must be able to turn it off or remap it, or it must only fire on focus. Speech-input and screen-reader users otherwise trigger shortcuts accidentally. Registering all shortcuts in one auditable registry makes this testable.",
+    "title": "WCAG 2.1.4: no bare single-character global shortcuts",
+    "url": "https://www.w3.org/WAI/WCAG22/Understanding/character-key-shortcuts.html",
+    "version": "2.2"
+  },
+  {
+    "id": "llamacpp/json-schema",
+    "sha256": "",
+    "text": "llama.cpp's OpenAI-compatible server supports constrained decoding via json_schema response_format / GBNF grammars: the sampler masks tokens so output always parses. The schema→grammar converter supports a subset of JSON Schema — validate the schema converts cleanly and still run a deterministic validator on the output; constrained decoding guarantees syntax, not semantics.",
+    "title": "llama.cpp constrained decoding: grammar guarantees syntax, validators guarantee semantics",
+    "url": "https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md",
+    "version": "2026"
+  },
+  {
+    "id": "drizzle/migrations-append-only",
+    "sha256": "",
+    "text": "Generated migrations are ordered, immutable steps; editing an already-applied migration desynchronizes databases that ran the original. Schema changes go through a NEW migration (drizzle-kit generate) — never edit an existing file, never `drizzle-kit push` outside local prototyping.",
+    "title": "Migration discipline: append-only files, generate over push",
+    "url": "https://orm.drizzle.team/docs/migrations",
+    "version": "1.0"
+  },
+  {
+    "id": "hono/sse-abort",
+    "sha256": "",
+    "text": "When streaming (SSE) from Hono, honor request abort: the streaming helper's onAbort / the request signal must terminate the generator and release resources, otherwise disconnected clients leak server work — critical for long-lived LLM token streams.",
+    "title": "Hono streaming: propagate client abort into the generator",
+    "url": "https://hono.dev/docs/helpers/streaming",
+    "version": "4"
+  }
+]

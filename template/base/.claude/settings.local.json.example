@@ -1,0 +1,24 @@
+{
+  "_readme": [
+    "Personal, git-ignored overrides. Copy this file to .claude/settings.local.json and fill in the env values.",
+    "DATABASE_URL / MIGRATOR_DATABASE_URL are for the LOCAL docker-compose Postgres ONLY (started via `pnpm db:up`). Never point them at a shared or production database.",
+    "CORPUS_INDEX_URL optionally points the corpus_search MCP server at a remote citation index; leave it empty to use the checked-in corpus index.",
+    "permissions.allow below adds personal conveniences (installs, commits, local db lifecycle) on top of the shared settings.json allowlist."
+  ],
+  "env": {
+    "DATABASE_URL": "",
+    "MIGRATOR_DATABASE_URL": "",
+    "CORPUS_INDEX_URL": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install *)",
+      "Bash(pnpm add *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git stash *)",
+      "Bash(docker compose up -d *)",
+      "Bash(docker compose stop *)"
+    ]
+  }
+}

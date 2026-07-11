@@ -1,0 +1,275 @@
+// In-process characterization tests for the provenance heuristic's single source
+// of truth (template/base/tools/lib/provenance-rules.mjs). Both enforcement
+// layers — the per-edit PostToolUse hook and the tree-wide `provenance` gate —
+// import from here, so this file pins the shared decision-site window, the
+// comment-line skips, the wrapped-payload extractor, payloadResolves' four
+// grounding kinds, and the scope predicates (including Windows backslash
+// normalization) branch by branch. Regression armor for the v0.1.4 refactor
+// that unified the two hand-duplicated regex copies — it pins CURRENT behavior,
+// not a wishlist. The gate's end-to-end red/green lives in check-sources.test.mjs.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  CORPUS_REF,
+  DECISION,
+  DECISION_GROUPS,
+  GATE_FILE_GLOBS,
+  SOURCE_WINDOW_LINES,
+  extractSourceComments,
+  findUncitedDecisionSites,
+  gateScansFile,
+  hookScansFile,
+  payloadResolves,
+} from '../../template/base/tools/lib/provenance-rules.mjs'
+
+// ── exported shape: the decision taxonomy and its knobs ───────────────────────
+test('DECISION_GROUPS carries the six stack decision classes in order', () => {
+  assert.deepEqual(
+    DECISION_GROUPS.map((g) => g.key),
+    ['rls-policy', 'guc-identity', 'token-verification', 'vector-index', 'llm-sampling', 'tuning-constants'],
+  )
+  for (const g of DECISION_GROUPS) {
+    assert.ok(Array.isArray(g.patterns) && g.patterns.length > 0, `${g.key} has patterns`)
+    assert.equal(typeof g.description, 'string')
+  }
+  assert.equal(SOURCE_WINDOW_LINES, 3)
+})
+
+test('GATE_FILE_GLOBS is the five committed git pathspecs', () => {
+  assert.deepEqual(GATE_FILE_GLOBS, [
+    'apps/**/*.ts',
+    'apps/**/*.tsx',
+    'packages/**/*.ts',
+    'packages/**/*.tsx',
+    'packages/**/*.sql',
+  ])
+})
+
+test('DECISION matches one representative token per group and is case-sensitive', () => {
+  const reps = [
+    'FORCE ROW LEVEL SECURITY', 'CREATE POLICY', 'pgPolicy',
+    'current_setting(', 'set_config(', 'SET LOCAL',
+    'jwtVerify', 'createRemoteJWKSet', 'createLocalJWKSet', 'clockTolerance',
+    'USING hnsw', 'USING ivfflat', 'vector_cosine_ops',
+    'temperature: 0.2', 'top_p = 1',
+    'maxRetries', 'timeoutMs', 'rateLimit', 'backoff',
+  ]
+  for (const r of reps) assert.ok(DECISION.test(r), `DECISION should match ${r}`)
+  // No `i` flag: the heuristic keys off exact identifiers, not prose lookalikes.
+  assert.ok(!DECISION.test('jwtverify'), 'lowercased identifier must not match')
+  assert.ok(!DECISION.test('the temperature outside'), 'temperature without :/= must not match')
+})
+
+// ── hookScansFile: scannability + excludes + POSIX normalization ───────────────
+test('hookScansFile: scannable extensions in-scope; non-code files out', () => {
+  assert.equal(hookScansFile('apps/server/src/auth.ts'), true)
+  assert.equal(hookScansFile('apps/desktop/src/App.tsx'), true)
+  assert.equal(hookScansFile('packages/schema/drizzle/0001_x.sql'), true)
+  // Only .ts/.tsx/.sql carry the comments the heuristic reads.
+  assert.equal(hookScansFile('apps/server/src/config.json'), false)
+  assert.equal(hookScansFile('tools/notes.md'), false)
+  assert.equal(hookScansFile('apps/desktop/src/main.js'), false)
+})
+
+test('hookScansFile: SCAN_EXCLUDES drop tests, bindings, and drizzle meta', () => {
+  assert.equal(hookScansFile('apps/server/src/auth.test.ts'), false)
+  assert.equal(hookScansFile('apps/desktop/src/App.spec.tsx'), false)
+  assert.equal(hookScansFile('apps/desktop/src/ipc/bindings.ts'), false)
+  assert.equal(hookScansFile('packages/schema/drizzle/meta/0000_snapshot.sql'), false)
+})
+
+test('hookScansFile: HOOK_EXCLUDES drop .claude tooling ONLY when nested (leading slash required)', () => {
+  // The hook receives OS-absolute paths, so `.claude` is always a nested segment.
+  assert.equal(hookScansFile('/home/me/proj/.claude/hooks/posttool.ts'), false)
+  // A bare relative path starting with `.claude` has no `/` before it — the
+  // exclude regex (`/\.claude\/`) does not fire. Documents the leading-slash
+  // requirement; the hook never actually feeds this form.
+  assert.equal(hookScansFile('.claude/hooks/posttool.ts'), true)
+})
+
+test('hookScansFile: Windows backslash paths are POSIX-normalized before the /-based excludes run', () => {
+  // The whole point of toPosix at this boundary — `apps\...\ipc\bindings.ts`
+  // must still hit the `/ipc/bindings.ts$` exclude on windows-latest.
+  assert.equal(hookScansFile('apps\\desktop\\src\\ipc\\bindings.ts'), false)
+  assert.equal(hookScansFile('apps\\desktop\\src\\App.test.tsx'), false)
+  assert.equal(hookScansFile('packages\\schema\\drizzle\\meta\\0000_snap.sql'), false)
+  assert.equal(hookScansFile('C:\\proj\\.claude\\hooks\\posttool.ts'), false)
+  // A normal Windows path that is NOT excluded still scans (normalization must
+  // not break the happy path).
+  assert.equal(hookScansFile('apps\\server\\src\\auth.ts'), true)
+})
+
+// ── gateScansFile: excludes-only, no scannability or hook excludes ─────────────
+test('gateScansFile applies SCAN_EXCLUDES but NOT scannability or HOOK_EXCLUDES', () => {
+  assert.equal(gateScansFile('apps/server/src/auth.ts'), true)
+  assert.equal(gateScansFile('apps/server/src/auth.test.ts'), false)
+  assert.equal(gateScansFile('apps/desktop/src/ipc/bindings.ts'), false)
+  assert.equal(gateScansFile('packages/schema/drizzle/meta/x.sql'), false)
+  // Excludes-only: the gate trusts its git globs to only feed .ts/.tsx/.sql, so
+  // a non-code path is "not excluded" -> true, and `.claude` is not a gate
+  // exclude (its globs never reach there). Contrast hookScansFile above.
+  assert.equal(gateScansFile('foo.js'), true)
+  assert.equal(gateScansFile('.claude/hooks/foo.ts'), true)
+})
+
+// ── findUncitedDecisionSites: the window + comment-line heuristic ──────────────
+test('an uncited decision line is flagged with 1-based line and a trimmed excerpt', () => {
+  const flagged = findUncitedDecisionSites('  const claims = await jwtVerify(token, jwks)\n')
+  assert.deepEqual(flagged, [{ line: 1, excerpt: 'const claims = await jwtVerify(token, jwks)' }])
+})
+
+test('a keyword appearing INSIDE a `//`, `*`, `/*` or `--` comment line is a mention, not a decision', () => {
+  assert.deepEqual(findUncitedDecisionSites('// we call jwtVerify below\n'), [])
+  assert.deepEqual(findUncitedDecisionSites(' * jwtVerify in the JSDoc\n'), [])
+  assert.deepEqual(findUncitedDecisionSites('/* jwtVerify note */\n'), [])
+  assert.deepEqual(findUncitedDecisionSites('-- CREATE POLICY described here\n'), [])
+})
+
+test('a SOURCE on the decision line itself (trailing comment) cites it', () => {
+  const src = 'const c = jwtVerify(t) // SOURCE: https://example.com/jose\n'
+  assert.deepEqual(findUncitedDecisionSites(src), [])
+})
+
+test('SOURCE_WINDOW_LINES=3: a citation exactly three lines above cites; four above does not', () => {
+  const covered = ['// SOURCE: x', 'a', 'b', 'const c = jwtVerify()'].join('\n')
+  assert.deepEqual(findUncitedDecisionSites(covered), [])
+  const justOut = ['// SOURCE: x', 'a', 'b', 'c', 'const d = jwtVerify()'].join('\n')
+  assert.deepEqual(findUncitedDecisionSites(justOut), [{ line: 5, excerpt: 'const d = jwtVerify()' }])
+})
+
+test('the window only looks UP — a SOURCE on the line below does not cite the decision', () => {
+  const src = ['const c = jwtVerify()', '// SOURCE: x'].join('\n')
+  assert.deepEqual(findUncitedDecisionSites(src), [{ line: 1, excerpt: 'const c = jwtVerify()' }])
+})
+
+test('mixed cited/uncited sites: only lines outside every SOURCE window are returned', () => {
+  const src = [
+    '// SOURCE: https://a', // 1
+    'const a = jwtVerify()', // 2 — cited (SOURCE one line up)
+    'const p = 1', // 3 — padding, pushes the SOURCE out of range
+    'const q = 2', // 4
+    'const r = 3', // 5
+    'const b = createRemoteJWKSet(u)', // 6 — uncited (SOURCE five lines up)
+    'const t = { clockTolerance: 300 }', // 7 — uncited
+  ].join('\n')
+  assert.deepEqual(findUncitedDecisionSites(src), [
+    { line: 6, excerpt: 'const b = createRemoteJWKSet(u)' },
+    { line: 7, excerpt: 'const t = { clockTolerance: 300 }' },
+  ])
+})
+
+test('the excerpt is trimmed and hard-capped at 80 characters', () => {
+  const long = `const x = jwtVerify(${'a'.repeat(120)})`
+  const [hit] = findUncitedDecisionSites(long)
+  assert.equal(hit.excerpt.length, 80)
+  assert.ok(hit.excerpt.startsWith('const x = jwtVerify('))
+})
+
+test('LINE-BASED LIMIT: a block-comment interior line not starting with `*` is still scanned', () => {
+  // Characterization, not endorsement: the heuristic is line-based, so a `/* */`
+  // interior line that does not lead with `*` looks like code and gets flagged.
+  // Properly-formatted JSDoc (`*`-prefixed) is skipped (asserted above).
+  const src = ['/*', '  jwtVerify happens here', '*/'].join('\n')
+  assert.deepEqual(findUncitedDecisionSites(src), [{ line: 2, excerpt: 'jwtVerify happens here' }])
+})
+
+test('empty source yields no flags', () => {
+  assert.deepEqual(findUncitedDecisionSites(''), [])
+})
+
+// ── extractSourceComments: wrapped-payload extraction ─────────────────────────
+test('a single-line SOURCE returns everything after `SOURCE:` (leading space preserved)', () => {
+  assert.deepEqual(extractSourceComments('// SOURCE: https://example.com/x\n'), [
+    { line: 1, payload: ' https://example.com/x' },
+  ])
+})
+
+test('a wrapped citation appends continuation comment lines until a non-comment line', () => {
+  const src = [
+    '// SOURCE: jose is the reference',
+    '  // implementation [corpus: entra/jwt-verify]',
+    'const x = 1',
+    'more',
+  ].join('\n')
+  // Continuation lines are trimmed but keep their `//` marker; the code line ends it.
+  assert.deepEqual(extractSourceComments(src), [
+    { line: 1, payload: ' jose is the reference\n// implementation [corpus: entra/jwt-verify]' },
+  ])
+})
+
+test('CITED requires `//` or `--`: a `/** SOURCE: ... */` JSDoc-block citation is NOT recognized', () => {
+  // Genuine gotcha — the head marker must be `//` (or `--`), so a block-comment
+  // SOURCE is silently invisible to both extraction and the citation check.
+  assert.deepEqual(extractSourceComments('/** SOURCE: entra docs [corpus: entra/jwt-verify] */\ncode\n'), [])
+})
+
+test('`*`-prefixed continuation lines are folded into the payload (COMMENT_START `*` branch)', () => {
+  const src = ['// SOURCE: entra docs', ' * [corpus: entra/jwt-verify]', ' */', 'code'].join('\n')
+  assert.deepEqual(extractSourceComments(src), [
+    { line: 1, payload: ' entra docs\n* [corpus: entra/jwt-verify]\n*/' },
+  ])
+})
+
+test('a new SOURCE comment terminates the previous payload — both are captured separately', () => {
+  const src = ['// SOURCE: a', '// SOURCE: b', 'code'].join('\n')
+  assert.deepEqual(extractSourceComments(src), [
+    { line: 1, payload: ' a' },
+    { line: 2, payload: ' b' },
+  ])
+})
+
+test('`-- SOURCE:` in SQL is extracted like `//`, with 1-based line numbers', () => {
+  const src = ['SELECT 1;', '-- SOURCE: pgvector docs [corpus: pgvector/hnsw]', 'code'].join('\n')
+  assert.deepEqual(extractSourceComments(src), [
+    { line: 2, payload: ' pgvector docs [corpus: pgvector/hnsw]' },
+  ])
+})
+
+// ── CORPUS_REF: the reference matcher ─────────────────────────────────────────
+test('CORPUS_REF captures each id via matchAll and rejects the `<id>` placeholder', () => {
+  const ids = [...'x [corpus: a/b] y [corpus: c.d]'.matchAll(CORPUS_REF)].map((m) => m[1])
+  assert.deepEqual(ids, ['a/b', 'c.d'])
+  // The id charset excludes `<`/`>`, so documentation placeholders never parse.
+  assert.deepEqual([...'[corpus: <id>]'.matchAll(CORPUS_REF)], [])
+})
+
+// ── payloadResolves: the four grounding kinds ─────────────────────────────────
+test('payloadResolves: an https URL or a corpus ref grounds; http-only and prose do not', () => {
+  assert.equal(payloadResolves('see https://learn.microsoft.com/entra'), true)
+  assert.equal(payloadResolves('pinned [corpus: entra/jwt-verify]'), true)
+  // Only https:// counts as a URL — a plain http:// token is skipped by the
+  // `^https?:` guard in the path loop and grounds nothing.
+  assert.equal(payloadResolves('see http://example.com/x'), false)
+  // Presence-only prose ("trust me") is not provenance.
+  assert.equal(payloadResolves('trust me'), false)
+  // The `<id>` placeholder is not a resolvable corpus ref.
+  assert.equal(payloadResolves('[corpus: <id>]'), false)
+})
+
+test('payloadResolves: a corpus ref stays truthy across repeated calls (no global-regex lastIndex leak)', () => {
+  // The impl builds a fresh non-global RegExp from CORPUS_REF.source precisely so
+  // the module-level global regex cannot drift lastIndex between calls.
+  const payload = 'grounded [corpus: harness/doctrine]'
+  assert.equal(payloadResolves(payload), true)
+  assert.equal(payloadResolves(payload), true)
+  assert.equal(payloadResolves(payload), true)
+})
+
+test('payloadResolves: a repo-relative path grounds only when it exists on disk', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-provres-'))
+  mkdirSync(join(dir, 'docs'))
+  writeFileSync(join(dir, 'docs', 'decisions.md'), '# decisions\n')
+  // Bare existing token, plus leading/trailing punctuation stripping.
+  assert.equal(payloadResolves('rationale in docs/decisions.md', dir), true)
+  assert.equal(payloadResolves('see (docs/decisions.md) for details', dir), true)
+  assert.equal(payloadResolves('recorded in docs/decisions.md.', dir), true)
+  // A path-shaped token that does not exist grounds nothing.
+  assert.equal(payloadResolves('docs/nope.md', dir), false)
+  // An absolute path is skipped by the `startsWith('/')` guard even if real.
+  assert.equal(payloadResolves('/etc/hosts', dir), false)
+  // A single token with no `/` is never treated as a path.
+  assert.equal(payloadResolves('decisions', dir), false)
+})

@@ -618,3 +618,159 @@ test('npm pack ships every template path (dotless storage survives packing)', ()
     assert.ok(files.includes(critical), `npm pack dropped ${critical}`)
   }
 })
+
+// ── v0.1.4 Stage 1c: regression armor for the just-landed update/refresh
+// refactor. These pin CURRENT behavior of the --force sweep, refresh-seeded
+// unknown-path reporting, park-on-drift idempotence, and dry-run plan parity. ──
+
+test('update --force overwrites a drifted OWNED file, notes it, and re-records the sha', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-force-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  // A locally-modified owned hook: without --force this parks (exit 2); with
+  // --force the incoming template version wins in place.
+  const ownedRel = '.claude/hooks/posttool-fast-check.mjs'
+  const owned = join(dir, ownedRel)
+  const templateContent = readFileSync(owned, 'utf8')
+  writeFileSync(owned, `${templateContent}\n// local tweak that force must overwrite\n`)
+
+  const forced = run(['update', '--dir', dir, '--force'])
+  assert.equal(forced.code, 0, forced.out) // deliberate overwrite → clean exit
+  const restored = readFileSync(owned, 'utf8')
+  assert.equal(restored, templateContent, '--force must restore the template version in place')
+  assert.ok(!restored.includes('// local tweak'), 'local drift must be gone after --force')
+  assert.ok(forced.out.includes(`--force overwrote locally-modified ${ownedRel}`), forced.out)
+
+  // Manifest hash must track the overwrite, so a follow-up doctor is clean.
+  const manifest = JSON.parse(readFileSync(join(dir, '.harness/manifest.json'), 'utf8'))
+  assert.equal(
+    manifest.files[ownedRel].sha256,
+    sha256(restored),
+    'manifest sha must be re-recorded to the written content',
+  )
+  assert.equal(run(['doctor', '--dir', dir]).code, 0, 'forced overwrite must leave a clean install')
+})
+
+test('refresh-seeded unknown path: non-zero via return (not a throw), near-candidate suggestions', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-refunk-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  // Near miss: wrong directory, right basename → the note names the real path.
+  const near = run(['update', '--dir', dir, '--refresh-seeded', 'desktop/App.tsx'])
+  assert.equal(near.code, 1, near.out)
+  assert.ok(near.out.includes('did you mean'), near.out)
+  assert.ok(near.out.includes('apps/desktop/src/App.tsx'), near.out)
+  // A non-zero RETURN, not a thrown error — the CLI prefixes "error:" only when
+  // update throws (e.g. missing manifest); a bad path must not read that way.
+  assert.ok(!near.out.includes('error:'), 'unknown path must exit via code, not throw')
+
+  // No basename match anywhere → the miss is reported WITHOUT a "did you mean".
+  const orphan = run(['update', '--dir', dir, '--refresh-seeded', 'no-such-file.zzz'])
+  assert.equal(orphan.code, 1, orphan.out)
+  assert.ok(orphan.out.includes('no template file installs to no-such-file.zzz'), orphan.out)
+  assert.ok(!orphan.out.includes('did you mean'), 'a candidate-less miss must not fabricate a suggestion')
+
+  // Batch with one good + one bad path: the good one is still applied in full,
+  // but a single miss fails the whole invocation (exit 1).
+  const seededRel = 'apps/server/src/app.ts'
+  const seededAbs = join(dir, seededRel)
+  const seededTemplate = readFileSync(seededAbs, 'utf8')
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const oldContent = '// installed by an older template\n'
+  writeFileSync(seededAbs, oldContent)
+  manifest.files[seededRel].sha256 = sha256(oldContent)
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  const batch = run(['update', '--dir', dir,
+    '--refresh-seeded', seededRel,
+    '--refresh-seeded', 'no-such-file.zzz'])
+  assert.equal(batch.code, 1, batch.out) // any miss fails the batch
+  assert.equal(
+    readFileSync(seededAbs, 'utf8'),
+    seededTemplate,
+    'the valid path in a partly-bad batch is still refreshed',
+  )
+})
+
+test('refresh-seeded park-on-drift is idempotent: re-running never clobbers and never flip-flops', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-refidem-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  const ip = 'apps/desktop/src/App.tsx'
+  const abs = join(dir, ip)
+  const templateContent = readFileSync(abs, 'utf8')
+  const localWork = `${templateContent}\n// my project's real work\n`
+  writeFileSync(abs, localWork)
+
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const recordedSha = JSON.parse(readFileSync(manifestPath, 'utf8')).files[ip].sha256
+  const pendingPath = join(dir, '.harness/pending', ip)
+
+  const snapshot = () => ({
+    file: readFileSync(abs, 'utf8'),
+    pending: readFileSync(pendingPath),
+    sha: JSON.parse(readFileSync(manifestPath, 'utf8')).files[ip].sha256,
+  })
+
+  const first = run(['update', '--dir', dir, '--refresh-seeded', ip])
+  assert.equal(first.code, 2, first.out) // drift → exit 2
+  assert.ok(first.out.includes('parked'), first.out)
+  const afterFirst = snapshot()
+  assert.equal(afterFirst.file, localWork, 'local work must survive the park')
+  assert.equal(afterFirst.pending.toString('utf8'), templateContent, 'the template version is what gets parked')
+  assert.equal(afterFirst.sha, recordedSha, 'park must NOT re-record the manifest sha')
+
+  // Re-run with nothing changed: same exit, same bytes everywhere — no flip-flop.
+  const second = run(['update', '--dir', dir, '--refresh-seeded', ip])
+  assert.equal(second.code, 2, second.out)
+  const afterSecond = snapshot()
+  assert.equal(afterSecond.file, afterFirst.file, 're-run must not touch local work')
+  assert.deepEqual(afterSecond.pending, afterFirst.pending, 're-run must re-park identical bytes')
+  assert.equal(afterSecond.sha, afterFirst.sha, 're-run must not drift the recorded sha')
+})
+
+test('update --dry-run touches nothing yet reports byte-for-byte the plan the real run applies', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-dryplan-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  // Stage a REFRESH: an owned file installed by an older harness (content
+  // differs from the template) but recorded as untouched (sha matches disk).
+  const ownedRel = '.claude/hooks/posttool-fast-check.mjs'
+  const owned = join(dir, ownedRel)
+  const oldContent = '#!/usr/bin/env node\n// older harness build\n'
+  writeFileSync(owned, oldContent)
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  manifest.files[ownedRel].sha256 = sha256(oldContent)
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  const fileBefore = readFileSync(owned, 'utf8')
+  const manifestBefore = readFileSync(manifestPath, 'utf8')
+
+  // Slice the JSON payload out of combined stdout/stderr — robust to any
+  // interpreter noise around it.
+  const parseReport = (out) => JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1))
+
+  // Dry-run: emits the plan, writes nothing.
+  const dry = run(['update', '--dir', dir, '--dry-run', '--report', 'json'])
+  assert.equal(dry.code, 0, dry.out)
+  const dryReport = parseReport(dry.out)
+  assert.ok(dryReport.written.includes(ownedRel), 'dry-run plan must list the refresh')
+  assert.equal(readFileSync(owned, 'utf8'), fileBefore, 'dry-run must not touch the file')
+  assert.equal(readFileSync(manifestPath, 'utf8'), manifestBefore, 'dry-run must not touch the manifest')
+  assert.ok(!existsSync(join(dir, '.harness/pending')), 'dry-run must not create pending/')
+
+  // Real run: identical report object, now actually applied on disk.
+  const real = run(['update', '--dir', dir, '--report', 'json'])
+  assert.equal(real.code, 0, real.out)
+  const realReport = parseReport(real.out)
+  assert.deepEqual(dryReport, realReport, 'dry-run must report exactly the plan the real run executes')
+  assert.notEqual(readFileSync(owned, 'utf8'), oldContent, 'the real run must refresh the file')
+  const manifestAfter = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  assert.equal(
+    manifestAfter.files[ownedRel].sha256,
+    sha256(readFileSync(owned, 'utf8')),
+    'real run must re-record the sha',
+  )
+})

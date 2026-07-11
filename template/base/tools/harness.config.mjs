@@ -53,4 +53,8 @@ export const STOP_HOOK_STEPS = [
   // --coverage enforces the thresholds in vitest.config.ts (write-guard-protected)
   // so a turn cannot end with a coverage-cratering change.
   ['unit', 'pnpm exec vitest run --coverage --silent'],
+  // Per-file floors on every CHANGED source file (uncommitted + untracked work
+  // included), read from the coverage-final.json the unit step just wrote — a
+  // new module cannot land 0%-covered inside a green aggregate.
+  ['diff-coverage', 'node tools/check-diff-coverage.mjs'],
 ]

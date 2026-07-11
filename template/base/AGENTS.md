@@ -41,8 +41,9 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 ## The validate contract (YOU MUST)
 
 - A turn is NOT done until `pnpm validate` is green. The Stop hook re-runs
-  validate + `node tests/rls/run-rls.mjs` + `pnpm exec vitest run --silent` and
-  exits 2 until everything passes. Fix root causes; do not stop.
+  validate + `node tests/rls/run-rls.mjs` + `pnpm exec vitest run --silent` +
+  `node tools/check-diff-coverage.mjs` and exits 2 until everything passes.
+  Fix root causes; do not stop.
 - **Prove, don't claim.** Show passing gate output; never assert "it works".
 - Do NOT edit a test in the same turn as the fix it covers (reward-hacking).
 - The 22 gates, in order: `format`, `gate-integrity`, `rust-fmt`, `types`,
@@ -118,8 +119,9 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   with an unconditional LIMIT and a statement-count invariance test
   (`dal/notes.ts` + `dal/cursor.ts` are the worked pattern).
 - **Coverage floors are enforced**: the Stop hook runs
-  `vitest run --coverage` against the thresholds in `vitest.config.ts` — a
-  feature landing without tests reds the turn.
+  `vitest run --coverage` against the thresholds in `vitest.config.ts`, then
+  `tools/check-diff-coverage.mjs` holds every CHANGED source file to the
+  per-file floors there — a feature landing without tests reds the turn.
 - **Styling is tokens-only, in BOTH themes.** The `@theme` in
   `apps/desktop/src/styles.css` (dark = base) + the `:root[data-theme='light']`
   override + `tools/styleguide.manifest.json` are the ENTIRE design vocabulary:

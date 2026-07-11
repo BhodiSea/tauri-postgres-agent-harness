@@ -101,6 +101,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # Full history: the diff-coverage step below diffs against the PR
+          # base's merge-base — a shallow clone makes that ref unresolvable
+          # and (fail-closed) red.
+          fetch-depth: 0
 
       - name: Enable Corepack
         run: corepack enable
@@ -115,6 +119,12 @@ jobs:
 
       - name: Unit + contract tests
         run: pnpm exec vitest run --coverage
+
+      # Per-file floors on every source file the PR touches, read from the
+      # coverage-final.json the vitest step above just wrote — the aggregate
+      # thresholds cannot see one untested module inside a green total.
+      - name: Diff coverage (per-file floors on changed files)
+        run: node tools/check-diff-coverage.mjs
 
   # ---------------------------------------------------------------------------
   # Runtime RLS — the headline isolation gate against REAL Postgres 16 + pgvector

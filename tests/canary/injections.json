@@ -49,7 +49,8 @@
     ],
     "validate": [{ "kind": "fixture", "ref": "tests/gates/validate-runner.test.mjs" }],
     "rls-isolation": [{ "kind": "selftest", "ref": "RLS runner FAILS CLOSED without a database (CI=true)" }],
-    "unit": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "vitest exits non-zero on failing tests or coverage-threshold misses" }]
+    "unit": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "vitest exits non-zero on failing tests or coverage-threshold misses" }],
+    "diff-coverage": [{ "kind": "fixture", "ref": "tests/gates/check-diff-coverage.test.mjs", "note": "an uncovered new src file (absent from coverage-final.json) and a below-floor changed file both red the Stop chain naming file + metric; missing coverage-final.json fails closed" }]
   },
   "hookRules": {
     "pretool-bash-guard.mjs": {

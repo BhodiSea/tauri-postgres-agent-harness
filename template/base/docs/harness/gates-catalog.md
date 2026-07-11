@@ -367,14 +367,40 @@ positive control fails (nothing visible), proving the suite cannot green vacuous
 (c) change `set_config(..., true)` to `false` in a scratch copy → the GUC-leak test
 fails.
 
-### unit — `pnpm exec vitest run --silent`
+### unit — `pnpm exec vitest run --coverage --silent`
 
 The behavioral net: both projects (`unit-node`, `unit-dom`), including the
 keyboard-registry WCAG 2.1.4 test, auth clock-skew (±4 pass / ±6 fail) and
 production+stub boot-fatal tests, skew-middleware route-coverage walk, SSE abort
 propagation, EMBEDDING_DIM assert, importer property tests, and the eval fixture scorer.
+`--coverage` additionally enforces the AGGREGATE thresholds in `vitest.config.ts`
+(70/60/65/70) and writes `coverage/coverage-final.json` — the artifact the next
+step reads.
 **Anti-vacuity:** register a bare single-character global shortcut in
-`src/keyboard/registry.ts` → the WCAG test fails.
+`src/keyboard/registry.ts` → the WCAG test fails; drop a large untested module →
+the aggregate threshold reds the run.
+
+### diff-coverage — `node tools/check-diff-coverage.mjs`
+
+Per-file coverage floors on every CHANGED source file, closing the wash the
+aggregate cannot see: a 0%-covered new module hides comfortably inside a green
+70% total. Changed = merge-base diff against the PR base in CI; worktree vs
+HEAD + staged + untracked source files locally (an agent's brand-new
+uncommitted feature file is exactly the case that must not slip). Each changed
+`apps/*/src` / `packages/*/src` code file must be present in the
+`coverage/coverage-final.json` the `unit` step just wrote (absent = no test
+imports it) and clear the `PER_FILE_FLOORS` in `vitest.config.ts` — parsed
+from that write-guard-protected config fail-closed, never duplicated. Test
+files, `.d.ts`, and the config's `COVERAGE_EXCLUDE` entries (generated
+bindings, boot wiring, the live-db surface the RLS suite proves instead) are
+exempt. An empty diff passes with a one-line note — which is what makes the
+step inherently ramp-safe on upgraded installs — but a missing
+coverage-final.json FAILS CLOSED: the chain was reordered or the artifact
+deleted.
+**Anti-vacuity:** add an untracked `apps/server/src/` file with an exported
+function and no test → FAIL naming the file as absent from the coverage map;
+`tests/gates/check-diff-coverage.test.mjs` additionally pins the below-floor
+red, the at-floor green, and the fail-closed missing-artifact path.
 
 ## Opt-in modules
 

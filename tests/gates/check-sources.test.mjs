@@ -86,6 +86,29 @@ test('RED: an uncited decision site fails naming file:line', () => {
   assert.ok(r.out.includes('lack an inline'), r.out)
 })
 
+// ── gate-file membership: the single-enumeration refactor + fail-closed widening ─
+test('WIDENING: a decision site DIRECTLY under apps/ is scanned (old `apps/**/*.ts` pathspec skipped it)', () => {
+  // git ls-files `apps/**/*.ts` required ≥1 intermediate dir, so `apps/direct.ts`
+  // silently fell out of the old two-pathspec sweep. The single bare `git ls-files`
+  // + gateFileMatch's `.+` now catches it — a decision site here can no longer hide.
+  const r = runGate(fixture({
+    files: { 'apps/direct.ts': 'const claims = await jwtVerify(token, jwks)\n' },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('apps/direct.ts:1'), r.out)
+  assert.ok(r.out.includes('lack an inline'), r.out)
+})
+
+test('gate scope stays apps/packages: an uncited decision in a root/tools .ts is NOT flagged', () => {
+  // The gate is deliberately narrower than the hook's whole-tree SCANNABLE_FILE —
+  // gateFileMatch only admits apps/ and packages/. A decision site in tools/ is out
+  // of the decision sweep (it is still read by the corpus sweep, which finds nothing).
+  const r = runGate(fixture({
+    files: { 'tools/helper.ts': 'const claims = await jwtVerify(token, jwks)\n' },
+  }))
+  assert.equal(r.code, 0, r.out)
+})
+
 // ── citation resolvability ────────────────────────────────────────────────────
 test('RED: a SOURCE citing an unknown corpus id fails naming file, line, and id', () => {
   const r = runGate(fixture({

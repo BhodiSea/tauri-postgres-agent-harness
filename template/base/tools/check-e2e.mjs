@@ -22,7 +22,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import process from 'node:process'
-import { fail, MAX_BUFFER, ok, skipOrFail } from './lib/gate.mjs'
+import { fail, MAX_BUFFER, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'e2e'
 const TIMEOUT_MS = 10 * 60 * 1000
@@ -31,6 +32,14 @@ const TAIL_LINES = 50
 if (!existsSync('playwright.config.ts') || !existsSync('e2e')) {
   skipOrFail(GATE, 'no e2e surface (playwright.config.ts + e2e/ not found)')
 }
+
+// Content-addressed local skip BEFORE the (minutes-long) Playwright run — and even
+// before resolving playwright, so a warm unchanged run skips in ms. The stamp records
+// that a full real run (chromium + the whole suite + the anti-vacuity check below)
+// went green for these exact inputs (declared in lib/stamp-inputs.mjs); unchanged
+// inputs cannot change that verdict. recordGreen() fires ONLY after the run passes
+// including anti-vacuity, so a vacuous run never stamps. CI always re-runs (inCI).
+const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 let chromiumPath = null
 try {
@@ -80,6 +89,7 @@ if (passed === 0) {
     'playwright exited 0 but reported no passing tests — an empty e2e run is a vacuous pass',
   )
 }
+recordGreen()
 ok(
   GATE,
   `${String(passed)} e2e test(s) green (chromium fast lane: a11y + states + degraded-network)`,

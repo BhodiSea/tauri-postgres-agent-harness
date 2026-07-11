@@ -71,14 +71,21 @@ export const SCAN_EXCLUDES = [/\.(test|spec)\.tsx?$/, /\/ipc\/bindings\.ts$/, /\
 // reach it, but the hook sees absolute paths for every edited file).
 export const HOOK_EXCLUDES = [/\/\.claude\//]
 
-// The tree the gate scans (git pathspecs, expanded by git itself — never a shell).
-export const GATE_FILE_GLOBS = [
-  'apps/**/*.ts',
-  'apps/**/*.tsx',
-  'packages/**/*.ts',
-  'packages/**/*.tsx',
-  'packages/**/*.sql',
-]
+// Tree-wide gate-file membership. Replaces the old GATE_FILE_GLOBS git pathspecs
+// (`apps/**/*.ts` etc.) so check-sources can enumerate the tree ONCE with a bare
+// `git ls-files` and filter in-process — the twin `git ls-files` calls collapse to one.
+// The old pathspecs required ≥1 intermediate directory: `git ls-files 'apps/**/*.ts'`
+// silently SKIPS `apps/top.ts`, and `packages/**/*.sql` skips `packages/foo.sql`. The
+// `.+` here matches those directly-under-scope files too — the WIDER, fail-closed
+// reading, so a decision site directly under apps/ or packages/ is scanned, never
+// missed. POSIX-normalized at this boundary so a backslash path (windows-latest) can
+// never dodge the `/`-anchored match. Same apps|packages scope as before, so the gate
+// stays narrower than the hook's whole-tree SCANNABLE_FILE by design; gateScansFile
+// still applies the test/binding/meta excludes on top.
+export function gateFileMatch(file) {
+  const posix = toPosix(file)
+  return /^(apps|packages)\/.+\.(ts|tsx)$/.test(posix) || /^packages\/.+\.sql$/.test(posix)
+}
 
 // Per-edit scope check used by the PostToolUse hook. The hook receives the
 // OS-native absolute path from tool_input — normalize to POSIX at this

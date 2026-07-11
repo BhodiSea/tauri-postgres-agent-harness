@@ -24,7 +24,7 @@ import {
   DECISION_GROUPS,
   extractSourceComments,
   findUncitedDecisionSites,
-  GATE_FILE_GLOBS,
+  gateFileMatch,
   gateScansFile,
   payloadResolves,
 } from './lib/provenance-rules.mjs'
@@ -35,23 +35,21 @@ const CORPUS_PATH = 'tools/mcp/corpus/index.json'
 const BINARY_FILE =
   /\.(png|jpe?g|gif|webp|ico|icns|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tar|exe|dll|so|dylib|gguf|node)$/i
 
-function trackedFiles(globs) {
-  // execFileSync, never a shell: sh expands `apps/**/*.ts` before git sees it,
-  // and any pattern with a shallow match collapses to just those files — the
-  // deep tree silently drops out of the scan (found when Windows cmd, which
-  // does not glob, scanned everything and flagged sites POSIX runs missed).
-  // MAX_BUFFER: the tree-wide sweep runs ls-files with NO pathspec, and node's
-  // 1 MB default ENOBUFS-crashes on large monorepos (or anything that
-  // force-tracked node_modules) instead of failing with a named gate error.
-  const out = execFileSync('git', ['ls-files', ...globs], {
-    encoding: 'utf8',
-    maxBuffer: MAX_BUFFER,
-  })
+function trackedFiles() {
+  // ONE bare `git ls-files` for the whole gate (was two): the gate-file sweep filters
+  // this with gateFileMatch in-process (replacing the old GATE_FILE_GLOBS pathspecs),
+  // the corpus sweep filters out binaries. execFileSync, never a shell — no argv to
+  // glob and nothing for sh to mangle. MAX_BUFFER: a large monorepo (or a force-tracked
+  // node_modules) ENOBUFS-crashes node's 1 MB default instead of a named gate error.
+  const out = execFileSync('git', ['ls-files'], { encoding: 'utf8', maxBuffer: MAX_BUFFER })
   return out
     .split('\n')
     .map((f) => f.trim())
     .filter(Boolean)
 }
+
+// Enumerate the tracked tree exactly once; both sweeps below reuse it.
+const tracked = trackedFiles()
 
 function read(file) {
   try {
@@ -65,7 +63,7 @@ const uncited = [] // decision sites with no SOURCE in the window (hook parity)
 const problems = [] // resolvability + corpus-integrity failures
 
 // ── 1. decision sites need a SOURCE, and every SOURCE must resolve ────────────
-for (const file of trackedFiles(GATE_FILE_GLOBS).filter(gateScansFile)) {
+for (const file of tracked.filter(gateFileMatch).filter(gateScansFile)) {
   const src = read(file)
   if (src === null) continue
   for (const f of findUncitedDecisionSites(src)) {
@@ -154,7 +152,7 @@ if (corpus !== null) {
 
 // ── 3. every corpus reference in the tracked tree must resolve ────────────────
 if (corpus !== null) {
-  for (const file of trackedFiles([]).filter((f) => !BINARY_FILE.test(f))) {
+  for (const file of tracked.filter((f) => !BINARY_FILE.test(f))) {
     const src = read(file)
     if (src === null || !src.includes('[corpus:')) continue
     src.split('\n').forEach((ln, i) => {

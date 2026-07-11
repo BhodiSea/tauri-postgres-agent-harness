@@ -287,6 +287,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$elapsed" -gt 120 ]; then echo "::error::warm validate took ${elapsed}s (budget 120s)"; exit 1; fi
           if [ "$elapsed" -gt 90 ]; then echo "::warning::warm validate took ${elapsed}s (target 90s)"; fi
+      - name: Warm-lane positive control — the e2e stamp engaged (skipped the browser run)
+        working-directory: .selftest/boot
+        # The cold --min-floor run above recorded .harness/e2e.ok; the warm run must
+        # then short-circuit e2e via that stamp instead of re-running Playwright. A
+        # green warm log WITHOUT this line means the biggest warm-path win silently
+        # regressed, so fail closed on its absence.
+        run: |
+          if grep -E '^e2e: OK.*inputs unchanged' warm-validate.log; then
+            echo 'e2e stamp engaged on the warm run: OK'
+          else
+            echo '::error::warm validate did not skip e2e via its stamp — the warm-path win regressed'
+            exit 1
+          fi
       - name: RLS runner FAILS CLOSED without a database (CI=true)
         working-directory: .selftest/boot
         run: |

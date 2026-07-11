@@ -11,7 +11,7 @@
 // that block is skipped entirely and no pnpm process is spawned.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -182,4 +182,40 @@ test('skip asymmetry: no root package.json → loud local SKIP (exit 0), CI fail
   assert.ok(local.out.includes('SKIPPED'), local.out)
   const ci = runGate(dir, { ci: true })
   assert.equal(ci.code, 1, ci.out)
+})
+
+// ── content-addressed stamp (v0.1.4): kills the `pnpm list -r` subprocess warm ──
+test('stamp: a green run records .harness/version-sync.ok; a warm re-run reports inputs-unchanged', () => {
+  const dir = fixture({ version: '0.1.4', serverVersion: '0.1.4' })
+  const cold = runGate(dir, { ci: false })
+  assert.equal(cold.code, 0, cold.out)
+  assert.ok(cold.out.includes('in lockstep'), cold.out)
+  assert.ok(existsSync(join(dir, '.harness/version-sync.ok')), 'a green run must record the stamp')
+  // The warm short-circuit happens at the top, before the zod/`pnpm list` block runs.
+  const warm = runGate(dir, { ci: false })
+  assert.equal(warm.code, 0, warm.out)
+  assert.ok(warm.out.includes('inputs unchanged'), warm.out)
+})
+
+test('stamp: CI=true ignores a present stamp and re-runs the real check', () => {
+  const dir = fixture({ version: '0.1.4' })
+  runGate(dir, { ci: false }) // record a stamp
+  const inCi = runGate(dir, { ci: true })
+  assert.equal(inCi.code, 0, inCi.out)
+  assert.ok(inCi.out.includes('in lockstep'), inCi.out)
+  assert.ok(!inCi.out.includes('inputs unchanged'), inCi.out)
+})
+
+test('stamp: mutating a version input invalidates the stamp — the warm run re-checks and reds', () => {
+  const dir = fixture({ version: '0.1.4', serverVersion: '0.1.4' })
+  assert.equal(runGate(dir, { ci: false }).code, 0)
+  // Drift apps/server behind root: the digest changes, so the stamp no longer skips.
+  writeFileSync(
+    join(dir, 'apps/server/package.json'),
+    JSON.stringify({ name: 'server', version: '0.1.3' }),
+  )
+  const r = runGate(dir, { ci: false })
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('version drift'), r.out)
+  assert.ok(!r.out.includes('inputs unchanged'), r.out)
 })

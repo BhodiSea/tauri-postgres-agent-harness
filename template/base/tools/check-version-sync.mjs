@@ -10,13 +10,21 @@
 //      instanceof checks in @hono/zod-openapi with incomprehensible errors)
 // SOURCE: docs/harness/README.md (version-sync gate) [corpus: harness/doctrine]
 import { existsSync, readFileSync } from 'node:fs'
-import { failures, inCI, ok, runCmd, skipOrFail } from './lib/gate.mjs'
+import { failures, inCI, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
+import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'version-sync'
 const errs = []
 
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'))
 if (!existsSync('package.json')) skipOrFail(GATE, 'no root package.json')
+
+// Content-addressed local skip (declared inputs: lib/stamp-inputs.mjs). The verdict is
+// a pure function of the version manifests, node-version files, catalog, and the
+// resolved lockfile that determines the installed zod graph — so a warm run short-
+// circuits here WITHOUT spawning `pnpm list -r`. CI always re-runs; recordGreen() below
+// fires only on a clean pass.
+const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 const root = readJson('package.json')
 const versions = { 'package.json': root.version }
@@ -100,4 +108,5 @@ if (existsSync('node_modules')) {
 }
 
 failures(GATE, errs)
+recordGreen()
 ok(GATE, `version ${root.version} in lockstep; node majors agree; rc tools exact-pinned`)

@@ -88,6 +88,13 @@ One version everywhere (root/tauri.conf/server/desktop — the skew middleware c
 majors, so a drifted manifest makes the desktop lie about itself); Node majors agree
 across `.nvmrc`/`.node-version`/`engines`; rc-churn tools EXACT-pinned in the catalog;
 exactly one zod instance resolves workspace-wide. Pass by bumping versions together.
+Stamped: `.harness/version-sync.ok` (sha256 over the four version manifests,
+`.nvmrc`/`.node-version`, `pnpm-workspace.yaml`, and `pnpm-lock.yaml`) short-circuits a
+warm unchanged run in ms — the win is skipping the `pnpm list -r --json` subprocess
+that dominates the gate's wall time. Staleness analysis: the verdict is a pure function
+of those files, and the single-zod-instance graph is fully determined by the lockfile
+(not the installed `node_modules` bytes), so an unchanged digest cannot hide a real
+drift; CI always re-runs regardless.
 **Anti-vacuity:** bump only `apps/server/package.json` → FAIL listing all four versions.
 
 ### 9. prompts — `node tools/check-prompts-lock.mjs`
@@ -218,7 +225,17 @@ degraded-network) in chromium against `vite dev` — the same suite CI runs. Chr
 presence is detected from playwright's own registry (`chromium.executablePath()` +
 existsSync); absent → loud local skip with the exact install command
 (`pnpm exec playwright install chromium`), CI → fail closed. Hard 10-minute kill;
-the last 50 output lines surface on failure.
+the last 50 output lines surface on failure. Stamped — the single biggest warm-validate
+win: `.harness/e2e.ok` (sha256 over `e2e/`, `playwright.config.ts`, the desktop app
+`src`/`index.html`/`public`/configs, `packages/schema/src`, and `pnpm-lock.yaml`)
+short-circuits a warm unchanged run in ms, *before even resolving Playwright*, instead
+of re-running the whole browser suite. The stamp records ONLY after a real run passes
+including the anti-vacuity check below, so a vacuous run never stamps. Staleness
+analysis of the deliberate exclusions: `apps/server` is stubbed by the e2e IPC mocks;
+`src-tauri` is mocked and its committed specta bindings already live inside
+`apps/desktop/src`; `packages/importer`/`packages/eval` are unreachable from the
+desktop graph by depcruise + bundle purity — none can change a desktop e2e verdict, so
+omitting them cannot ride a stale green. CI always re-runs.
 **Anti-vacuity:** an exit-0 run reporting zero passing tests FAILS ("an empty e2e run
 is a vacuous pass"); break a state test id or remove the `:focus-visible` outline →
 the suite (and thus the gate) reds.
@@ -232,6 +249,23 @@ mechanical); every `pnpm <script>` command AGENTS.md advertises must exist in th
 package.json scripts.
 **Anti-vacuity:** add a gate to VALIDATE_STEPS without touching AGENTS.md → FAIL
 printing documented-vs-actual chains; advertise `pnpm ghost` → FAIL naming it.
+
+### the validate runner — serial by default, pooled under `--report-all`
+
+`node tools/validate.mjs` runs the chain above strictly serially with streamed output,
+stopping at the first failure — the fast agent edit-loop (one red, one fix). This mode
+is byte-for-byte unchanged from earlier releases. The Stop hook instead passes
+`--report-all` so an agent sees EVERY red at once; there, maximal runs of consecutive
+read-only gates (the `PARALLEL_SAFE` set: provenance, tauri-policy, version-sync,
+prompts, licenses, schema-rls, migrations, contracts, styleguide, route-manifest,
+docs-sync) execute in a small pool (size `max(1, min(4, cores−1))`), with each child's
+stdout+stderr captured and flushed in CANONICAL order, so the report always reads
+top-to-bottom regardless of finish order. Any step NOT in that set runs exclusive
+(serial, streamed): the build/rust-check/e2e gates, `perf-budget` (a wall-time render
+measurement that CPU contention would flake red), and any consumer-added custom step —
+an unknown step is never assumed pool-safe. `provenance` and `migrations` share a `git`
+resource key so they never race `.git/index.lock` inside a batch. Per-step elapsed ms,
+the summary block, and the exit aggregation are identical across both modes.
 
 ## Stop-hook runtime suites (`STOP_HOOK_STEPS`)
 

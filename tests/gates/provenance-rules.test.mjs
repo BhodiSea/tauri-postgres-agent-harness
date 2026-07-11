@@ -16,10 +16,10 @@ import {
   CORPUS_REF,
   DECISION,
   DECISION_GROUPS,
-  GATE_FILE_GLOBS,
   SOURCE_WINDOW_LINES,
   extractSourceComments,
   findUncitedDecisionSites,
+  gateFileMatch,
   gateScansFile,
   hookScansFile,
   payloadResolves,
@@ -38,14 +38,40 @@ test('DECISION_GROUPS carries the six stack decision classes in order', () => {
   assert.equal(SOURCE_WINDOW_LINES, 3)
 })
 
-test('GATE_FILE_GLOBS is the five committed git pathspecs', () => {
-  assert.deepEqual(GATE_FILE_GLOBS, [
-    'apps/**/*.ts',
-    'apps/**/*.tsx',
-    'packages/**/*.ts',
-    'packages/**/*.tsx',
-    'packages/**/*.sql',
-  ])
+// ── gateFileMatch: the tree-wide gate-file membership (replaces GATE_FILE_GLOBS) ──
+test('gateFileMatch: apps/packages .ts/.tsx and packages .sql are in scope', () => {
+  assert.equal(gateFileMatch('apps/desktop/src/App.tsx'), true)
+  assert.equal(gateFileMatch('apps/server/src/auth.ts'), true)
+  assert.equal(gateFileMatch('packages/schema/src/index.ts'), true)
+  assert.equal(gateFileMatch('packages/schema/src/x.tsx'), true)
+  assert.equal(gateFileMatch('packages/schema/drizzle/0001_x.sql'), true)
+})
+
+test('gateFileMatch: out-of-scope trees, wrong extensions, and apps/*.sql are excluded', () => {
+  // .sql is packages-only — the old pathspecs never listed apps/**/*.sql.
+  assert.equal(gateFileMatch('apps/desktop/src/query.sql'), false)
+  // Only apps/ and packages/ are gate scope (narrower than the hook by design).
+  assert.equal(gateFileMatch('tools/check-sources.mjs'), false)
+  assert.equal(gateFileMatch('root.ts'), false)
+  assert.equal(gateFileMatch('docs/notes.md'), false)
+  assert.equal(gateFileMatch('apps/desktop/src/config.json'), false)
+})
+
+test('gateFileMatch: WIDENING — files DIRECTLY under apps/ or packages/ are in scope', () => {
+  // git ls-files `apps/**/*.ts` requires ≥1 intermediate dir and SKIPS these; the
+  // `.+` regex includes them — the wider, fail-closed reading (a decision site
+  // directly under apps/ or packages/ is scanned, not silently missed).
+  assert.equal(gateFileMatch('apps/top.ts'), true)
+  assert.equal(gateFileMatch('apps/top.tsx'), true)
+  assert.equal(gateFileMatch('packages/root.sql'), true)
+  assert.equal(gateFileMatch('packages/root.ts'), true)
+})
+
+test('gateFileMatch: Windows backslash paths are POSIX-normalized before matching', () => {
+  assert.equal(gateFileMatch('apps\\desktop\\src\\App.tsx'), true)
+  assert.equal(gateFileMatch('packages\\schema\\drizzle\\0001_x.sql'), true)
+  // Normalization must not widen scope: apps\...\*.sql is still out (packages-only).
+  assert.equal(gateFileMatch('apps\\desktop\\src\\query.sql'), false)
 })
 
 test('DECISION matches one representative token per group and is case-sensitive', () => {

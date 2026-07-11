@@ -5,10 +5,88 @@ pick up fixes with `npx --yes github:BhodiSea/tauri-postgres-agent-harness updat
 
 ## [0.1.4] — 2026-07-11
 
-In progress — the four pillars deepened: the reference UI becomes a real subject
-(matrix feature, primitives, light/dark parity with computed contrast), the
-machinery is deduplicated and unit-tested, and warm validate gets stamped e2e +
-a report-all concurrency pool. Full notes land with the release commit.
+The four pillars deepened. The reference UI becomes a real gate subject (a
+virtualized matrix exemplar, shared primitives, light/dark parity with
+**computed** WCAG contrast), the machinery is deduplicated and unit-tested
+(205 → 558 harness tests), and warm validate drops to ≈5 s for all 22 gates
+(stamped e2e, pooled report-all) — measured cold ≈76 s with real cargo +
+30 chromium e2e tests on the fresh scaffold.
+
+**What `update` does for an existing install** (lead story): all owned gate
+scripts, hooks, e2e specs, and the corpus refresh as usual. The ~28 new seeded
+desktop exemplar files (features/matrix, screens/, theme/, router, the
+component primitives) are **withheld** — a new `seedOnInitOnly` migration kind
+stops `update` from planting files your seeded `routes.ts` never references
+(which would red route-manifest + dead-code). Each withheld cluster emits a
+note; pull on your terms with `update --refresh-seeded <path>` (now accepts
+directory prefixes). After pulling `features/matrix`, register the screen in
+`routes.ts` (or pull the new `routes.ts` too — pristine seeded files refresh,
+drifted ones park) — route-manifest's FIX line walks you through it. The new
+styleguide/perf-budget checks self-disable on pre-0.1.4 manifests, except the
+arbitrary-value scan (tokens-only hardening; `allow` entries are the escape).
+
+- **UI/UX**: shared `src/components` primitives (Button/Input/Skeleton/Toast/
+  EmptyState) replace four hand-repeated inline button styles (accent usage
+  4/10 of budget); light + dark themes with `prefers-color-scheme` tracking, a
+  persisted three-state toggle, palette commands, and a dark launch frame in
+  both themes (anti-flash, lockstep with tauri.conf backgroundColor); explicit
+  `prefers-reduced-motion` support; a hand-rolled router with a lazy-loaded
+  second route; and `features/matrix` — the doctrine's data-dense exemplar:
+  pure virtual-window math, an APG roving-tabindex grid reporting
+  `aria-rowcount` over a windowed DOM, keyset pagination wired to the server's
+  `{ items, nextCursor }` contract, and a hand-rolled SVG summary strip.
+- **Styleguide gate computes contrast**: the prose contrast table in styles.css
+  is replaced by `tools/lib/oklch.mjs` (CSS Color 4 conversion → WCAG relative
+  luminance) verifying every manifest-declared fg/bg pair in BOTH themes —
+  6 pairs computed green (the shipped light accent was out of sRGB gamut and
+  failing 4.5:1 as text; retuned to `oklch(0.475 0.08 200)`). Theme-block token
+  closure (a light override missing a token fails loudly), and Tailwind
+  arbitrary-value escapes (`w-[13px]`, `[prop:value]`, `-(--var)`) are gate-red.
+- **perf-budget measures the real component**: `budget.subject` spawns
+  `features/matrix/perfSubject.ts` under tsx (median-of-7 renderToString of the
+  actual 10k-cell grid, ~40 ms local, budget 500 ms), anti-vacuous
+  (`role="gridcell"` asserted), and an unresolvable subject FAILS — never a
+  silent synthetic fallback. route-manifest adds canonical-path validity,
+  duplicate-path, and state-test-id uniqueness checks.
+- **e2e lane 15 → 30 tests**: every route axe-swept in BOTH themes; a
+  reduced-motion lane proving the held loading skeleton runs zero animations
+  (with a no-preference control proving the assert can red); a matrix lane
+  proving single-tab-stop roving focus, real virtualization, and cursor
+  forwarding. 3× consecutive runs flake-free; `retries` stays 0.
+- **Warm validate ≈5 s**: the e2e and version-sync gates are content-hash
+  stamped (a vacuous run never stamps; CI always re-runs — the selftest warm
+  lane greps the stamp skip as a positive control), and `--report-all` (the
+  Stop-hook path) runs the 11 read-only gates through a concurrency pool with
+  canonical-order output. Cold ≈76 s (rust-check dominates at ~51 s).
+- **FLOOR is a frozen snapshot**: `tools/validate.floor.json` replaces the
+  hand-copied array in validate.mjs — `--min-floor` fails CLOSED on a missing/
+  corrupt snapshot, `scripts/generate-floor.mjs --check` + a data-to-data test
+  end the hand-sync, and the file is write-guard protected (34 → 33 real
+  patterns + 1: the old count regex had been counting two comment lines).
+- **Guard rules are data with per-rule falsifiability**: both guards load their
+  tables from `hooks/lib/guard-rules.mjs` (import failure = BLOCKED, exit 2);
+  check-canary-coverage asserts every one of the 56 rule ids has a behavioral
+  deny/allow canary (three brittle count-regexes deleted; closure surfaced
+  three previously untested rules: fork-bomb, drizzle-kit-drop,
+  minisign-secret-key) and pins the inline denyTool call-site counts.
+- **Fixed (fail-open)**: the provenance sweep's git pathspecs silently skipped
+  files directly under `apps/` and `packages/` (`apps/**/*.ts` requires an
+  intermediate directory) — `gateFileMatch()` widens the sweep fail-closed and
+  one bare `git ls-files` serves both sweeps.
+- **Machinery quality**: one dirent-based walker per side replaces ~12 drifted
+  copies (directory-only pruning; a broken symlink can no longer crash
+  doctor's scan); `writeInstallFile` re-asserts the executable bit on
+  overwrite; update's plan loop and refresh-seeded share one pure
+  `classifyDrift()`; doctor renders only seeded entries and `--refresh-seeded`
+  renders only the requested paths. 558 harness tests (was 205): logic-level
+  suites for 8 previously canary-only gates, 9 untested installer libs, hookio
+  fail-closed contracts, and a pinned digest vector guarding stamp inputs.
+  New CI floors: tools-lib 90/85/85; update-skew is now a [v0.1.1, v0.1.3]
+  matrix asserting route-manifest green on the 0.1.3 leg.
+- **Docs honesty**: README module list 12 → 10 (the two retired-in-0.1.3
+  modules removed; stub-core modules now say what ships wired vs. as a seam);
+  CITATION.cff carries version + date-released and check-release-lockstep
+  asserts both plus the CHANGELOG section on every PR.
 
 ## [0.1.3] — 2026-07-10
 

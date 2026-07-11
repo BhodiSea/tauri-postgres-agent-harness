@@ -24,7 +24,7 @@ npx --yes github:BhodiSea/tauri-postgres-agent-harness update   # pull harness f
 npx --yes github:BhodiSea/tauri-postgres-agent-harness doctor   # integrity + wiring check
 ```
 
-Pin installs to a tag for reproducibility: `github:BhodiSea/tauri-postgres-agent-harness#v0.1.1`.
+Pin installs to a tag for reproducibility: `github:BhodiSea/tauri-postgres-agent-harness#v0.1.4`.
 This repo is also a **GitHub template** ("Use this template" → `pnpm bootstrap` consumes
 the checkout into a project in place), and its agents/commands/skill are installable as a
 **Claude Code plugin** (`/plugin marketplace add BhodiSea/tauri-postgres-agent-harness`).
@@ -74,7 +74,9 @@ focus traps — as an agent-time gate) → docs-sync (AGENTS.md gate list == the
 advertised commands exist). The expensive gates are content-hash **stamped**: unchanged
 inputs make a warm validate skip build/contracts/licenses/rust-check/**e2e**/version-sync
 in milliseconds (a vacuous run never stamps; CI always re-runs everything), and the Stop
-hook's `--report-all` runs the read-only gates through a small concurrency pool.
+hook's `--report-all` runs the read-only gates through a small concurrency pool —
+measured on the fresh scaffold: cold ≈ 76 s (real cargo check + 30 chromium e2e tests),
+warm ≈ 5 s for all 22 steps.
 
 Rust/database gates **skip loudly** without the toolchain locally and **fail closed in
 CI** (`HARNESS_REQUIRE_TOOLCHAINS=1`) — a skip is never mistakable for a pass.
@@ -149,7 +151,7 @@ CI parity and review are the backstops. Threat model:
 
 ## What an install gives you
 
-~170 files: the `.claude/` machinery (settings + 5 hooks + 8 agents + 3 commands + rules
+~250 files: the `.claude/` machinery (settings + 5 hooks + 8 agents + 3 commands + rules
 + the vertical-slice skill), the gate configs (biome, eslint, knip, dependency-cruiser,
 tsconfig solution + max-strict base, lefthook, commitlint, gitleaks, cspell, deny.toml,
 rust-toolchain), `tools/` (validate runner + 9 gate scripts + two MCP servers + corpus),

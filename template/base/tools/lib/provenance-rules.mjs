@@ -79,12 +79,15 @@ export const GATE_FILE_GLOBS = [
   'packages/**/*.sql',
 ]
 
-// Per-edit scope check used by the PostToolUse hook.
+// Per-edit scope check used by the PostToolUse hook. The hook receives the
+// OS-native absolute path from tool_input — normalize to POSIX at this
+// boundary so the `/`-based excludes hold on Windows (`apps\desktop\...`).
 export function hookScansFile(file) {
+  const posix = file.replaceAll('\\', '/')
   return (
-    SCANNABLE_FILE.test(file) &&
-    !SCAN_EXCLUDES.some((re) => re.test(file)) &&
-    !HOOK_EXCLUDES.some((re) => re.test(file))
+    SCANNABLE_FILE.test(posix) &&
+    !SCAN_EXCLUDES.some((re) => re.test(posix)) &&
+    !HOOK_EXCLUDES.some((re) => re.test(posix))
   )
 }
 

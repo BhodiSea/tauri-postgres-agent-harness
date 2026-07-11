@@ -17,7 +17,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const CLI = fileURLToPath(new URL('../../installer/cli.mjs', import.meta.url))
 const TEMPLATE = fileURLToPath(new URL('../../template/', import.meta.url))
@@ -583,7 +583,11 @@ test('CI floor is in lockstep with VALIDATE_STEPS (a weakened config cannot weak
   const floor = [...floorBlock[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)].map((m) => [m[1], m[2]])
   assert.ok(floor.length > 0, 'FLOOR parsed empty')
 
-  const { VALIDATE_STEPS } = await import(join(TEMPLATE, 'base/tools/harness.config.mjs'))
+  // file:// URL, not the raw path — Windows absolute paths (D:\…) are not
+  // importable by the ESM loader.
+  const { VALIDATE_STEPS } = await import(
+    pathToFileURL(join(TEMPLATE, 'base/tools/harness.config.mjs')).href
+  )
   assert.deepEqual(
     VALIDATE_STEPS,
     floor,
@@ -592,9 +596,13 @@ test('CI floor is in lockstep with VALIDATE_STEPS (a weakened config cannot weak
 })
 
 test('npm pack ships every template path (dotless storage survives packing)', () => {
+  // shell: true — on Windows npm is a .cmd shim that a shell-less spawn cannot
+  // execute (ENOENT bare / EINVAL as npm.cmd under Node's CVE-2024-27980
+  // hardening). Args are static, so shell interpolation is a non-issue.
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
     encoding: 'utf8',
+    shell: true,
   })
   const files = JSON.parse(out)[0].files.map((f) => f.path)
   for (const critical of [

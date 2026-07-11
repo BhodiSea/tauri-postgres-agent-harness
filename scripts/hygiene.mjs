@@ -6,7 +6,7 @@
 //    installer's placeholder registry, and every registry var must be used.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TEMPLATE = join(ROOT, 'template')
@@ -77,7 +77,9 @@ for (const file of walk(TEMPLATE)) {
 // Placeholder closure (runs once the registry + manifest exist).
 const registryPath = join(ROOT, 'installer/lib/placeholders.mjs')
 if (existsSync(registryPath)) {
-  const { PLACEHOLDERS } = await import(registryPath)
+  // file:// URL, not the raw path — Windows absolute paths (D:\…) are not
+  // importable by the ESM loader.
+  const { PLACEHOLDERS } = await import(pathToFileURL(registryPath).href)
   const registered = new Set(Object.keys(PLACEHOLDERS))
   const used = new Set()
   for (const file of walk(TEMPLATE)) {

@@ -18,8 +18,10 @@ const cmd = String(input?.tool_input?.command ?? '')
 // HARNESS_ALLOW_SELF_EDIT=1 human escape hatch as the write-guard (canary CI
 // injections use it deliberately).
 // SOURCE: docs/harness/README.md (tamper evidence)
-const PROT_DIRS = String.raw`(?:\.\/)?(?:tools|\.claude|\.harness|\.github\/workflows|packages\/schema\/drizzle|tests\/rls|tests\/migrations)\/[^\s"'|;&]*`
-const PROT_FILES = String.raw`(?:\.\/)?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
+// [\\/] everywhere a separator appears: on Windows shells the same write is
+// spelled `tools\validate.mjs`, and a `/`-only pattern would fail OPEN there.
+const PROT_DIRS = String.raw`(?:\.[\\/])?(?:tools|\.claude|\.harness|\.github[\\/]workflows|packages[\\/]schema[\\/]drizzle|tests[\\/]rls|tests[\\/]migrations)[\\/][^\s"'|;&]*`
+const PROT_FILES = String.raw`(?:\.[\\/])?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
 const PROT = `(?:${PROT_DIRS}|${PROT_FILES})`
 const selfEdit = process.env.HARNESS_ALLOW_SELF_EDIT === '1'
 const SHELL_WRITE_MSG =
@@ -107,7 +109,9 @@ const RULES = [
     // its plan probe seeds and ANALYZEs through the owner role). The runners' own
     // fix hints say to set this env var, so pointing them at a database stays legal.
     /MIGRATOR_DATABASE_URL/,
-    /drizzle-kit\s+(migrate|generate|check)|db:migrate|test:rls|tests\/(migrations|rls)\//.test(cmd)
+    /drizzle-kit\s+(migrate|generate|check)|db:migrate|test:rls|tests[\\/](migrations|rls)[\\/]/.test(
+      cmd,
+    )
       ? null
       : 'Blocked: MIGRATOR_DATABASE_URL is the RLS-bypassing role — only drizzle-kit migrate/generate/check and the tests/migrations + tests/rls runners may use it.',
   ],

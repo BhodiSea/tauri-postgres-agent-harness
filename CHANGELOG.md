@@ -58,6 +58,14 @@ the consumer's config, promoted modules fold in, canonical commands heal).
   ENOBUFS-crashed on large trees (64 MB buffer); pnpm's CI banner polluted the
   openapi regen diff (`--silent`); a jsdom teardown race in the desktop unit
   tests (network-stubbed test setup + RTL cleanup).
+- **Fixed (Windows)**: on native-Windows sessions the write-guard derived the
+  project-relative path without normalizing separators, so every root-anchored
+  PROTECTED pattern silently failed OPEN — backslash paths now normalize to
+  POSIX before matching, and the bash-guard's protected-surface patterns accept
+  both separators (deny tests cover the Windows spellings). Also: the
+  source-check hook scanned generated bindings on Windows (same separator bug),
+  and absolute-path dynamic `import()`s crashed the new Windows unit lanes
+  (`pathToFileURL` everywhere).
 
 ## [0.1.1] — 2026-07-10
 

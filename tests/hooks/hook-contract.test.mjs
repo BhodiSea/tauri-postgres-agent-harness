@@ -99,6 +99,11 @@ for (const cmd of [
   'echo "-- tweak" >> packages/schema/drizzle/0000_init.sql',
   'echo {} > pnpm-lock.yaml',
   'echo "" > eslint.config.mjs',
+  // Windows spellings — the protected-surface patterns accept both separators.
+  'echo x > tools\\validate.mjs',
+  'echo x | tee .claude\\hooks\\stop-validate-gate.mjs',
+  'echo deadbeef > .harness\\build.ok',
+  'cp evil.yml .github\\workflows\\quality-gate.yml',
 ]) {
   test(`bash-guard denies shell write: ${cmd}`, () => {
     assert.ok(denied(runHook('pretool-bash-guard.mjs', { tool_name: 'Bash', tool_input: { command: cmd } })), cmd)
@@ -210,6 +215,22 @@ test('write-guard allows gate edits with HARNESS_ALLOW_SELF_EDIT=1', () => {
     { env: { HARNESS_ALLOW_SELF_EDIT: '1' } },
   )
   assert.ok(!denied(r), r.stdout)
+})
+
+test('write-guard denies Windows-spelled paths (backslashes must not fail open)', () => {
+  // Simulates a native-Windows session: OS-native absolute file_path + backslashed
+  // CLAUDE_PROJECT_DIR. The guard normalizes both to POSIX before the PROTECTED
+  // match — without that, every root-anchored pattern silently fails open.
+  const abs = runHook(
+    'pretool-write-guard.mjs',
+    { tool_input: { file_path: 'D:\\proj\\tools\\validate.mjs', content: 'x\n' } },
+    { env: { CLAUDE_PROJECT_DIR: 'D:\\proj' } },
+  )
+  assert.ok(denied(abs), 'backslashed absolute path must still be write-protected')
+  const rel = runHook('pretool-write-guard.mjs', {
+    tool_input: { file_path: 'tools\\harness.config.mjs', content: 'x\n' },
+  })
+  assert.ok(denied(rel), 'backslashed relative path must still be write-protected')
 })
 
 test('write-guard does NOT false-positive on ordinary nested project files', () => {

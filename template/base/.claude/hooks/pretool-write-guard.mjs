@@ -16,12 +16,16 @@ const path = String(ti.file_path ?? ti.path ?? '')
 
 // Resolve to a path RELATIVE to the project root so the protected patterns can be
 // root-anchored (^…) — otherwise a nested node_modules/x/tools/validate.mjs would
-// false-match. CLAUDE_PROJECT_DIR is guaranteed for hook subprocesses.
-const projectDir = process.env.CLAUDE_PROJECT_DIR ?? ''
+// false-match. CLAUDE_PROJECT_DIR is guaranteed for hook subprocesses. Normalize
+// to POSIX separators FIRST: on Windows the tool delivers D:\…\tools\validate.mjs,
+// and without this every `/`-based PROTECTED pattern silently fails OPEN.
+const toPosix = (p) => p.replaceAll('\\', '/')
+const projectDir = toPosix(process.env.CLAUDE_PROJECT_DIR ?? '')
+const posixPath = toPosix(path)
 const rel =
-  projectDir && path.startsWith(projectDir)
-    ? path.slice(projectDir.length).replace(/^\/+/, '')
-    : path.replace(/^\.?\/+/, '')
+  projectDir && posixPath.startsWith(projectDir)
+    ? posixPath.slice(projectDir.length).replace(/^\/+/, '')
+    : posixPath.replace(/^\.?\/+/, '')
 
 // Tamper evidence (layer 2): the gate must not be able to rewrite itself. Edits to the
 // harness config, the gate runner + every gate script, the RLS runner, the lockfiles the

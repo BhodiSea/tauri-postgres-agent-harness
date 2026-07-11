@@ -139,8 +139,11 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 - **Data-dense screens follow `features/matrix`**: virtualized window
   (`useVirtualWindow`), APG roving-tabindex grid (`useRovingGrid`,
   aria-rowcount over the windowed DOM), keyset pagination (`useKeysetQuery`).
-  The perf-budget gate measures the REAL matrix subject
-  (`features/matrix/perfSubject.ts`), not a synthetic fixture.
+  The perf-budget gate measures REAL subjects, not a synthetic fixture, and
+  enforces closure: every `features/*` dir importing those hooks ships a
+  `perfSubject.ts` declared in `tools/perf-budget.json` `subjects[]`
+  (`features/matrix/perfSubject.ts` is the worked pattern; reviewed
+  `exempt: [{ dir, reason }]` entries are the only escape).
 - Charts in `features/{matrix,graph}` are hand-rolled SVG (chart libs banned
   there by lint); a11y is jsx-a11y strict, WCAG 2.2 AA.
 

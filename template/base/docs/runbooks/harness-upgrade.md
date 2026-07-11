@@ -46,3 +46,22 @@ start already grown.
 
 A corrupt manifest never ramps anything — the gates fail closed on unparseable
 JSON (restore the file from git history; do NOT re-run `init`).
+
+## Content-conditional checks (data-shape ramps, no `baseVersion` involved)
+
+Some checks key off the SHAPE of a seeded data file instead of `baseVersion`:
+the styleguide theme/contrast passes run only when
+`tools/styleguide.manifest.json` declares `themes`/`contrast`, and perf-budget's
+plural-subject measurement + dense-feature closure run only when
+`tools/perf-budget.json` declares `subjects[]`. Those files are seeded — `update`
+never rewrites them — so your install keeps its old shape (and gets a NOTE
+naming the newer one) until you pull the file deliberately:
+
+```
+npx tauri-postgres-agent-harness update --refresh-seeded tools/perf-budget.json
+```
+
+Pull any exemplar the new shape references first (a pre-0.1.4 install needs
+`update --refresh-seeded apps/desktop/src/features/matrix/` before the budget's
+matrix subject can measure), then re-run `pnpm validate`. Graduation here is the
+file pull itself — no `baseVersion` bump.

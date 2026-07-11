@@ -36,7 +36,9 @@
     ],
     "perf-budget": [
       { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs" }
+      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "dense-feature closure: a features/* dir importing useVirtualWindow/useRovingGrid with no perfSubject.ts → red with the create-FIX line naming the worked matrix pattern; exempt[] is the reviewed escape and malformed/stale exempt entries fail closed" },
+      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "subjects[] closure inverse: an entry pointing at a missing file and an undeclared features/*/perfSubject.ts both red before any measurement; declaring subject AND subjects together is an ambiguity red; legacy single-subject budgets keep 0.1.4 behavior plus a NOTE naming the refresh command" }
     ],
     "route-manifest": [
       { "kind": "fixture", "ref": "tests/gates/check-route-manifest.test.mjs" },

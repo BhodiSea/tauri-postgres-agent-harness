@@ -13,9 +13,9 @@
 // re-measure-once) is what we pin, not absolute milliseconds.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -80,14 +80,57 @@ function fixture({ budget = { cells: 2500, runs: 5, medianBudgetMs: 100000 }, de
   return dir
 }
 
-function runGate(dir, { ci = true } = {}) {
-  const env = { ...process.env }
+function runGate(dir, { ci = true, extraEnv = {} } = {}) {
+  const env = { ...process.env, ...extraEnv }
   delete env.CI
   delete env.HARNESS_REQUIRE_TOOLCHAINS
+  delete env.PERF_SUBJECT_EXPECT
   if (ci) env.CI = 'true'
   const res = spawnSync('node', [GATE], { cwd: dir, encoding: 'utf8', env })
   return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}` }
 }
+
+// ---- subjects[]-shape helpers (v0.1.5) -------------------------------------------
+const MATRIX_SUBJECT = 'apps/desktop/src/features/matrix/perfSubject.ts'
+
+function plantFile(dir, rel, content) {
+  mkdirSync(join(dir, dirname(rel)), { recursive: true })
+  writeFileSync(join(dir, rel), content)
+}
+
+// A minimal subjects[]-shape budget: one matrix entry under a generous budget.
+function subjectsBudget(overrides = {}) {
+  return {
+    runs: 3,
+    subjects: [{ subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 100000 }],
+    ...overrides,
+  }
+}
+
+// A file whose import makes its feature dir "dense" to the closure scan.
+const DENSE_FEATURE_SOURCE =
+  "import { computeWindow } from '../matrix/useVirtualWindow'\nexport const w = computeWindow\n"
+
+// A POSIX `pnpm` shim on PATH standing in for `pnpm --filter desktop exec tsx …`:
+// prints one {"samples":[…]} line exactly like the real perf-subject CLI would.
+// requireExpect pins the gate→CLI anti-vacuity contract: the shim refuses to
+// "measure" unless PERF_SUBJECT_EXPECT arrives with exactly that value.
+function fakePnpm(dir, { samples = [1, 1, 1], requireExpect } = {}) {
+  const bin = join(dir, 'fakebin')
+  mkdirSync(bin, { recursive: true })
+  const guard =
+    requireExpect === undefined
+      ? ''
+      : `[ "$PERF_SUBJECT_EXPECT" = '${requireExpect}' ] || { echo "PERF_SUBJECT_EXPECT not passed through" >&2; exit 1; }\n`
+  writeFileSync(
+    join(bin, 'pnpm'),
+    `#!/bin/sh\n${guard}echo '${JSON.stringify({ samples })}'\nexit 0\n`,
+  )
+  chmodSync(join(bin, 'pnpm'), 0o755)
+  return bin
+}
+
+const POSIX_ONLY = { skip: process.platform === 'win32' ? 'POSIX-only pnpm shim' : false }
 
 test('GREEN: a generous budget passes, reporting median-of-N (SIDE from cells, one sample per run)', () => {
   const r = runGate(fixture({ budget: { cells: 2500, runs: 5, medianBudgetMs: 100000 } }))
@@ -180,12 +223,20 @@ test('skip asymmetry: no desktop surface → loud local SKIP (exit 0), CI fail-c
   assert.equal(ci.code, 1, ci.out)
 })
 
-test('the SHIPPED tools/perf-budget.json satisfies the gate shape it is measured against', () => {
+test('the SHIPPED tools/perf-budget.json declares the subjects[] shape the gate enforces', () => {
   const budget = JSON.parse(readFileSync(SHIPPED_BUDGET_PATH, 'utf8'))
-  for (const key of ['cells', 'runs', 'medianBudgetMs']) {
-    assert.equal(typeof budget[key], 'number', `${key}: ${JSON.stringify(budget)}`)
-    assert.ok(budget[key] > 0, `${key}: ${JSON.stringify(budget)}`)
+  assert.equal(typeof budget.runs, 'number', JSON.stringify(budget))
+  assert.ok(budget.runs > 0, JSON.stringify(budget))
+  assert.equal(budget.subject, undefined, 'legacy "subject" must not coexist with subjects[]')
+  assert.ok(Array.isArray(budget.subjects) && budget.subjects.length >= 1, JSON.stringify(budget))
+  const matrix = budget.subjects.find((s) => s.subject === MATRIX_SUBJECT)
+  assert.ok(matrix, `the matrix exemplar must stay declared: ${JSON.stringify(budget.subjects)}`)
+  for (const entry of budget.subjects) {
+    assert.equal(typeof entry.subject, 'string', JSON.stringify(entry))
+    assert.ok(entry.cells > 0, JSON.stringify(entry))
+    assert.ok(entry.medianBudgetMs > 0, JSON.stringify(entry))
   }
+  assert.ok(Array.isArray(budget.exempt), 'exempt must ship as a (possibly empty) array')
 })
 
 // ---- v0.1.4: real-subject path (budget.subject) ---------------------------------
@@ -238,11 +289,14 @@ test('RED: a present subject whose measurement spawn fails is a FAIL, never a sy
 const CLI = fileURLToPath(
   new URL('../../template/base/tools/lib/perf-subject-cli.mjs', import.meta.url),
 )
-function runCli(subjectSource, cells, runs) {
+function runCli(subjectSource, cells, runs, { expect } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-perfcli-'))
   const subj = join(dir, 'subject.mjs')
   writeFileSync(subj, subjectSource)
-  const res = spawnSync('node', [CLI, subj, String(cells), String(runs)], { encoding: 'utf8' })
+  const env = { ...process.env }
+  delete env.PERF_SUBJECT_EXPECT
+  if (expect !== undefined) env.PERF_SUBJECT_EXPECT = expect
+  const res = spawnSync('node', [CLI, subj, String(cells), String(runs)], { encoding: 'utf8', env })
   return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, stdout: res.stdout ?? '' }
 }
 
@@ -271,4 +325,244 @@ test('perf-subject-cli: a subject with no renderSubject export exits 1', () => {
   const r = runCli('export const nope = 1\n', 100, 3)
   assert.equal(r.code, 1, r.out)
   assert.ok(r.out.includes('renderSubject'), r.out)
+})
+
+test('perf-subject-cli: PERF_SUBJECT_EXPECT overrides the anti-vacuity marker per subject', () => {
+  const src = 'export function renderSubject() { return \'<div data-heatcell="1">x</div>\' }\n'
+  // The custom marker is present → green even though role="gridcell" is absent.
+  const hit = runCli(src, 100, 3, { expect: 'data-heatcell' })
+  assert.equal(hit.code, 0, hit.out)
+  // No override → the gridcell default still applies to the same render.
+  const miss = runCli(src, 100, 3)
+  assert.equal(miss.code, 1, miss.out)
+  assert.ok(miss.out.includes('role="gridcell"'), miss.out)
+  // Override present but not in the HTML → red NAMING the marker.
+  const wrong = runCli(src, 100, 3, { expect: 'role="row"' })
+  assert.equal(wrong.code, 1, wrong.out)
+  assert.ok(wrong.out.includes('expected marker role="row"'), wrong.out)
+  assert.ok(wrong.out.includes('vacuous'), wrong.out)
+})
+
+// ---- v0.1.5: subjects[] shape + dense-feature closure ----------------------------
+// Closure and shape validation run BEFORE any measurement spawn, so every red
+// below is proven install-free; the measurement loop itself is pinned with a
+// POSIX pnpm shim (the check-e2e.test.mjs pattern) and end-to-end in the
+// fresh-scaffold acceptance lane.
+
+test('RED: declaring BOTH "subject" and "subjects" is an ambiguity fail, never a guess', () => {
+  const r = runGate(
+    fixture({ budget: { runs: 3, subject: MATRIX_SUBJECT, subjects: [] } }),
+  )
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('BOTH "subject" and "subjects"'), r.out)
+  assert.ok(r.out.includes('delete the legacy "subject" key'), r.out)
+})
+
+test('RED: subjects[] shape violations each fail closed naming the contract', () => {
+  const cases = [
+    { runs: 3, subjects: {} }, // not an array
+    { runs: 3, subjects: [] }, // empty = vacuous measurement list
+    { runs: 3, subjects: [{ subject: MATRIX_SUBJECT, cells: 100 }] }, // no budget
+    { runs: 3, subjects: [{ subject: MATRIX_SUBJECT, cells: -1, medianBudgetMs: 5 }] },
+    { runs: 3, subjects: [{ subject: '', cells: 100, medianBudgetMs: 5 }] },
+    { runs: 3, subjects: [{ subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 5, expect: '' }] },
+  ]
+  for (const budget of cases) {
+    const r = runGate(fixture({ budget }))
+    assert.equal(r.code, 1, `${JSON.stringify(budget)} :: ${r.out}`)
+    assert.ok(
+      r.out.includes('"subject": non-empty string') || r.out.includes('NON-EMPTY array'),
+      `${JSON.stringify(budget)} :: ${r.out}`,
+    )
+  }
+  const noRuns = runGate(fixture({ budget: { subjects: [{ subject: MATRIX_SUBJECT, cells: 1, medianBudgetMs: 1 }] } }))
+  assert.equal(noRuns.code, 1, noRuns.out)
+  assert.ok(noRuns.out.includes('positive number for runs'), noRuns.out)
+})
+
+test('RED: a duplicate subjects[] entry fails naming the path', () => {
+  const entry = { subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 5 }
+  const r = runGate(fixture({ budget: { runs: 3, subjects: [entry, { ...entry }] } }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('twice'), r.out)
+  assert.ok(r.out.includes(MATRIX_SUBJECT), r.out)
+})
+
+test('RED closure: a dense feature (imports useVirtualWindow) without perfSubject.ts, with the create-FIX line', () => {
+  const dir = fixture({ budget: subjectsBudget() })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  plantFile(dir, 'apps/desktop/src/features/reports/HeatPanel.tsx', DENSE_FEATURE_SOURCE)
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('ships NO perfSubject.ts'), r.out)
+  // The FIX line says exactly what to create and points at the worked pattern.
+  assert.ok(r.out.includes('apps/desktop/src/features/reports/perfSubject.ts'), r.out)
+  assert.ok(r.out.includes('renderSubject(cells)'), r.out)
+  assert.ok(r.out.includes('worked pattern: apps/desktop/src/features/matrix/perfSubject.ts'), r.out)
+  assert.ok(r.out.includes('exempt'), r.out)
+  // Closure reds BEFORE any measurement spawn.
+  assert.ok(!r.out.includes('falls back'), r.out)
+})
+
+test('RED closure: useRovingGrid imports are detected too, tolerant of path variants', () => {
+  const dir = fixture({ budget: subjectsBudget() })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  plantFile(
+    dir,
+    'apps/desktop/src/features/triage/Grid.tsx',
+    "import { useRovingGrid } from '@/features/matrix/useRovingGrid'\nexport const g = useRovingGrid\n",
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('apps/desktop/src/features/triage/'), r.out)
+  assert.ok(r.out.includes('ships NO perfSubject.ts'), r.out)
+})
+
+test('RED closure (inverse): a subjects[] entry pointing at a missing file fails before any spawn', () => {
+  const r = runGate(fixture({ budget: subjectsBudget() })) // matrix file never planted
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes(`subjects[] declares "${MATRIX_SUBJECT}" but the file does not exist`), r.out)
+  assert.ok(r.out.includes('remove the entry'), r.out)
+  assert.ok(!r.out.includes('falls back'), r.out)
+})
+
+test('RED closure (inverse): an existing features/*/perfSubject.ts not declared in subjects[] fails', () => {
+  const dir = fixture({ budget: subjectsBudget() })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  plantFile(dir, 'apps/desktop/src/features/notes/perfSubject.ts', 'export function renderSubject() { return "" }\n')
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(
+    r.out.includes('apps/desktop/src/features/notes/perfSubject.ts exists but is not declared'),
+    r.out,
+  )
+})
+
+test('RED: malformed exempt entries fail closed, never fail open', () => {
+  const missingReason = runGate(
+    fixture({ budget: subjectsBudget({ exempt: [{ dir: 'reports' }] }) }),
+  )
+  assert.equal(missingReason.code, 1, missingReason.out)
+  assert.ok(missingReason.out.includes('every exemption must be'), missingReason.out)
+  const notArray = runGate(fixture({ budget: subjectsBudget({ exempt: 'reports' }) }))
+  assert.equal(notArray.code, 1, notArray.out)
+  assert.ok(notArray.out.includes('"exempt" must be an ARRAY'), notArray.out)
+  const pathNotName = runGate(
+    fixture({ budget: subjectsBudget({ exempt: [{ dir: 'apps/desktop/src/features/reports', reason: 'x' }] }) }),
+  )
+  assert.equal(pathNotName.code, 1, pathNotName.out)
+  assert.ok(pathNotName.out.includes('feature dir NAME'), pathNotName.out)
+})
+
+test('RED: a stale exemption (no such feature dir) fails — the escape list stays honest', () => {
+  const dir = fixture({ budget: subjectsBudget({ exempt: [{ dir: 'ghost', reason: 'gone' }] }) })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('exempts feature dir "ghost"'), r.out)
+  assert.ok(r.out.includes('stale exemption'), r.out)
+})
+
+test(
+  'GREEN: exempt silences a dense dir; the default expect marker reaches the CLI via env',
+  POSIX_ONLY,
+  () => {
+    const dir = fixture({
+      budget: subjectsBudget({ exempt: [{ dir: 'reports', reason: 'prototype, not routed yet' }] }),
+    })
+    plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+    plantFile(dir, 'apps/desktop/src/features/reports/HeatPanel.tsx', DENSE_FEATURE_SOURCE)
+    // The shim only "measures" when PERF_SUBJECT_EXPECT carries the gridcell
+    // default — proof the gate always arms the anti-vacuity marker on this path.
+    const bin = fakePnpm(dir, { requireExpect: 'role="gridcell"' })
+    const r = runGate(dir, { ci: false, extraEnv: { PATH: `${bin}:${process.env.PATH}` } })
+    assert.equal(r.code, 0, r.out)
+    assert.ok(r.out.includes('perf-budget: OK'), r.out)
+    assert.ok(r.out.includes(`subject ${MATRIX_SUBJECT}, 100 cells, 3 runs`), r.out)
+    assert.ok(!r.out.includes('NOTE'), r.out)
+  },
+)
+
+test('GREEN: multiple subjects are measured sequentially, one detail per entry', POSIX_ONLY, () => {
+  const second = 'apps/desktop/src/features/reports/perfSubject.ts'
+  const dir = fixture({
+    budget: {
+      runs: 3,
+      subjects: [
+        { subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 100000 },
+        { subject: second, cells: 40, medianBudgetMs: 100000 },
+      ],
+    },
+  })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  plantFile(dir, second, 'export function renderSubject() { return "" }\n')
+  plantFile(dir, 'apps/desktop/src/features/reports/HeatPanel.tsx', DENSE_FEATURE_SOURCE)
+  const bin = fakePnpm(dir)
+  const r = runGate(dir, { ci: false, extraEnv: { PATH: `${bin}:${process.env.PATH}` } })
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes(`subject ${MATRIX_SUBJECT}, 100 cells, 3 runs`), r.out)
+  assert.ok(r.out.includes(`subject ${second}, 40 cells, 3 runs`), r.out)
+})
+
+test('per-subject expect: a declared marker is passed through and its absence would red', POSIX_ONLY, () => {
+  const dir = fixture({
+    budget: {
+      runs: 3,
+      subjects: [{ subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 100000, expect: 'data-heatcell' }],
+    },
+  })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  const bin = fakePnpm(dir, { requireExpect: 'data-heatcell' })
+  const green = runGate(dir, { ci: false, extraEnv: { PATH: `${bin}:${process.env.PATH}` } })
+  assert.equal(green.code, 0, green.out)
+  // Control: the same shim guard with the DEFAULT marker exits 1, and the gate
+  // reports the measurement failure — the env contract is load-bearing.
+  const dir2 = fixture({ budget: subjectsBudget() })
+  plantFile(dir2, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  const bin2 = fakePnpm(dir2, { requireExpect: 'data-heatcell' })
+  const red = runGate(dir2, { ci: false, extraEnv: { PATH: `${bin2}:${process.env.PATH}` } })
+  assert.equal(red.code, 1, red.out)
+  assert.ok(red.out.includes('failed to measure'), red.out)
+})
+
+test('RED: an over-budget subjects[] median re-measures once, then fails naming the subject', POSIX_ONLY, () => {
+  const dir = fixture({
+    budget: { runs: 3, subjects: [{ subject: MATRIX_SUBJECT, cells: 100, medianBudgetMs: 1 }] },
+  })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  const bin = fakePnpm(dir, { samples: [999, 999, 999] })
+  const r = runGate(dir, { ci: false, extraEnv: { PATH: `${bin}:${process.env.PATH}` } })
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('(re-measured once)'), r.out)
+  assert.ok(r.out.includes('regressed past the budget twice in a row'), r.out)
+  assert.ok(r.out.includes(`subject ${MATRIX_SUBJECT}`), r.out)
+})
+
+// ---- v0.1.5: legacy-shape NOTE (content-conditional, not rampNote) ---------------
+
+test('NOTE: the legacy single-subject shape names the subjects[] form and the refresh command', () => {
+  const budget = { cells: 100, runs: 3, medianBudgetMs: 500, subject: MATRIX_SUBJECT }
+  const r = runGate(fixture({ budget })) // subject file missing → red AFTER the NOTE
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('perf-budget: NOTE'), r.out)
+  assert.ok(r.out.includes('legacy single-subject shape'), r.out)
+  assert.ok(r.out.includes('subjects: [{ subject, cells, medianBudgetMs }]'), r.out)
+  assert.ok(r.out.includes('update --refresh-seeded tools/perf-budget.json'), r.out)
+})
+
+test('legacy single-subject GREEN behavior is unchanged apart from the NOTE', POSIX_ONLY, () => {
+  const budget = { cells: 100, runs: 3, medianBudgetMs: 100000, subject: MATRIX_SUBJECT }
+  const dir = fixture({ budget })
+  plantFile(dir, MATRIX_SUBJECT, 'export function renderSubject() { return "" }\n')
+  const bin = fakePnpm(dir)
+  const r = runGate(dir, { ci: false, extraEnv: { PATH: `${bin}:${process.env.PATH}` } })
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes('perf-budget: NOTE'), r.out)
+  assert.ok(r.out.includes(`OK — subject ${MATRIX_SUBJECT}, 100 cells, 3 runs`), r.out)
+})
+
+test('no NOTE on the subject-absent synthetic shape (pre-0.1.4 budgets stay byte-quiet)', () => {
+  const r = runGate(fixture({ budget: { cells: 100, runs: 3, medianBudgetMs: 100000 } }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(!r.out.includes('NOTE'), r.out)
 })

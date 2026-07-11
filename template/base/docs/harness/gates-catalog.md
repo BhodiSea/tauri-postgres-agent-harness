@@ -233,33 +233,57 @@ out of the sRGB gamut → FAIL 'unverifiable'; drop a light-theme token override
 ### 19. perf-budget — `node tools/check-perf-budget.mjs`
 
 Median-of-N `renderToString` wall time asserted against `tools/perf-budget.json`
-(write-guard-protected — raising the budget is a reviewed human decision). A red
-requires TWO independent over-budget medians (one automatic re-measure), so scheduler
-noise cannot fail a turn while a genuine 10× regression still cannot pass. Default-on
-since 0.1.3 (formerly the gate-perf-budget module). TWO measurement paths, chosen by
-whether the budget declares a `subject`:
+(write-guard-protected — raising a budget is a reviewed human decision; the file is
+SEEDED, so `update` never rewrites it). A red requires TWO independent over-budget
+medians (one automatic re-measure), so scheduler noise cannot fail a turn while a
+genuine 10× regression still cannot pass. Default-on since 0.1.3 (formerly the
+gate-perf-budget module). THREE budget shapes, chosen by the JSON content:
 
-- **Real subject (the shipped path).** `budget.subject` (resolved relative to the
-  SCAFFOLD ROOT) points at `apps/desktop/src/features/matrix/perfSubject.ts`. The gate
-  spawns `pnpm --filter desktop exec tsx tools/lib/perf-subject-cli.mjs <subject>
-  <cells> <runs>` (shell:true for the Windows `.cmd` shims); tsx resolves react +
-  react-dom/server from the desktop workspace and transpiles the TS import graph, so the
-  gate measures the ACTUAL `MatrixGrid`, not a stand-in. The CLI does 2 warmups + N
-  timed `renderToString` runs, asserts each render contains `role="gridcell"`
-  (anti-vacuity), and prints one `{"samples":[…]}` line. **Fail, not fallback:** a
-  missing subject file, unresolvable tsx, spawn failure, malformed CLI output, or a
-  vacuous render is a hard FAIL with a named reason — the gate NEVER silently
-  substitutes the synthetic measurement.
-- **Legacy synthetic (pre-0.1.4 budgets).** When `subject` is absent, the gate falls
-  back to the in-process synthetic rows×cols fixture, byte-for-byte as it shipped in
-  0.1.3, resolving react via `createRequire` from `apps/desktop`.
+- **`subjects[]` (the shipped 0.1.5 form).** `subjects: [{ subject, cells,
+  medianBudgetMs, expect? }]` under one shared top-level `runs` (one measurement
+  protocol per budget keeps medians comparable; there is deliberately no per-subject
+  run count). Each entry is measured SEQUENTIALLY (wall-clock medians never share a
+  CPU): the gate spawns `pnpm --filter desktop exec tsx tools/lib/perf-subject-cli.mjs
+  <subject> <cells> <runs>` (shell:true for the Windows `.cmd` shims); tsx resolves
+  react + react-dom/server from the desktop workspace and transpiles the TS import
+  graph, so the gate measures the ACTUAL component, not a stand-in. The CLI does 2
+  warmups + N timed `renderToString` runs, asserts each render contains the entry's
+  `expect` marker (default `role="gridcell"`; passed via the `PERF_SUBJECT_EXPECT`
+  env var — argv would be mangled by shell quoting), and prints one `{"samples":[…]}`
+  line. **Fail, not fallback:** a missing subject file, unresolvable tsx, spawn
+  failure, malformed CLI output, or a vacuous render is a hard FAIL with a named
+  reason — the gate NEVER silently substitutes the synthetic measurement. Declaring
+  `subject` AND `subjects` together is an ambiguity FAIL.
 
-**Calibration doctrine.** The shipped budget is ~10× the locally-measured
+  This shape also arms the **dense-feature closure** rule: every
+  `apps/desktop/src/features/*` dir whose `.ts`/`.tsx` files import the matrix hooks
+  (`useVirtualWindow` / `useRovingGrid` — textual `from '…/useVirtualWindow'`
+  specifier match, tolerant of relative/alias paths; no AST, so over-detection reds
+  and can never fail-open green) must ship a `perfSubject.ts` declared in
+  `subjects[]`; every declared file must exist; and every `features/*/perfSubject.ts`
+  must be declared. `features/matrix/perfSubject.ts` is the worked pattern (an
+  ISLAND: exports `renderSubject(cells): string`, imported only by its unit test and
+  this gate's CLI — never reachable from `main.tsx`). The reviewed escape is
+  `exempt: [{ dir, reason }]` (`dir` = the bare feature dir name); malformed or stale
+  exempt entries FAIL, never fail open.
+- **Legacy single `subject` (0.1.4 budgets).** Exactly the 0.1.4 single-subject
+  behavior (no closure scan), plus a NOTE naming the `subjects[]` form and the
+  deliberate adoption command: `npx tauri-postgres-agent-harness update
+  --refresh-seeded tools/perf-budget.json`. A pre-0.1.4 install must pull
+  `apps/desktop/src/features/matrix/` first, or the refreshed budget's matrix entry
+  reds on a missing file.
+- **Legacy synthetic (pre-0.1.4 budgets).** When neither key is present, the gate
+  falls back to the in-process synthetic rows×cols fixture, byte-for-byte as it
+  shipped in 0.1.3, resolving react via `createRequire` from `apps/desktop`.
+
+**Calibration doctrine.** Each shipped budget is ~10× the locally-measured
 fresh-scaffold median, rounded up to a clean number, so real features fit while a 10×
 regression cannot — pin from the slower CI lane's median if a clean lane exists.
-**Anti-vacuity:** the CLI's `role="gridcell"` assert makes an empty render exit 1;
-slow the cell render 10× → FAIL twice-measured; declare a `subject` that does not
-exist → FAIL naming it.
+**Anti-vacuity:** the CLI's `expect`-marker assert makes an empty render exit 1;
+slow the cell render 10× → FAIL twice-measured; declare a subject that does not
+exist → FAIL naming it; add a features dir importing `useVirtualWindow` with no
+`perfSubject.ts` → FAIL with the create-FIX line; leave a `perfSubject.ts`
+undeclared → FAIL; malform an `exempt` entry → FAIL.
 
 ### 20. route-manifest — `node tools/check-route-manifest.mjs`
 

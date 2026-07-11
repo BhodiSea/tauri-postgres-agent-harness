@@ -2,10 +2,13 @@
 // Fixture-driven like the schema-rls / route-manifest suites: build a scaffold-shaped
 // tree, run the real gate with cwd inside it, assert the exact red/green. The GREEN
 // case uses the SHIPPED styles.css + manifest verbatim, so template drift reds here.
-// Pins v0.1.3 behavior only — erasure markers, bidirectional token/family closure,
+// Pins v0.1.3 behavior — erasure markers, bidirectional token/family closure,
 // OKLCH-only colors, the source scan (hex/px/inline-style/erased-palette), the
-// per-file allow exemptions, and the single-accent usage budget. (Themes/contrast
-// are a later stage and deliberately NOT covered.)
+// per-file allow exemptions, the single-accent usage budget — AND the v0.1.4
+// additions: theme closure, COMPUTED contrast (oklch->linear sRGB->WCAG luminance
+// via tools/lib/oklch.mjs, exercised in-process here too), the arbitrary-value
+// scan, and the backward-compat proof that a themes/contrast-less manifest still
+// passes.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -13,6 +16,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import {
+  contrastRatio,
+  inSrgbGamut,
+  oklchToLinearSrgb,
+  relativeLuminance,
+} from '../../template/base/tools/lib/oklch.mjs'
 
 const GATE = fileURLToPath(
   new URL('../../template/base/tools/check-styleguide-manifest.mjs', import.meta.url),
@@ -194,4 +203,135 @@ test('RED: a malformed allow entry fails LOUD (the source-scan escape hatch cann
   const r = runGate(fixture({ manifest }))
   assert.equal(r.code, 1, r.out)
   assert.ok(r.out.includes('allow entry'), r.out)
+})
+
+// ---- v0.1.4: the oklch.mjs math the gate computes contrast with -----------------
+
+test('oklch.mjs: white/black/mid vectors and gamut check', () => {
+  const white = oklchToLinearSrgb(1, 0, 0)
+  for (const v of [white.r, white.g, white.b]) assert.ok(Math.abs(v - 1) < 1e-4, JSON.stringify(white))
+  assert.ok(Math.abs(relativeLuminance(white) - 1) < 1e-4)
+
+  const black = oklchToLinearSrgb(0, 0, 0)
+  for (const v of [black.r, black.g, black.b]) assert.ok(Math.abs(v) < 1e-4, JSON.stringify(black))
+  assert.ok(Math.abs(relativeLuminance(black)) < 1e-4)
+
+  // white on black is the WCAG ceiling, 21:1.
+  const ratio = contrastRatio(relativeLuminance(white), relativeLuminance(black))
+  assert.ok(Math.abs(ratio - 21) < 1e-2, `white/black = ${ratio}`)
+
+  // Mid color cross-checked against a trusted converter: sRGB #ff0000 (linear
+  // 1,0,0) is oklch(0.6279 0.2577 29.23).
+  const red = oklchToLinearSrgb(0.6279, 0.2577, 29.23)
+  assert.ok(Math.abs(red.r - 1) < 5e-3 && Math.abs(red.g) < 5e-3 && Math.abs(red.b) < 5e-3, JSON.stringify(red))
+
+  // Gamut: white is displayable; a high-chroma low-lightness hue-200 is not.
+  assert.equal(inSrgbGamut(white), true)
+  assert.equal(inSrgbGamut(oklchToLinearSrgb(0.475, 0.15, 200)), false)
+})
+
+// ---- v0.1.4: theme closure ------------------------------------------------------
+
+test('RED: a theme override missing a token reds (the base value would paint through)', () => {
+  const styles = SHIPPED_STYLES.replace('    --color-edge: oklch(0.82 0.008 240);\n', '')
+  assert.notEqual(styles, SHIPPED_STYLES, 'fixture replacement must hit')
+  const r = runGate(fixture({ styles }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('does not override --color-edge'), r.out)
+  assert.ok(r.out.includes('paints through'), r.out)
+})
+
+test('RED: a non-oklch theme override value reds', () => {
+  const styles = SHIPPED_STYLES.replace(
+    '    --color-accent: oklch(0.475 0.08 200);',
+    '    --color-accent: rgb(0 100 120);',
+  )
+  assert.notEqual(styles, SHIPPED_STYLES, 'fixture replacement must hit')
+  const r = runGate(fixture({ styles }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('theme "light" --color-accent'), r.out)
+  assert.ok(r.out.includes('plain oklch()'), r.out)
+})
+
+test('RED: a manifest theme whose selector has no override block reds', () => {
+  const manifest = withManifest((m) => {
+    m.themes.dark = { selector: ":root[data-theme='void']" }
+  })
+  const r = runGate(fixture({ manifest }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('no `:root[data-theme=\'void\']` override block'), r.out)
+})
+
+// ---- v0.1.4: computed contrast --------------------------------------------------
+
+test('RED: a contrast pair below its min reds, printing the computed ratio to 2dp', () => {
+  // Lighten the light accent so it fails 4.5:1 on canvas/surface while staying in
+  // gamut (so the gate computes a ratio, not "unverifiable").
+  const styles = SHIPPED_STYLES.replace(
+    '--color-accent: oklch(0.475 0.08 200)',
+    '--color-accent: oklch(0.65 0.08 200)',
+  )
+  assert.notEqual(styles, SHIPPED_STYLES, 'fixture replacement must hit')
+  const r = runGate(fixture({ styles }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('theme "light" contrast accent on'), r.out)
+  assert.ok(/accent on \w+ = \d+\.\d{2}:1/.test(r.out), r.out) // computed ratio, 2dp
+  assert.ok(r.out.includes('(min 4.5:1)'), r.out)
+  assert.ok(r.out.includes('FIX:'), r.out)
+})
+
+test('RED: an out-of-gamut token reds as contrast unverifiable', () => {
+  const styles = SHIPPED_STYLES.replace(
+    '--color-accent: oklch(0.475 0.08 200)',
+    '--color-accent: oklch(0.475 0.15 200)',
+  )
+  assert.notEqual(styles, SHIPPED_STYLES, 'fixture replacement must hit')
+  const r = runGate(fixture({ styles }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('outside the sRGB gamut'), r.out)
+  assert.ok(r.out.includes('unverifiable'), r.out)
+})
+
+// ---- v0.1.4: arbitrary-value scan (unconditional) -------------------------------
+
+test('RED: each Tailwind arbitrary-value form reds (utility / property / shorthand)', () => {
+  const cases = {
+    utility: 'export const A = () => <div className="text-[#abc123]" />\n',
+    property: 'export const B = () => <div className="[mask-type:luminance]" />\n',
+    shorthand: 'export const C = () => <div className="bg-(--sneaky)" />\n',
+  }
+  for (const [name, content] of Object.entries(cases)) {
+    const rel = `apps/desktop/src/features/arb-${name}/X.tsx`
+    const r = runGate(fixture({ sources: { [rel]: content } }))
+    assert.equal(r.code, 1, `${name}: ${r.out}`)
+    assert.ok(r.out.includes('Tailwind arbitrary value'), `${name}: ${r.out}`)
+  }
+})
+
+test('GREEN: a tokens-only source file passes the arbitrary-value scan', () => {
+  const rel = 'apps/desktop/src/features/clean/Ok.tsx'
+  const content = 'export const Ok = () => <div className="bg-surface text-ink rounded-lg p-4" />\n'
+  const r = runGate(fixture({ sources: { [rel]: content } }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: a `[corpus: id]` provenance citation is NOT flagged as an arbitrary property', () => {
+  // The property-form regex requires a non-space char right after the colon (the
+  // Tailwind grammar), so the mandatory provenance citation form is never a red.
+  const rel = 'apps/desktop/src/features/cited/Y.ts'
+  const content = '// SOURCE: WAI-ARIA APG grid pattern [corpus: wai-aria/apg-grid]\nexport const Y = 1\n'
+  const r = runGate(fixture({ sources: { [rel]: content } }))
+  assert.equal(r.code, 0, r.out)
+})
+
+// ---- v0.1.4: backward-compat ----------------------------------------------------
+
+test('GREEN: a v0.1.3 manifest WITHOUT themes/contrast still passes (self-disabling checks)', () => {
+  const manifest = withManifest((m) => {
+    delete m.themes
+    delete m.contrast
+  })
+  const r = runGate(fixture({ manifest }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(!r.out.includes('contrast pair'), r.out) // the contrast note is absent
 })

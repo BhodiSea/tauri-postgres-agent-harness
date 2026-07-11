@@ -25,7 +25,8 @@
         "tests/unit/**/*.test.{ts,tsx}"
       ],
       "project": ["src/**/*.{ts,tsx}!", "tests/**/*.{ts,tsx}", "*.ts"],
-      "ignore": ["src/ipc/bindings.ts"]
+      "ignore": ["src/ipc/bindings.ts"],
+      "ignoreDependencies": ["tsx"]
     },
     "apps/server": {
       "entry": [

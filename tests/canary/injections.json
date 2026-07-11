@@ -29,9 +29,13 @@
     "rust-check": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
     "styleguide": [
       { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs" },
       { "kind": "selftest", "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL" }
     ],
-    "perf-budget": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "perf-budget": [
+      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs" }
+    ],
     "route-manifest": [
       { "kind": "fixture", "ref": "tests/gates/check-route-manifest.test.mjs" },
       { "kind": "selftest", "ref": "Canary 6: unregistered features directory → route-manifest must FAIL" }

@@ -182,27 +182,77 @@ bindings → FAIL drift; introduce a type error in `lib.rs` → FAIL cargo check
 
 The design system is DATA (default-on since 0.1.3; formerly the gate-styleguide
 module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` and
-`tools/styleguide.manifest.json` (write-guard-protected): every erased namespace keeps
-its `--<ns>-*: initial` marker (Tailwind's default palette/scales can never silently
-return); `--color-*` tokens and every family (font/text/radius/shadow/ease) match the
-manifest bidirectionally; color tokens are OKLCH-only; the desktop source carries no
-raw hex, no raw px, no inline `style={}`, and no references to erased default-palette
-utilities (which compile to NOTHING after erasure — a silent no-op, worse than
-off-brand); accent-utility usage stays within the documented budget. File-level
-exemptions live in `manifest.allow` with reasons.
+`tools/styleguide.manifest.json` (write-guard-protected):
+
+- **Erasure + closure.** Every erased namespace keeps its `--<ns>-*: initial` marker
+  (Tailwind's default palette/scales can never silently return); `--color-*` tokens and
+  every family (font/text/radius/shadow/ease) match the manifest bidirectionally; color
+  tokens are OKLCH-only (one color model keeps lightness steps perceptually comparable
+  and the contrast recomputable).
+- **Theme closure** (conditional on `manifest.themes`). Each `themes.<name>.selector`
+  names a `:root` override block in `styles.css` that must redeclare EXACTLY the token
+  set — a token the theme forgets to override lets the base (dark) value paint through
+  on the light canvas. Override values are plain `oklch()` literals (no alpha, no
+  `var()`) so they stay convertible. v0.1.3 manifests without `themes` self-disable this.
+- **Computed contrast** (conditional on `manifest.contrast`). Contrast is no longer
+  prose in `styles.css`: for the base `@theme` AND every theme block, each
+  `{fg,bg,min}` pair is CONVERTED through `tools/lib/oklch.mjs` — OKLCH → OKLab
+  (polar→rectangular) → cube LMS → linear-light sRGB (CSS Color 4 reference matrices)
+  → WCAG relative luminance (`0.2126R+0.7152G+0.0722B` on the linear channels) →
+  `(Lhi+0.05)/(Llo+0.05)` — and asserted `>= min`. An out-of-gamut token FAILs
+  'unverifiable' (the browser would gamut-map it, so its painted contrast is not the
+  computed one). The numbers thus cannot drift from the token values.
+  SOURCE: CSS Color 4 OKLCH→sRGB [corpus: csswg/oklch-srgb]; WCAG relative luminance
+  [corpus: wcag/relative-luminance].
+- **Source scan.** The desktop source carries no raw hex, no raw px, no inline
+  `style={}`, no references to erased default-palette utilities (which compile to
+  NOTHING — a silent no-op, worse than off-brand), and no Tailwind **arbitrary values**:
+  the utility form `text-[#abc]`/`w-[13px]`, the bracket-property form
+  `[mask-type:luminance]`, and the v4 shorthand `bg-(--var)` all smuggle off-token
+  colors/lengths inline. The property-form check requires a non-whitespace char right
+  after the colon — exactly the Tailwind grammar (arbitrary values encode spaces as `_`)
+  — which precisely excludes prose bracket-colon forms, above all the mandatory
+  `[corpus: <id>]` provenance citations in source comments. Extend the vocabulary in
+  BOTH files, or add a reviewed `manifest.allow` file exemption.
+- **Accent budget.** Accent-utility usage stays within the documented budget.
+
 **Anti-vacuity:** delete an erasure marker → FAIL naming the namespace; add
-`text-red-500` to any TSX → FAIL naming the file; add a hex literal → FAIL.
+`text-red-500` to any TSX → FAIL naming the file; add a hex literal or a `text-[#…]`
+arbitrary value → FAIL; darken a light token below its floor → FAIL printing the
+computed ratio (e.g. `accent on surface = 4.24:1 (min 4.5:1)`); push a token
+out of the sRGB gamut → FAIL 'unverifiable'; drop a light-theme token override → FAIL
+('the base value paints through').
 
 ### 19. perf-budget — `node tools/check-perf-budget.mjs`
 
-Median-of-N `renderToString` wall time over a synthetic 10k-cell matrix fixture,
-asserted against `tools/perf-budget.json` (write-guard-protected; shipped ~20× above
-the fresh-scaffold median so real features fit while a 10× regression cannot). A red
+Median-of-N `renderToString` wall time asserted against `tools/perf-budget.json`
+(write-guard-protected — raising the budget is a reviewed human decision). A red
 requires TWO independent over-budget medians (one automatic re-measure), so scheduler
-noise cannot fail a turn. Default-on since 0.1.3 (formerly the gate-perf-budget
-module); replace the synthetic fixture with your real matrix component when it lands.
-**Anti-vacuity:** the fixture asserts its own render is non-empty; slow the cell
-render 10× (e.g. an inner loop) → FAIL twice-measured.
+noise cannot fail a turn while a genuine 10× regression still cannot pass. Default-on
+since 0.1.3 (formerly the gate-perf-budget module). TWO measurement paths, chosen by
+whether the budget declares a `subject`:
+
+- **Real subject (the shipped path).** `budget.subject` (resolved relative to the
+  SCAFFOLD ROOT) points at `apps/desktop/src/features/matrix/perfSubject.ts`. The gate
+  spawns `pnpm --filter desktop exec tsx tools/lib/perf-subject-cli.mjs <subject>
+  <cells> <runs>` (shell:true for the Windows `.cmd` shims); tsx resolves react +
+  react-dom/server from the desktop workspace and transpiles the TS import graph, so the
+  gate measures the ACTUAL `MatrixGrid`, not a stand-in. The CLI does 2 warmups + N
+  timed `renderToString` runs, asserts each render contains `role="gridcell"`
+  (anti-vacuity), and prints one `{"samples":[…]}` line. **Fail, not fallback:** a
+  missing subject file, unresolvable tsx, spawn failure, malformed CLI output, or a
+  vacuous render is a hard FAIL with a named reason — the gate NEVER silently
+  substitutes the synthetic measurement.
+- **Legacy synthetic (pre-0.1.4 budgets).** When `subject` is absent, the gate falls
+  back to the in-process synthetic rows×cols fixture, byte-for-byte as it shipped in
+  0.1.3, resolving react via `createRequire` from `apps/desktop`.
+
+**Calibration doctrine.** The shipped budget is ~10× the locally-measured
+fresh-scaffold median, rounded up to a clean number, so real features fit while a 10×
+regression cannot — pin from the slower CI lane's median if a clean lane exists.
+**Anti-vacuity:** the CLI's `role="gridcell"` assert makes an empty render exit 1;
+slow the cell render 10× → FAIL twice-measured; declare a `subject` that does not
+exist → FAIL naming it.
 
 ### 20. route-manifest — `node tools/check-route-manifest.mjs`
 
@@ -211,12 +261,25 @@ every entry carries id/label/path/features + `states.{loading,empty,error}` test
 (`e2e/states.spec.ts` drives each; the a11y sweeps iterate the same array); every
 directory under `src/features/` is either referenced by an entry's `features` list or
 allowlisted in `tools/route-allowlist.json` (write-guard-protected, reasons required).
-Closure runs both ways — stale manifest/allowlist entries fail too. Static, <100ms:
-brace-depth entry split + per-field regex, not substring vibes.
+Closure runs both ways — stale manifest/allowlist entries fail too. Beyond presence,
+the gate checks the DATA is well-formed:
+
+- **Path validity.** Each `path` matches `^/$|^/[a-z0-9-]+(/[a-z0-9-]+)*$` — a leading
+  slash and lowercase kebab segments, no trailing slash (except root), whitespace,
+  query, or hash. The router matches these literally, so a stray space or capital is a
+  silently-dead route.
+- **Path uniqueness.** No two entries share a `path` (a duplicate routes two screens to
+  one URL) — the red names both ids.
+- **State-id uniqueness.** State test ids are distinct within an entry AND globally
+  unique across the manifest, so an e2e sweep can never assert against the wrong
+  screen's DOM.
+
+Static, <100ms: brace-depth entry split + per-field regex, not substring vibes.
 **Anti-vacuity:** add `src/features/reports/` without a ROUTES reference → FAIL naming
 the directory; empty the ROUTES array → FAIL ("vacuous pass"); drop `states.error` →
-FAIL naming the entry and key; malformed allowlist JSON → the gate itself fails,
-never open.
+FAIL naming the entry and key; a malformed path (`matrix`, `/Matrix `, `/a//b`),
+duplicate path, or reused state id → FAIL naming the offender; malformed allowlist JSON
+→ the gate itself fails, never open.
 
 ### 21. e2e — `node tools/check-e2e.mjs`
 
@@ -351,3 +414,7 @@ Recorded so the next maintainer doesn't re-litigate:
   `mutation` module, which catches the damage rather than the act.
 - **max-lines file/function caps** — proxy metrics that punish cohesive modules;
   sonarjs cognitive-complexity ≤ 15 targets the actual failure mode.
+- **Playwright-trace interaction budget on a pinned runner** — deferred: an absolute
+  UX latency metric (input→paint) needs a dedicated pinned CI runner to be stable,
+  whereas `perf-budget`'s relative render canary catches regressions cheaply with no
+  browser; revisit if a hosted runner class with pinned CPU lands.

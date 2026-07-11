@@ -21,6 +21,10 @@ const ROUTES_FILE = 'apps/desktop/src/routes.ts'
 const FEATURES_DIR = 'apps/desktop/src/features'
 const ALLOWLIST = 'tools/route-allowlist.json'
 const STATE_KEYS = ['loading', 'empty', 'error']
+// A canonical SPA route path: root `/`, or `/`-led lowercase kebab segments with
+// no trailing slash, whitespace, query (`?`), or hash (`#`) — the router matches
+// on these literally, so a stray space or capital is a silently-dead route.
+const PATH_RE = /^\/$|^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/
 
 if (!existsSync('apps/desktop/src')) {
   skipOrFail(GATE, 'apps/desktop/src not found (no desktop surface yet)')
@@ -117,6 +121,12 @@ if (entries.length === 0) {
 const errs = []
 const referenced = new Set()
 const ids = new Set()
+// path -> first entry that claimed it; test-id -> `${entry}.${key}` that claimed
+// it. Both closures are GLOBAL across the manifest: a duplicate path routes two
+// screens to one URL, and a reused state test id makes the e2e sweeps assert
+// against the wrong screen's DOM.
+const pathOwners = new Map()
+const stateIdOwners = new Map()
 
 entries.forEach((entry, i) => {
   const id = entry.match(/\bid:\s*['"]([a-z0-9-]+)['"]/)?.[1]
@@ -131,8 +141,24 @@ entries.forEach((entry, i) => {
   if (entry.match(/\blabel:\s*['"]([^'"]+)['"]/) === null) {
     errs.push(`${name}: missing \`label\` (human-readable string literal)`)
   }
-  if (entry.match(/\bpath:\s*['"]([^'"]+)['"]/) === null) {
+
+  const pathMatch = entry.match(/\bpath:\s*['"]([^'"]*)['"]/)
+  if (pathMatch === null) {
     errs.push(`${name}: missing \`path\` (how the SPA reaches the screen)`)
+  } else {
+    const path = pathMatch[1]
+    if (!PATH_RE.test(path)) {
+      errs.push(
+        `${name}: path ${JSON.stringify(path)} is not a canonical route path — need a leading slash and lowercase [a-z0-9-] segments (\`/\`, \`/foo\`, \`/foo/bar\`), no trailing slash, whitespace, query, or hash`,
+      )
+    }
+    if (pathOwners.has(path)) {
+      errs.push(
+        `${name}: duplicate path ${JSON.stringify(path)} — also declared by "${pathOwners.get(path)}"; each screen needs a distinct route path`,
+      )
+    } else {
+      pathOwners.set(path, name)
+    }
   }
 
   const features = entry.match(/\bfeatures:\s*\[([^\]]*)\]/)
@@ -151,12 +177,29 @@ entries.forEach((entry, i) => {
     )
     return
   }
+  const seenInEntry = new Map() // test-id -> the key that first used it in THIS entry
   for (const key of STATE_KEYS) {
     const sel = states[1].match(new RegExp(`\\b${key}:\\s*['"]([^'"]*)['"]`))
     if (sel === null || sel[1].trim() === '') {
       errs.push(
         `${name}: states.${key} missing or empty — every screen declares a ${key}-state test id`,
       )
+      continue
+    }
+    const testId = sel[1].trim()
+    if (seenInEntry.has(testId)) {
+      errs.push(
+        `${name}: states.${key} test id ${JSON.stringify(testId)} duplicates states.${seenInEntry.get(testId)} in the same entry — each state needs a distinct test id`,
+      )
+      continue
+    }
+    seenInEntry.set(testId, key)
+    if (stateIdOwners.has(testId)) {
+      errs.push(
+        `${name}: states.${key} test id ${JSON.stringify(testId)} is already used by ${stateIdOwners.get(testId)} — state test ids must be globally unique across the manifest`,
+      )
+    } else {
+      stateIdOwners.set(testId, `${name}.${key}`)
     }
   }
 })

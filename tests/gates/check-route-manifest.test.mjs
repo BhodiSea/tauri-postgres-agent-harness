@@ -151,3 +151,44 @@ test('skip asymmetry: no desktop surface → loud local SKIP (exit 0), CI fail-c
   const ci = runGate(dir, { ci: true })
   assert.equal(ci.code, 1, ci.out)
 })
+
+// ---- v0.1.4: path validity + duplicate path + state-id uniqueness ---------------
+
+test('RED: a malformed path reds naming the id and the offending path', () => {
+  for (const bad of ['matrix', '/Matrix ', '/a//b']) {
+    const routes = SHIPPED_ROUTES.replace("path: '/matrix'", `path: '${bad}'`)
+    assert.notEqual(routes, SHIPPED_ROUTES, `replacement must hit for ${bad}`)
+    const r = runGate(fixture({ routes }))
+    assert.equal(r.code, 1, `${bad}: ${r.out}`)
+    assert.ok(r.out.includes('matrix: path'), `${bad}: ${r.out}`)
+    assert.ok(r.out.includes(JSON.stringify(bad)), `${bad}: ${r.out}`)
+    assert.ok(r.out.includes('not a canonical route path'), `${bad}: ${r.out}`)
+  }
+})
+
+test('RED: a duplicate path across entries reds naming both ids', () => {
+  const routes = SHIPPED_ROUTES.replace("path: '/matrix'", "path: '/'")
+  assert.notEqual(routes, SHIPPED_ROUTES, 'replacement must hit')
+  const r = runGate(fixture({ routes }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('matrix: duplicate path'), r.out)
+  assert.ok(r.out.includes('also declared by "home"'), r.out)
+})
+
+test('RED: a state test id reused across entries reds (global uniqueness) naming both', () => {
+  const routes = SHIPPED_ROUTES.replace("loading: 'matrix-loading'", "loading: 'home-loading'")
+  assert.notEqual(routes, SHIPPED_ROUTES, 'replacement must hit')
+  const r = runGate(fixture({ routes }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('already used by home.loading'), r.out)
+  assert.ok(r.out.includes('globally unique'), r.out)
+})
+
+test('RED: a state test id duplicated within one entry reds (within-entry distinctness)', () => {
+  const routes = SHIPPED_ROUTES.replace("empty: 'home-empty'", "empty: 'home-loading'")
+  assert.notEqual(routes, SHIPPED_ROUTES, 'replacement must hit')
+  const r = runGate(fixture({ routes }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('home: states.empty test id "home-loading"'), r.out)
+  assert.ok(r.out.includes('same entry'), r.out)
+})

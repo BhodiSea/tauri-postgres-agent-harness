@@ -1,5 +1,6 @@
 {
   "cells": 10000,
   "runs": 7,
-  "medianBudgetMs": 400
+  "medianBudgetMs": 500,
+  "subject": "apps/desktop/src/features/matrix/perfSubject.ts"
 }

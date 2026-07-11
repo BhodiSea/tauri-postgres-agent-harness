@@ -187,3 +187,88 @@ test('the SHIPPED tools/perf-budget.json satisfies the gate shape it is measured
     assert.ok(budget[key] > 0, `${key}: ${JSON.stringify(budget)}`)
   }
 })
+
+// ---- v0.1.4: real-subject path (budget.subject) ---------------------------------
+// The gate's subject branch spawns `pnpm --filter desktop exec tsx` on the real
+// TS perfSubject — that end-to-end path needs a full pnpm install, so it is proven
+// in the scaffold acceptance (node tools/validate.mjs), not here. Install-free, we
+// pin: (a) subject declared but the file is missing → a named FAIL BEFORE any
+// spawn; (b) subject present but the spawn cannot run → a named FAIL that says it
+// never falls back to the synthetic path; and (c) the anti-vacuity + JSON contract
+// of tools/lib/perf-subject-cli.mjs, driven directly under plain node with a .mjs
+// subject stub (the CLI imports only node builtins).
+
+test('RED: a declared subject whose file is missing fails BEFORE spawning, naming it', () => {
+  const budget = {
+    cells: 100,
+    runs: 3,
+    medianBudgetMs: 500,
+    subject: 'apps/desktop/src/features/matrix/perfSubject.ts',
+  }
+  // Default fixture creates apps/desktop but not the subject file.
+  const r = runGate(fixture({ budget }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('budget.subject'), r.out)
+  assert.ok(r.out.includes('does not exist'), r.out)
+  assert.ok(r.out.includes('apps/desktop/src/features/matrix/perfSubject.ts'), r.out)
+})
+
+test('RED: a present subject whose measurement spawn fails is a FAIL, never a synthetic fallback', () => {
+  const budget = {
+    cells: 100,
+    runs: 3,
+    medianBudgetMs: 500,
+    subject: 'apps/desktop/src/features/matrix/perfSubject.ts',
+  }
+  const dir = fixture({ budget })
+  // Plant the subject so the existence check passes; the spawn then fails because
+  // this bare tmp tree is no pnpm workspace (proves no silent synthetic fallback).
+  mkdirSync(join(dir, 'apps/desktop/src/features/matrix'), { recursive: true })
+  writeFileSync(
+    join(dir, 'apps/desktop/src/features/matrix/perfSubject.ts'),
+    'export function renderSubject() { return \'<span role="gridcell">x</span>\' }\n',
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('never falls back to a synthetic measurement'), r.out)
+  // Never the synthetic detail line.
+  assert.ok(!/\d+×\d+ cells/.test(r.out), r.out)
+})
+
+const CLI = fileURLToPath(
+  new URL('../../template/base/tools/lib/perf-subject-cli.mjs', import.meta.url),
+)
+function runCli(subjectSource, cells, runs) {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-perfcli-'))
+  const subj = join(dir, 'subject.mjs')
+  writeFileSync(subj, subjectSource)
+  const res = spawnSync('node', [CLI, subj, String(cells), String(runs)], { encoding: 'utf8' })
+  return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, stdout: res.stdout ?? '' }
+}
+
+test('perf-subject-cli: a valid subject prints ONE {"samples":[…]} line of N numbers', () => {
+  const src =
+    'export function renderSubject(cells) { return `<span role="gridcell">${cells}</span>` }\n'
+  const r = runCli(src, 100, 5)
+  assert.equal(r.code, 0, r.out)
+  const lines = r.stdout.trim().split('\n')
+  assert.equal(lines.length, 1, r.out) // exactly one line
+  const parsed = JSON.parse(lines[0])
+  assert.equal(parsed.samples.length, 5, r.out)
+  assert.ok(
+    parsed.samples.every((s) => typeof s === 'number' && Number.isFinite(s)),
+    r.out,
+  )
+})
+
+test('perf-subject-cli: a render without role="gridcell" exits 1 (anti-vacuity)', () => {
+  const r = runCli('export function renderSubject() { return "<div>nothing</div>" }\n', 100, 3)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('vacuous'), r.out)
+})
+
+test('perf-subject-cli: a subject with no renderSubject export exits 1', () => {
+  const r = runCli('export const nope = 1\n', 100, 3)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('renderSubject'), r.out)
+})

@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server'
 import { createApp } from './app.js'
 import { assertAuthBootSafety } from './auth/verify.js'
-import { closeDb } from './db/context.js'
+import { closeDb } from './db/client.js'
 
 // Fatal before binding a port: production must never boot with the stub verifier.
 assertAuthBootSafety(process.env)

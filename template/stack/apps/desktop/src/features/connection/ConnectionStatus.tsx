@@ -13,12 +13,19 @@ const PROBE_TIMEOUT_MS = 3_000
 // CSP (tauri.conf.json connect-src) at install time.
 const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
 
+// Dispatched by the command palette's "Probe API connection now" — the status
+// indicator owns the probe loop; other features only ever signal it.
+export const PROBE_CONNECTION_EVENT = 'app:probe-connection'
+
+// Three states, not two: rendering "unreachable — retrying" before the FIRST
+// probe resolves is a lie that trains users to distrust the indicator.
 type ProbeState =
+  | { readonly status: 'connecting' }
   | { readonly status: 'ok'; readonly version: string }
   | { readonly status: 'degraded' }
 
 export function ConnectionStatus() {
-  const [state, setState] = useState<ProbeState>({ status: 'degraded' })
+  const [state, setState] = useState<ProbeState>({ status: 'connecting' })
 
   useEffect(() => {
     let cancelled = false
@@ -39,13 +46,19 @@ export function ConnectionStatus() {
         if (!cancelled) setState({ status: 'degraded' })
       }
     }
+    const probeNow = (): void => {
+      setState({ status: 'connecting' })
+      void probe()
+    }
     void probe()
     const timer = setInterval(() => {
       void probe()
     }, POLL_INTERVAL_MS)
+    window.addEventListener(PROBE_CONNECTION_EVENT, probeNow)
     return () => {
       cancelled = true
       clearInterval(timer)
+      window.removeEventListener(PROBE_CONNECTION_EVENT, probeNow)
     }
   }, [])
 
@@ -55,11 +68,16 @@ export function ConnectionStatus() {
         aria-hidden="true"
         className={cn(
           'size-2 rounded-full',
-          state.status === 'ok' ? 'bg-accent' : 'border border-ink-muted bg-transparent',
+          state.status === 'ok' && 'bg-accent',
+          state.status === 'connecting' &&
+            'border border-ink-muted bg-transparent motion-safe:animate-pulse',
+          state.status === 'degraded' && 'border border-ink-muted bg-transparent',
         )}
       />
       {state.status === 'ok' ? (
         <span className="text-ink">API connected (v{state.version})</span>
+      ) : state.status === 'connecting' ? (
+        <span className="text-ink-muted">Connecting to API…</span>
       ) : (
         <span className="text-ink-muted">API unreachable — retrying</span>
       )}

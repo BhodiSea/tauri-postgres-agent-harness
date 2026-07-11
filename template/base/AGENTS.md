@@ -29,7 +29,7 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 
 ## Commands
 
-- `pnpm validate` — **THE GATE**: `node tools/validate.mjs`, the 16-step chain
+- `pnpm validate` — **THE GATE**: `node tools/validate.mjs`, the 22-step chain
   from `tools/harness.config.mjs` (see below). Must be green before a turn ends.
 - `pnpm typecheck` (`tsc -b`) · `pnpm lint` / `pnpm lint:fix` · `pnpm format`
   (`biome check --write .`) · `pnpm knip` · `pnpm arch` (depcruise).
@@ -45,10 +45,11 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   exits 2 until everything passes. Fix root causes; do not stop.
 - **Prove, don't claim.** Show passing gate output; never assert "it works".
 - Do NOT edit a test in the same turn as the fix it covers (reward-hacking).
-- The 16 gates, in order: `format`, `rust-fmt`, `types`, `lint`, `provenance`,
-  `tauri-policy`, `version-sync`, `prompts`, `licenses`, `schema-rls`,
-  `migrations`, `contracts`, `dead-code`, `architecture`, `build`, `rust-check`
-  (docs/harness/gates-catalog.md documents each).
+- The 22 gates, in order: `format`, `gate-integrity`, `rust-fmt`, `types`,
+  `lint`, `provenance`, `tauri-policy`, `version-sync`, `prompts`, `licenses`,
+  `schema-rls`, `migrations`, `contracts`, `dead-code`, `architecture`, `build`,
+  `rust-check`, `styleguide`, `perf-budget`, `route-manifest`, `e2e`,
+  `docs-sync` (docs/harness/gates-catalog.md documents each).
 - **Toolchain asymmetry:** gates needing cargo or a live database SKIP LOUDLY
   locally when the prerequisite is absent and FAIL CLOSED in CI
   (`CI=true` / `HARNESS_REQUIRE_TOOLCHAINS=1`). A skip is never a pass — do not
@@ -69,11 +70,15 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   Destructive DDL (DROP TABLE/COLUMN, TRUNCATE) needs `-- adr: docs/adr/<file>`;
   DML in a migration needs `-- harness-allow-dml: <reason>`.
 - **`MIGRATOR_DATABASE_URL` bypasses RLS** (schema owner). Sanctioned uses only:
-  drizzle-kit migrate/generate/check and `tests/migrations/`. Never in app code.
+  drizzle-kit migrate/generate/check and the harness RLS runners
+  (`tests/migrations/`, `tests/rls/` — plan-probe seeding + ANALYZE). Never in
+  app or assertion code: isolation asserts always run as `app_api`.
 - **Every new table ships FORCE RLS**: `ENABLE` + `FORCE ROW LEVEL SECURITY` +
   four per-operation policies reading
-  `(select current_setting('app.user_id', true)::uuid)` (initPlan pattern), in
-  the same migration. Exemptions = human-reviewed `tools/rls-exempt.json`.
+  `(select current_setting('app.user_id', true)::uuid)` (initPlan pattern) +
+  a leading-column index on the owner column (the policies filter by it on
+  every statement — `schema-rls` and the runtime plan probe both enforce it),
+  in the same migration. Exemptions = human-reviewed `tools/rls-exempt.json`.
 - **Desktop-bundle purity:** `apps/desktop` never imports `postgres`,
   `drizzle-orm`, `pg`, `@hono/*`, `pino`, or anything in `apps/server`. It talks
   to the API via typed contracts from `@app/schema`.
@@ -107,6 +112,19 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 - Eliminate special-casing; delete code; justify every abstraction. `knip
   --strict` stays green. Cognitive complexity <= 15 (ESLint error).
 - Adversarial self-review before declaring done: try to break your own code.
+- **Server surface:** errors through the ONE envelope
+  (`src/errors.ts` — `{ error: { code, message, requestId } }`, declared 4xx/5xx
+  per route); every wire string bounded (`.max()`); every list keyset-paginated
+  with an unconditional LIMIT and a statement-count invariance test
+  (`dal/notes.ts` + `dal/cursor.ts` are the worked pattern).
+- **Coverage floors are enforced**: the Stop hook runs
+  `vitest run --coverage` against the thresholds in `vitest.config.ts` — a
+  feature landing without tests reds the turn.
+- **Styling is tokens-only.** The `@theme` in `apps/desktop/src/styles.css` +
+  `tools/styleguide.manifest.json` are the ENTIRE design vocabulary: the default
+  Tailwind palette/scales are erased (an erased utility compiles to nothing), and
+  raw hex, raw px, and inline `style={}` are gate-red. Extend the system by
+  editing BOTH files in one reviewed diff.
 - Charts in `features/{matrix,graph}` are hand-rolled SVG (chart libs banned
   there by lint); a11y is jsx-a11y strict, WCAG 2.2 AA.
 

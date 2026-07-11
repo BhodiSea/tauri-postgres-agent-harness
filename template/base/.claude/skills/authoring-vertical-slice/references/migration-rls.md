@@ -49,19 +49,32 @@ CREATE POLICY "t_update_own" ON "t" AS PERMISSIVE FOR UPDATE TO "app_api"
 CREATE POLICY "t_delete_own" ON "t" AS PERMISSIVE FOR DELETE TO "app_api"
   USING ("owner_id" = (select nullif(current_setting('app.user_id', true), '')::uuid));
 --> statement-breakpoint
+-- SOURCE: every policy filters by the owner column on EVERY statement; without a
+-- leading-column index that is a per-row sequential scan at scale. The schema-rls
+-- gate and the runtime EXPLAIN plan probe both require it. [corpus: postgres/rls-initplan]
+CREATE INDEX "t_owner_id_idx" ON "t" ("owner_id");
+--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "t" TO "app_api";
 ```
 
 Four per-operation policies, never `FOR ALL` — each op stays independently auditable.
 Mirror the same policies in the Drizzle source (`pgPolicy`) so schema and SQL agree
-(see `packages/schema/src/index.ts` and `drizzle/0000_init.sql` for the worked
-example). Index every policy-predicate column.
+(see `packages/schema/src/index.ts` and `drizzle/0000_init.sql` +
+`0001_notes_owner_idx.sql` for the worked example). The owner column must be the
+LEADING column of an index (second position does not serve the policy's equality
+qual); index every other policy-predicate column too.
 
 ## Gates that check this layer
 
 - `schema-rls`: every `pgTable` name must be covered by ENABLE + FORCE + per-op
   policies somewhere in the cumulative migration SQL, or exempted in the
   write-guard-protected `tools/rls-exempt.json` (a human decision — never edit it).
+  It also requires initPlan-shaped predicates, ISOLATION_TARGETS wiring, and the
+  leading-column owner index above.
+- `pnpm test:rls` runs the EXPLAIN plan probe (`tests/rls/plan-regression.test.ts`)
+  against a scratch database (`<db>_rls` — dev data is never dropped): at 10k
+  seeded rows every isolation target must be reached through its owner index with
+  a once-per-statement InitPlan — no Seq Scan, no per-row SubPlan.
 - `migrations`: append-only vs git; no DML without `-- harness-allow-dml: <reason>`;
   destructive DDL (DROP TABLE/COLUMN, TRUNCATE) requires `-- adr: docs/adr/<file>`
   pointing at an existing ADR — run `/adr` BEFORE writing the migration (it cannot be
@@ -82,4 +95,5 @@ example). Index every policy-predicate column.
 - `WITH RECURSIVE` over graph data needs a `CYCLE` clause or visited guard (the
   write-guard blocks it otherwise). `[corpus: postgres/recursive-cycle]`
 - `MIGRATOR_DATABASE_URL` (owner role, bypasses RLS) is confined by the bash-guard to
-  drizzle-kit migrate/generate/check, `pnpm db:migrate`, and `tests/migrations/`.
+  drizzle-kit migrate/generate/check, `pnpm db:migrate`, and the harness RLS runners
+  (`tests/migrations/`, `tests/rls/`).

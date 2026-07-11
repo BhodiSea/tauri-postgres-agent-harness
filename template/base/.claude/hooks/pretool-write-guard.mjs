@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import { denyTool, pass, readHookInput } from './lib/hookio.mjs'
 
-export const HARNESS_HOOK_VERSION = '0.1.1'
+export const HARNESS_HOOK_VERSION = '0.1.3'
 
 const input = await readHookInput()
 const ti = input?.tool_input ?? {}
@@ -36,8 +36,15 @@ const PROTECTED = [
   /^tools\/validate\.mjs$/,
   /^tools\/(check-[^/]+|run-rust-gates|build-check)\.mjs$/,
   /^tools\/lib\//, // shared gate helpers — same trust level as the gates themselves
+  /^tools\/mcp\//, // corpus + MCP servers the provenance gate resolves against
   /^tools\/(identity|prompts)\.lock\.json$/,
   /^tools\/rls-exempt\.json$/, // exempting a table from RLS is a human decision
+  /^tools\/license-exceptions\.json$/, // license exceptions are a human decision
+  /^tools\/bundle-budget\.json$/,
+  /^tools\/perf-budget\.json$/,
+  /^tools\/styleguide\.manifest\.json$/,
+  /^tools\/mutation-baseline\.json$/, // accepting a surviving mutant is a human decision
+  /^tools\/route-allowlist\.json$/, // exempting a features dir from ROUTES is a human decision
   /^tests\/rls\/run-rls\.mjs$/, // the RLS runner the Stop hook invokes directly (test bodies stay editable)
   /^tests\/migrations\/migration-apply\.mjs$/,
   /^lefthook\.yml$/,
@@ -47,6 +54,8 @@ const PROTECTED = [
   /^biome\.jsonc$/,
   /^knip\.json$/,
   /^\.dependency-cruiser\.cjs$/,
+  /^vitest\.config\.ts$/, // the single test-project surface the Stop hook runs
+  /^playwright\.config\.ts$/,
   /^tsconfig(\.base)?\.json$/,
   /^pnpm-workspace\.yaml$/,
   /^deny\.toml$/, // cargo-deny policy (licenses + advisories + bans)
@@ -76,7 +85,14 @@ if (/^packages\/schema\/drizzle\/[^/]+\.sql$/.test(rel) && existsSync(path)) {
 }
 
 // Exempt harness tooling and test bodies from the content checks below.
-if (/\/\.claude\/|(^|\/)(tests?|__tests__|e2e)\//.test(path)) pass()
+// Deliberately NARROW: only the root-level test trees (the harness's own RLS/
+// migration suites), the e2e specs, and colocated *.test.* / *.spec.* FILES.
+// A directory merely named "tests" deeper in the app tree (src/dal/tests/…)
+// is product code and stays fully content-checked — the old any-segment match
+// let real invariant violations ship from such paths.
+if (/^\.claude\//.test(rel) || /^(tests?|e2e)\//.test(rel) || /\.(test|spec)\.[a-z]+$/.test(rel)) {
+  pass()
+}
 
 const text = [
   ti.content,
@@ -136,7 +152,10 @@ const GLOBAL_CHECKS = [
     'VITE_-prefixed vars are compiled into the client bundle — never put secret-shaped names there.',
   ],
   [
-    /set_config\(\s*['"]app\.[a-z_.]+['"]\s*,[^,]+,\s*false\s*\)/,
+    // Lazy [\s\S]*? instead of [^,]+ so a comma INSIDE the value expression
+    // (set_config('app.user_id', concat(a, b), false)) cannot hide the
+    // session-wide third argument; /i catches SQL-style FALSE.
+    /set_config\(\s*['"]app\.[a-z_.]+['"]\s*,[\s\S]*?,\s*false\s*\)/i,
     'set_config(..., false) sets the GUC session-wide and LEAKS across pooled connections — the third argument must be true (transaction-local). SOURCE: docs/harness/README.md (GUC discipline)',
   ],
   [

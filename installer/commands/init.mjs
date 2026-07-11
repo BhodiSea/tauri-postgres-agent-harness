@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path'
 import { planTree } from '../lib/copy.mjs'
 import { detect, detectContext } from '../lib/detect.mjs'
 import { CONFLICTABLE, MODULES, RETROFIT_ADDITIVE, TIERS } from '../lib/layout.mjs'
-import { fileMode, installerVersion, sha256, writeManifest } from '../lib/manifest.mjs'
+import { fileMode, installerVersion, readManifest, sha256, writeManifest } from '../lib/manifest.mjs'
+import { mergeClaudeSettings } from '../lib/merge-claude-settings.mjs'
+import { mergeGitignore } from '../lib/merge-gitignore.mjs'
 import { mergePackageJson } from '../lib/merge-package-json.mjs'
 import { mergeWorkspaceYaml } from '../lib/merge-workspace-yaml.mjs'
 import { printReport } from '../lib/report.mjs'
@@ -14,16 +16,44 @@ export async function init(opts) {
   const targetDir = opts.dir
   mkdirSync(targetDir, { recursive: true })
 
+  // Idempotency guard: re-running init on an installed project would rebuild
+  // the manifest from scratch — modules dropped, modes rewritten, and every
+  // locally-tuned owned file clobbered with no drift protection. readManifest
+  // throws its own restore-from-git error when the manifest is corrupt.
+  const priorManifest = readManifest(targetDir)
+  if (priorManifest && !opts.force) {
+    console.error(
+      `error: this project already has a harness (v${priorManifest.harnessVersion}) — ` +
+        'run `update` to pull fixes, or `init --force` to deliberately re-render (answers/modules carry over).',
+    )
+    return 1
+  }
+
   if (opts.consume) {
     // Template-repo path: consume the local checkout into a project in place.
     rmSync(join(targetDir, '.github'), { recursive: true, force: true })
   }
 
-  const det = opts.consume ? { mode: 'bootstrap' } : detect(targetDir)
+  // A --force re-render keeps the prior install's mode: detect() would now see
+  // the previously-scaffolded tree and misclassify (a bootstrap looks like a
+  // retrofit once package.json exists).
+  const det = opts.consume
+    ? { mode: 'bootstrap' }
+    : priorManifest
+      ? { mode: priorManifest.mode }
+      : detect(targetDir)
   const ctx = detectContext(targetDir)
-  const answers = await collectAnswers({ yes: opts.yes, sets: parseSets(opts.set), ctx })
+  // `init --force` on an installed project carries the prior answers forward
+  // as defaults; explicit --set flags still win.
+  const sets = { ...(priorManifest?.answers ?? {}), ...parseSets(opts.set) }
+  const answers = await collectAnswers({ yes: opts.yes, sets, ctx })
 
-  const modules = opts.modules ?? TIERS[opts.tier] ?? []
+  // An unknown --tier silently installing ZERO modules would be a false-green
+  // install for someone who asked for `--tier strict`.
+  if (opts.modules === undefined && !priorManifest && !(opts.tier in TIERS)) {
+    throw new Error(`unknown tier: ${opts.tier} (known: ${Object.keys(TIERS).join(', ')})`)
+  }
+  const modules = opts.modules ?? (priorManifest ? (priorManifest.modules ?? []) : TIERS[opts.tier])
   for (const m of modules) {
     if (!MODULES.includes(m)) throw new Error(`unknown module: ${m} (known: ${MODULES.join(', ')})`)
   }
@@ -112,13 +142,67 @@ export async function init(opts) {
       }
     }
 
-    if (det.mode === 'retrofit') {
-      const conflictable = CONFLICTABLE.find((c) => c.installed === ip)
-      if (conflictable && existsSync(dest) && readFileSync(dest, 'utf8') !== entry.content) {
-        const sibling = ip.replace(/(\.[a-z]+)$/, '.harness$1')
-        if (!opts.dryRun) write(join(targetDir, sibling), entry.content)
-        report.conflicts.push({ path: ip, detail: `existing config kept; harness version at ${sibling} — merge manually` })
-        report.written.push(sibling)
+    // Retrofit non-clobber is UNIVERSAL: any existing file with different
+    // content is merged (known types), parked as a .harness sibling (root
+    // configs), or parked under .harness/conflicts/ — never overwritten.
+    // package.json / pnpm-workspace.yaml were already content-merged above.
+    // (--force re-renders skip this: the prior install owns those files.)
+    if (
+      det.mode === 'retrofit' &&
+      !priorManifest &&
+      ip !== 'package.json' &&
+      ip !== 'pnpm-workspace.yaml' &&
+      existsSync(dest)
+    ) {
+      const currentRaw = readFileSync(dest)
+      const incomingRaw = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content)
+      if (!currentRaw.equals(incomingRaw)) {
+        const current = currentRaw.toString('utf8')
+
+        if (ip === '.gitignore') {
+          const { merged, added } = mergeGitignore(current, String(entry.content))
+          if (added.length > 0) {
+            if (!opts.dryRun) write(dest, merged)
+            report.written.push(ip)
+            report.notes.push(`.gitignore: kept yours, appended ${added.length} harness pattern(s)`)
+          } else {
+            report.skipped.push(ip)
+          }
+          continue
+        }
+
+        if (ip === '.claude/settings.json') {
+          const res = mergeClaudeSettings(current, String(entry.content))
+          if (res !== null) {
+            if (!opts.dryRun) write(dest, res.merged)
+            report.written.push(ip)
+            files[ip] = { mode: fileMode(ip), sha256: sha256(res.merged) }
+            report.notes.push(
+              '.claude/settings.json: merged — harness hooks/permissions added, your settings kept (review the diff)',
+            )
+            for (const r of res.report) {
+              if (r.kind === 'scalar-kept') report.notes.push(`settings ${r.name}: kept yours (${String(r.existing)}); harness default is ${String(r.harness)}`)
+            }
+            continue
+          }
+          // fall through to conflict parking when unparseable
+        }
+
+        const conflictable = CONFLICTABLE.find((c) => c.installed === ip)
+        if (conflictable) {
+          const sibling = ip.replace(/(\.[a-z]+)$/, '.harness$1')
+          if (!opts.dryRun) write(join(targetDir, sibling), entry.content)
+          report.conflicts.push({ path: ip, detail: `existing config kept; harness version at ${sibling} — merge manually` })
+          report.written.push(sibling)
+          continue
+        }
+
+        // Everything else (AGENTS.md, docker-compose.yml, workflows, docs, …):
+        // theirs stays byte-identical; ours parks OUTSIDE active paths — a
+        // sibling inside .github/workflows/ would itself execute as a workflow.
+        const parked = join('.harness', 'conflicts', ip)
+        if (!opts.dryRun) write(join(targetDir, parked), entry.content)
+        report.conflicts.push({ path: ip, detail: `existing file kept; harness version at ${parked} — merge manually` })
         continue
       }
     }

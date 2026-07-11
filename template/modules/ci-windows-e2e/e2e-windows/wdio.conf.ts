@@ -44,8 +44,10 @@ export const config: WdioLiteConfig = {
       maxInstances: 1,
       'tauri:options': {
         // Debug binary produced by `pnpm --filter desktop exec tauri build --debug --no-bundle`.
-        // The exe name derives from tauri.conf.json's productName.
-        application: '../apps/desktop/src-tauri/target/debug/{{PROJECT_NAME}}.exe',
+        // Tauri 2 names the built binary after the CARGO BIN ("desktop", fixed in
+        // src-tauri/Cargo.toml), NOT tauri.conf.json's productName — verified on a
+        // real Windows runner by the harness selftest's install/uninstall smoke.
+        application: '../apps/desktop/src-tauri/target/debug/desktop.exe',
       },
     },
   ],

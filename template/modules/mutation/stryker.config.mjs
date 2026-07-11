@@ -17,10 +17,13 @@ const config = {
     'packages/eval/src/**/*.ts',
     '!**/*.test.ts',
   ],
-  reporters: ['progress', 'clear-text', 'html'],
+  reporters: ['progress', 'clear-text', 'html', 'json'],
   testRunner: 'vitest',
-  // Full nightly run measures; it does not break. The per-PR incremental config
-  // (stryker.incremental.mjs) owns the hard threshold.
+  // Score thresholds never break — the SET-based ratchet does
+  // (tools/check-mutation-ratchet.mjs compares surviving mutants against the
+  // committed baseline after this run). concurrency 1: timeout-killed mutants
+  // flip status under parallel load, and the set compare must be deterministic.
+  concurrency: 1,
   thresholds: { break: null },
   vitest: { configFile: 'vitest.config.ts' },
 }

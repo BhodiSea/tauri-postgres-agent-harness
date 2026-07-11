@@ -8,6 +8,8 @@ target/
 apps/desktop/src-tauri/gen/
 *.tsbuildinfo
 coverage/
+# playwright artifacts (traces/error contexts from the e2e lane and check-e2e gate)
+test-results/
 
 # env & local secrets — .env.example is the committed contract
 .env

@@ -1,0 +1,51 @@
+import { type ReactNode, useEffect, useRef } from 'react'
+
+interface AppDialogProps {
+  readonly title: string
+  readonly open: boolean
+  readonly onClose: () => void
+  readonly children: ReactNode
+}
+
+// Native <dialog> + showModal(): focus trap, Escape-to-close, backdrop, and
+// focus restore to the opener all come from the platform (WebView2 = Chromium)
+// instead of a hand-rolled trap that drifts from the spec. jsdom lacks
+// showModal — the feature-detected fallback keeps unit tests rendering real
+// content without pretending to trap focus.
+// SOURCE: WAI-ARIA APG dialog (modal) pattern — native dialog element [corpus: wcag/character-key-shortcuts]
+export function AppDialog({ title, open, onClose, children }: AppDialogProps) {
+  const ref = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialog = ref.current
+    if (dialog === null) return
+    if (open && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal()
+      else dialog.setAttribute('open', '')
+    } else if (!open && dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close()
+      else dialog.removeAttribute('open')
+    }
+  }, [open])
+
+  return (
+    <dialog
+      ref={ref}
+      aria-label={title}
+      onClose={onClose}
+      className="m-auto w-full max-w-md rounded-lg border border-edge bg-surface p-0 text-ink backdrop:bg-canvas/80"
+    >
+      <div className="flex items-center justify-between border-b border-edge px-4 py-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded border border-edge px-2 py-0.5 text-xs text-ink-muted hover:text-ink"
+        >
+          Esc
+        </button>
+      </div>
+      <div className="p-4">{children}</div>
+    </dialog>
+  )
+}

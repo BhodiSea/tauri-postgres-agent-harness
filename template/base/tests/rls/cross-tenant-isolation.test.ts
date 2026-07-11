@@ -145,6 +145,51 @@ if (!RLS_SUITE_READY) {
       }
     })
 
+    it('every isolation target owner column is the LEADING column of an index', async () => {
+      // Leading-column coverage is what turns the policy qual into an Index Cond —
+      // an index with the owner column in second position does not serve
+      // `owner = $0`, and every RLS policy filters by it on every statement.
+      // SOURCE: PostgreSQL multicolumn index semantics [corpus: postgres/rls-initplan]
+      for (const t of ISOLATION_TARGETS) {
+        const idx = await sql`
+          SELECT c.relname FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indexrelid
+          JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+          WHERE i.indrelid = ${`public.${t.table}`}::regclass AND a.attname = ${t.ownerColumn}`
+        expect(
+          idx.length,
+          `${t.table}.${t.ownerColumn}: no leading-column index — add a migration (see 0001_notes_owner_idx.sql)`,
+        ).toBeGreaterThanOrEqual(1)
+      }
+    })
+
+    it('every policy predicate resolves identity through a sub-select (initPlan), per pg_policies', async () => {
+      // The static schema-rls gate asserts this on migration TEXT; this asserts it on
+      // what the database actually compiled — pg_policies pretty-prints the stored
+      // predicate, so a per-row current_setting() shows up here with no `( SELECT`.
+      // SOURCE: initPlan sub-select pattern [corpus: postgres/rls-initplan]
+      for (const t of ISOLATION_TARGETS) {
+        const policies = await sql`
+          SELECT policyname, qual, with_check FROM pg_policies
+          WHERE schemaname = 'public' AND tablename = ${t.table}`
+        expect(policies.length, `${t.table}: has policies`).toBeGreaterThanOrEqual(1)
+        for (const p of policies) {
+          const preds: [string, unknown][] = [
+            ['USING', p['qual']],
+            ['WITH CHECK', p['with_check']],
+          ]
+          for (const [kind, pred] of preds) {
+            if (pred === null || pred === undefined) continue
+            const text = String(pred)
+            expect(
+              /\(\s*SELECT\b/i.test(text) && /current_setting/i.test(text),
+              `${t.table} policy ${String(p['policyname'])} ${kind} must wrap current_setting in a scalar sub-select (initPlan) — got: ${text}`,
+            ).toBe(true)
+          }
+        }
+      }
+    })
+
     it('pgvector is installed at a patched version (>= 0.8.2)', async () => {
       const ext = await sql`SELECT extversion FROM pg_extension WHERE extname = 'vector'`
       expect(ext, 'vector extension installed').toHaveLength(1)

@@ -1,0 +1,20 @@
+{
+  "comment": "Design-system contract enforced by tools/check-styleguide-manifest.mjs against apps/desktop/src/styles.css. tokens/families mirror the @theme declarations bidirectionally; erasedNamespaces must keep their `--<ns>-*: initial` markers; accentUsageBudget caps accent-utility occurrences across the desktop source; allow entries (file + reason) exempt a file from the raw px/hex source scan. This file is write-guard-protected: extending the design system is a reviewed human diff of styles.css AND this manifest together.",
+  "tokens": ["canvas", "surface", "edge", "ink", "ink-muted", "accent"],
+  "accentTokens": ["accent"],
+  "accentUsageBudget": 10,
+  "erasedNamespaces": ["color", "font", "text", "radius", "shadow", "ease"],
+  "families": {
+    "font": ["sans", "mono", "weight-normal", "weight-medium", "weight-semibold", "weight-bold"],
+    "text": ["xs", "sm", "base", "lg", "xl", "2xl"],
+    "radius": ["sm", "md", "lg"],
+    "shadow": ["sm", "md"],
+    "ease": ["out", "in-out"]
+  },
+  "allow": [
+    {
+      "file": "apps/desktop/src/styles.css",
+      "reason": "the token source of truth: raw px appears only in token values and the focus outline"
+    }
+  ]
+}

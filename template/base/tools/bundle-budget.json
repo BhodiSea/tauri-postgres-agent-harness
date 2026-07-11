@@ -1,0 +1,6 @@
+{
+  "comment": "Gzip byte budgets enforced by the build gate (tools/build-check.mjs) over apps/desktop/dist. Calibrated ~3x above the fresh scaffold (React 19 + the shell ≈ 60 KB total gzip) so real features fit while an accidental heavyweight dependency (charting lib, moment, lodash) or an unsplit route bundle turns the gate red. Raising a budget is a reviewed human decision — this file is write-guard-protected.",
+  "totalGzipKb": 250,
+  "largestChunkGzipKb": 180,
+  "largestAssetGzipKb": 100
+}

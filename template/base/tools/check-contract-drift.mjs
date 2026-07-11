@@ -12,9 +12,13 @@
 import { execSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { failures, ok, skipOrFail } from './lib/gate.mjs'
+import { failures, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'contracts'
+// Content-addressed local skip (declared inputs: lib/stamp-inputs.mjs — the
+// server sources, committed contract, and workspace topology). CI always re-runs.
+const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 const errs = []
 
 // tsconfig reference paths are POSIX; join()/relative() yield backslashes on
@@ -115,7 +119,9 @@ if (existsSync(EMIT)) {
     skipOrFail(GATE, 'node_modules missing — openapi regen-diff needs an install')
   }
   try {
-    const regenerated = execSync(`pnpm exec tsx ${EMIT} --stdout`, {
+    // --silent: under CI=true pnpm prints its auto-install/verify banner to
+    // STDOUT, which would pollute the captured JSON and false-fail the diff.
+    const regenerated = execSync(`pnpm --silent exec tsx ${EMIT} --stdout`, {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -132,4 +138,5 @@ if (existsSync(EMIT)) {
 }
 
 failures(GATE, errs)
+recordGreen()
 ok(GATE, 'openapi.json in sync; tsconfig references mirror the workspace graph')

@@ -2,26 +2,33 @@
 
 The full accessibility sweep: axe with the complete WCAG 2.x tag set (2.0/2.1
 A+AA + the 2.2 additions) and a strict keyboard-traversal walk — every tab stop
-must be visible, labeled, and inside a landmark — across EVERY route in a
-committed route manifest. Plus the manual NVDA checklist automation cannot
+must be visible, labeled, and inside a landmark, and the Tab cycle must
+TERMINATE (a revisited element before the cycle completes is a focus trap and
+fails loudly) — across EVERY route in the canonical manifest
+`apps/desktop/src/routes.ts`. Plus the manual NVDA checklist automation cannot
 replace.
 
 ## What it adds
 
 | File | Purpose |
 | --- | --- |
-| `e2e/a11y-routes.ts` | the route manifest — every user-reachable screen registers here |
 | `e2e/a11y-deep.spec.ts` | axe full-tag scan + keyboard-traversal walk per route |
 | `.github/workflows/a11y-deep.yml` | per-PR (UI paths) + nightly sweep |
 | `docs/nvda-checklist.md` | the manual screen-reader release checklist |
 
+The route manifest itself ships with the scaffold (`apps/desktop/src/routes.ts`)
+and is closure-checked by the default `route-manifest` gate
+(`tools/check-route-manifest.mjs`): a feature directory that no ROUTES entry
+references (and that is not allowlisted in `tools/route-allowlist.json`) fails
+`pnpm validate` — so this sweep can no longer be starved by an unregistered
+screen. (The module's former private `e2e/a11y-routes.ts` was retired in favor
+of that single manifest.)
+
 ## Prerequisites
 
 - The base e2e lane (ships with the scaffold): `playwright.config.ts`,
-  `e2e/mock-ipc.ts`, and the `@playwright/test` / `@axe-core/playwright` devDeps.
-- Discipline: add a manifest entry per new route. The sweep fails if the manifest
-  is EMPTY, but it cannot know about a route you never listed — reviewers own that
-  (the fast lane still covers the shell regardless).
+  `e2e/mock-ipc.ts`, `apps/desktop/src/routes.ts`, and the `@playwright/test` /
+  `@axe-core/playwright` devDeps.
 
 ## How enabling works
 
@@ -41,8 +48,13 @@ The workflow IS the gate — no `tools/harness.config.mjs` change. Locally:
   fails "must live inside a landmark".
 - Add a `tabindex="0"` element with no text/label → fails "must have an
   accessible name".
-- Empty the `ROUTES` array → the manifest guard test fails (an empty sweep is a
-  vacuous pass, and the gate says so).
+- Trap focus (a widget whose keydown handler swallows Tab, or an element that
+  re-focuses itself) → the walk fails "focus TRAP" / "never completed a cycle"
+  instead of silently exhausting its press budget.
+- Remove every tabbable element from a route → fails "must expose at least one
+  keyboard focus stop" (a keyboard-inoperable page can no longer pass vacuously).
+- Empty the `ROUTES` array → the manifest guard test fails here AND the
+  `route-manifest` gate fails `pnpm validate`.
 
 ## Honest limits
 

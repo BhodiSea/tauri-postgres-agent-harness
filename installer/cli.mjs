@@ -14,6 +14,7 @@ const { values, positionals } = parseArgs({
     yes: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
+    'refresh-seeded': { type: 'string', multiple: true },
     consume: { type: 'boolean', default: false },
     set: { type: 'string', multiple: true },
     report: { type: 'string' },
@@ -29,6 +30,7 @@ const opts = {
   yes: values.yes,
   dryRun: values['dry-run'],
   force: values.force,
+  refreshSeeded: values['refresh-seeded'],
   consume: values.consume,
   set: values.set,
   report: values.report,
@@ -40,10 +42,12 @@ Usage:
   init     [--dir .] [--tier core|standard|strict] [--modules a,b] [--yes]
            [--set VAR=value ...] [--dry-run] [--report json] [--consume]
   update   [--dir .] [--dry-run] [--force] [--report json]
+           [--refresh-seeded <path> ...]  (pull the template version of a
+           seeded, project-owned file: overwrite when untouched, park on drift)
   doctor   [--dir .]
   enable   <module>   (ci-windows-release, ci-windows-e2e, ci-macos, ci-provenance,
-           mutation, gate-perf-budget, gate-a11y-deep, gate-styleguide,
-           crash-reporting, ops-backup, eval-live, observability)
+           mutation, gate-a11y-deep, crash-reporting, ops-backup, eval-live,
+           observability)
   disable  <module>
 
 Placeholders: PROJECT_NAME PROJECT_SLUG PRODUCT_IDENTIFIER WINDOWS_PUBLISHER

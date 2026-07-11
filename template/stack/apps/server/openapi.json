@@ -19,71 +19,291 @@
   "paths": {
     "/api/notes": {
       "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "properties": {
-                      "body": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "string"
-                      },
-                      "embedding": {
-                        "items": {
-                          "type": "number"
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "body": {
+                            "maxLength": 20000,
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "maxLength": 64,
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}",
+                            "type": "string"
+                          },
+                          "embedding": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": [
+                              "array",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "type": "string"
+                          },
+                          "ownerId": {
+                            "format": "uuid",
+                            "type": "string"
+                          },
+                          "sourceConfidence": {
+                            "maximum": 1,
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "sourceModel": {
+                            "maxLength": 128,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "title": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          }
                         },
-                        "type": [
-                          "array",
-                          "null"
-                        ]
+                        "required": [
+                          "body",
+                          "createdAt",
+                          "embedding",
+                          "id",
+                          "ownerId",
+                          "sourceConfidence",
+                          "sourceModel",
+                          "title"
+                        ],
+                        "type": "object"
                       },
-                      "id": {
-                        "format": "uuid",
-                        "type": "string"
-                      },
-                      "ownerId": {
-                        "format": "uuid",
-                        "type": "string"
-                      },
-                      "sourceConfidence": {
-                        "maximum": 8388607,
-                        "minimum": -8388608,
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "sourceModel": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "title": {
-                        "type": "string"
-                      }
+                      "maxItems": 200,
+                      "type": "array"
                     },
-                    "required": [
-                      "body",
-                      "createdAt",
-                      "embedding",
-                      "id",
-                      "ownerId",
-                      "sourceConfidence",
-                      "sourceModel",
-                      "title"
-                    ],
-                    "type": "object"
+                    "nextCursor": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
                   },
-                  "type": "array"
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
                 }
               }
             },
-            "description": "All notes owned by the authenticated user (scoped by RLS)"
+            "description": "One keyset page of the notes owned by the authenticated user (scoped by RLS), newest first; follow nextCursor until it is null"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request validation failed (envelope code bad_request)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Missing or unverifiable bearer token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Client major version does not match the server (code version_skew)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unexpected server error — correlate via error.requestId"
           }
         },
         "security": [
@@ -99,9 +319,11 @@
               "schema": {
                 "properties": {
                   "body": {
+                    "maxLength": 20000,
                     "type": "string"
                   },
                   "title": {
+                    "maxLength": 200,
                     "minLength": 1,
                     "type": "string"
                   }
@@ -122,9 +344,12 @@
                 "schema": {
                   "properties": {
                     "body": {
+                      "maxLength": 20000,
                       "type": "string"
                     },
                     "createdAt": {
+                      "maxLength": 64,
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}",
                       "type": "string"
                     },
                     "embedding": {
@@ -145,20 +370,23 @@
                       "type": "string"
                     },
                     "sourceConfidence": {
-                      "maximum": 8388607,
-                      "minimum": -8388608,
+                      "maximum": 1,
+                      "minimum": 0,
                       "type": [
                         "number",
                         "null"
                       ]
                     },
                     "sourceModel": {
+                      "maxLength": 128,
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "title": {
+                      "maxLength": 200,
+                      "minLength": 1,
                       "type": "string"
                     }
                   },
@@ -177,6 +405,221 @@
               }
             },
             "description": "The created note"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request validation failed (envelope code bad_request)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Missing or unverifiable bearer token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Client major version does not match the server (code version_skew)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request body exceeds the 1 MiB /api/* limit"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unexpected server error — correlate via error.requestId"
           }
         },
         "security": [
@@ -202,13 +645,124 @@
           "204": {
             "description": "Note deleted"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request validation failed (envelope code bad_request)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Missing or unverifiable bearer token"
+          },
           "404": {
             "content": {
               "application/json": {
                 "schema": {
                   "properties": {
                     "error": {
-                      "type": "string"
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -219,6 +773,92 @@
               }
             },
             "description": "No such note visible to this user"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Client major version does not match the server (code version_skew)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unexpected server error — correlate via error.requestId"
           }
         },
         "security": [
@@ -245,9 +885,12 @@
                 "schema": {
                   "properties": {
                     "body": {
+                      "maxLength": 20000,
                       "type": "string"
                     },
                     "createdAt": {
+                      "maxLength": 64,
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}",
                       "type": "string"
                     },
                     "embedding": {
@@ -268,20 +911,23 @@
                       "type": "string"
                     },
                     "sourceConfidence": {
-                      "maximum": 8388607,
-                      "minimum": -8388608,
+                      "maximum": 1,
+                      "minimum": 0,
                       "type": [
                         "number",
                         "null"
                       ]
                     },
                     "sourceModel": {
+                      "maxLength": 128,
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "title": {
+                      "maxLength": 200,
+                      "minLength": 1,
                       "type": "string"
                     }
                   },
@@ -301,13 +947,124 @@
             },
             "description": "The requested note"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request validation failed (envelope code bad_request)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Missing or unverifiable bearer token"
+          },
           "404": {
             "content": {
               "application/json": {
                 "schema": {
                   "properties": {
                     "error": {
-                      "type": "string"
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -318,6 +1075,92 @@
               }
             },
             "description": "No such note visible to this user"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Client major version does not match the server (code version_skew)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unexpected server error — correlate via error.requestId"
           }
         },
         "security": [
@@ -342,6 +1185,7 @@
                       "type": "boolean"
                     },
                     "version": {
+                      "maxLength": 64,
                       "type": "string"
                     }
                   },
@@ -354,6 +1198,49 @@
               }
             },
             "description": "Liveness probe — no auth, no version gate; the desktop status indicator polls it"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "bad_request",
+                            "unauthorized",
+                            "not_found",
+                            "payload_too_large",
+                            "version_skew",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unexpected server error — correlate via error.requestId"
           }
         }
       }

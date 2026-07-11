@@ -25,10 +25,19 @@ defaults:
     shell: bash
 
 jobs:
+  # Both unit lanes run on ubuntu AND windows: the v0.1.1 bug class (path
+  # separators, CRLF, shell globbing) only reproduces on a real Windows
+  # filesystem — a Linux-only unit lane cannot make that class extinct.
   installer-unit:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        # harden-runner egress blocking is unsupported on Windows (audit-only);
+        # declaring audit everywhere keeps the two legs honest and identical.
         with:
           egress-policy: audit
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -39,10 +48,25 @@ jobs:
           node-version: 22
       - run: node scripts/check-syntax.mjs
       - run: node scripts/hygiene.mjs
-      - run: node --test "tests/**/*.test.mjs"
+      - run: node scripts/check-release-lockstep.mjs
+      - run: node scripts/check-plugin-manifest.mjs
+      - run: node scripts/check-canary-coverage.mjs
+      # Coverage floor over the installer itself (measured ~92/73/94 at 0.1.3;
+      # floors sit ~7 points under). Hooks are exercised as CHILD processes by
+      # tests/hooks (out-of-process — not measurable here); their behavioral
+      # floor is the hook-contract deny/allow matrix instead.
+      - run: >-
+          node --test --experimental-test-coverage
+          --test-coverage-include='installer/**'
+          --test-coverage-lines=85 --test-coverage-branches=65 --test-coverage-functions=85
+          "tests/**/*.test.mjs"
 
   hook-contracts:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -128,9 +152,39 @@ jobs:
           fi
           git checkout -q -- .
           echo 'canary OK: schema-rls went red'
+      - name: 'Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          printf 'export const oops = <p className="text-red-500">bad #ff0000</p>\n' > apps/desktop/src/oops.tsx
+          if env -u GITHUB_BASE_REF node tools/check-styleguide-manifest.mjs; then
+            echo '::error::CANARY: styleguide PASSED raw hex + erased palette — the gate cannot fail'; exit 1
+          fi
+          rm apps/desktop/src/oops.tsx
+          echo 'canary OK: styleguide went red'
+      - name: 'Canary 6: unregistered features directory → route-manifest must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          mkdir -p apps/desktop/src/features/reports
+          echo 'export const x = 1' > apps/desktop/src/features/reports/index.ts
+          if env -u GITHUB_BASE_REF node tools/check-route-manifest.mjs; then
+            echo '::error::CANARY: route-manifest PASSED an unregistered screen dir — the gate cannot fail'; exit 1
+          fi
+          rm -r apps/desktop/src/features/reports
+          echo 'canary OK: route-manifest went red'
+      - name: 'Canary 7: tamper a hash-locked prompt → prompts must FAIL'
+        working-directory: ${{ runner.temp }}/canary
+        run: |
+          echo ' ' >> packages/eval/prompts/extract.v1.md
+          if env -u GITHUB_BASE_REF node tools/check-prompts-lock.mjs; then
+            echo '::error::CANARY: prompts PASSED a tampered hash-locked prompt — the gate cannot fail'; exit 1
+          fi
+          git checkout -q -- .
+          echo 'canary OK: prompts went red'
       - name: Restore sanity — gates green again after the last restore
         working-directory: ${{ runner.temp }}/canary
         run: env -u GITHUB_BASE_REF node tools/check-rls-manifest.mjs
+      - name: Canary coverage lockstep (every step provably red; hook rules tested)
+        run: node scripts/check-canary-coverage.mjs
 
   bootstrap-linux:
     strategy:
@@ -194,6 +248,9 @@ jobs:
       - name: pnpm install
         working-directory: .selftest/boot
         run: pnpm install --no-frozen-lockfile
+      - name: Playwright chromium (the e2e gate fails closed in CI without it)
+        working-directory: .selftest/boot
+        run: pnpm exec playwright install chromium --with-deps
       # Soft assertion: on a re-run with an unchanged catalog the store cache
       # should hit. A miss is a warning (first run / catalog bump are
       # legitimate); a cache CONFIG error already failed the job above.
@@ -207,6 +264,28 @@ jobs:
         env:
           HARNESS_REQUIRE_TOOLCHAINS: '1'
         run: node tools/validate.mjs --min-floor
+      - name: Warm validate wall-time budget (stamped local experience — fail >120s, warn >90s)
+        working-directory: .selftest/boot
+        env:
+          # CI=false so stamps + caches apply: this measures the LOCAL warm
+          # experience an agent gets between edits, not the fail-closed CI run
+          # (which just happened above). Stamps were recorded by the cold run.
+          CI: 'false'
+          HARNESS_REQUIRE_TOOLCHAINS: ''
+        run: |
+          start=$(date +%s)
+          node tools/validate.mjs | tee warm-validate.log
+          elapsed=$(( $(date +%s) - start ))
+          echo "warm validate wall time: ${elapsed}s"
+          {
+            echo '### Warm validate (stamped) — per-step ms'
+            echo '```'
+            grep -E '^  ' warm-validate.log || true
+            echo '```'
+            echo "wall time: ${elapsed}s"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$elapsed" -gt 120 ]; then echo "::error::warm validate took ${elapsed}s (budget 120s)"; exit 1; fi
+          if [ "$elapsed" -gt 90 ]; then echo "::warning::warm validate took ${elapsed}s (target 90s)"; fi
       - name: RLS runner FAILS CLOSED without a database (CI=true)
         working-directory: .selftest/boot
         run: |
@@ -259,6 +338,18 @@ jobs:
             --set PROJECT_NAME="Selftest App" \
             --set GITHUB_OWNER=selftest-owner \
             --set SECURITY_OWNERS=@selftest-owner
+      - name: Manifest is POSIX-keyed and lifecycle commands work on Windows
+        run: |
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const m = JSON.parse(readFileSync(process.env.GITHUB_WORKSPACE + "/.selftest/boot/.harness/manifest.json", "utf8"));
+            const bad = Object.keys(m.files).filter((k) => k.includes("\\"));
+            if (bad.length) { console.error("backslash manifest keys:", bad.slice(0, 5)); process.exit(1); }
+            const mode = m.files["apps/desktop/src-tauri/tauri.conf.json"].mode;
+            if (mode !== "seeded") { console.error("tauri.conf.json mode", mode, "!== seeded - prefix rules broken on Windows"); process.exit(1); }
+          '
+          node installer/cli.mjs doctor --dir "$GITHUB_WORKSPACE/.selftest/boot"
+          node installer/cli.mjs update --dir "$GITHUB_WORKSPACE/.selftest/boot" --dry-run
       - name: Git baseline + corepack
         working-directory: .selftest/boot
         run: |
@@ -290,14 +381,36 @@ jobs:
       - name: pnpm install
         working-directory: .selftest/boot
         run: pnpm install --no-frozen-lockfile
+      - name: Playwright chromium (the e2e gate fails closed in CI without it)
+        working-directory: .selftest/boot
+        run: pnpm exec playwright install chromium
       - name: THE GATE — full validate on Windows (fail-closed toolchains)
         working-directory: .selftest/boot
         env:
           HARNESS_REQUIRE_TOOLCHAINS: '1'
         run: node tools/validate.mjs --min-floor
+      - name: Warm validate wall-time (Windows runners are slow — warn-only)
+        working-directory: .selftest/boot
+        shell: bash
+        env:
+          CI: 'false'
+          HARNESS_REQUIRE_TOOLCHAINS: ''
+        run: |
+          start=$(date +%s)
+          node tools/validate.mjs | tee warm-validate.log
+          elapsed=$(( $(date +%s) - start ))
+          echo "warm validate wall time: ${elapsed}s"
+          {
+            echo '### Warm validate on Windows (stamped) — per-step ms'
+            echo '```'
+            grep -E '^  ' warm-validate.log || true
+            echo '```'
+            echo "wall time: ${elapsed}s"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$elapsed" -gt 120 ]; then echo "::warning::warm validate took ${elapsed}s (budget 120s; warn-only on Windows)"; fi
       - name: Unit tests green (Stop-hook step 3)
         working-directory: .selftest/boot
-        run: pnpm exec vitest run --silent
+        run: pnpm exec vitest run --coverage --silent
 
   # Path filter feeding tauri-build-smoke: the full NSIS bundle is expensive,
   # so it runs when the desktop surface changes, on demand, nightly, and on
@@ -431,7 +544,7 @@ jobs:
           node-version: 22
       - name: Synthesize an existing pnpm monorepo with planted conflicts
         run: |
-          mkdir -p "$RUNNER_TEMP/retro/apps/server/src"
+          mkdir -p "$RUNNER_TEMP/retro/apps/server/src" "$RUNNER_TEMP/retro/.claude"
           cat > "$RUNNER_TEMP/retro/package.json" <<'EOF'
           {"name":"existing","dependencies":{"hono":"^4.0.0"},"scripts":{"validate":"my-own-gate"}}
           EOF
@@ -439,6 +552,8 @@ jobs:
           echo 'export default []' > "$RUNNER_TEMP/retro/eslint.config.mjs"
           echo '{"name":"server"}' > "$RUNNER_TEMP/retro/apps/server/package.json"
           echo 'export const theirs = true' > "$RUNNER_TEMP/retro/apps/server/src/index.ts"
+          printf '# THEIR project memory\n' > "$RUNNER_TEMP/retro/AGENTS.md"
+          printf '{"permissions":{"allow":["Bash(make test)"],"defaultMode":"default"}}\n' > "$RUNNER_TEMP/retro/.claude/settings.json"
       - name: Retrofit install (JSON report; conflicts exit 2 by design)
         run: |
           node installer/cli.mjs init --dir "$RUNNER_TEMP/retro" --yes --report json \
@@ -465,8 +580,65 @@ jobs:
           if (fs.readFileSync(`${tmp}/retro/apps/server/src/index.ts`, 'utf8') !== 'export const theirs = true\n') throw new Error('their app code modified')
           if (fs.existsSync(`${tmp}/retro/apps/desktop`)) throw new Error('stack app code installed on retrofit')
           if (!report.conflicts?.length) throw new Error('conflict report empty — planted conflicts not surfaced')
+          if (fs.readFileSync(`${tmp}/retro/AGENTS.md`, 'utf8') !== '# THEIR project memory\n') throw new Error('clobbered their AGENTS.md')
+          if (!fs.existsSync(`${tmp}/retro/.harness/conflicts/AGENTS.md`)) throw new Error('harness AGENTS.md not parked as a conflict')
+          const settings = JSON.parse(fs.readFileSync(`${tmp}/retro/.claude/settings.json`, 'utf8'))
+          if (settings.permissions.defaultMode !== 'default') throw new Error('clobbered their permission posture')
+          if (!JSON.stringify(settings.hooks ?? {}).includes('stop-validate-gate')) throw new Error('harness Stop hook not merged into their settings')
           console.log('retrofit non-clobber + workspace merge: OK')
           EOF
+
+  # A project installed from the PREVIOUS release must upgrade cleanly with the
+  # CURRENT installer: version migrations apply, doctor is not broken, and the
+  # local step list matches the CI floor (a promoted gate that reaches CI but
+  # not the consumer's Stop hook is a silent lockstep break).
+  update-skew:
+    runs-on: ubuntu-latest
+    env:
+      PREVIOUS_RELEASE_TAG: v0.1.1
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Init from the previous release tag
+        run: |
+          git worktree add "$RUNNER_TEMP/old-harness" "$PREVIOUS_RELEASE_TAG"
+          node "$RUNNER_TEMP/old-harness/installer/cli.mjs" init --dir "$RUNNER_TEMP/skew" --yes \
+            --set PROJECT_NAME="Skew App" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+      - name: Update with the CURRENT installer
+        run: |
+          node installer/cli.mjs update --dir "$RUNNER_TEMP/skew" || code=$?
+          # exit 2 (drift parked for human review) is acceptable; 1 is broken.
+          if [ "${code:-0}" -eq 1 ]; then
+            echo '::error::update from the previous release failed'
+            exit 1
+          fi
+      - name: Doctor is not broken after the upgrade
+        run: |
+          node installer/cli.mjs doctor --dir "$RUNNER_TEMP/skew" || code=$?
+          if [ "${code:-0}" -eq 1 ]; then
+            echo '::error::doctor reports a BROKEN install after upgrade'
+            exit 1
+          fi
+      - name: Local step list matches the CI floor (FLOOR ↔ VALIDATE_STEPS lockstep survives upgrade)
+        working-directory: ${{ runner.temp }}/skew
+        run: |
+          node tools/validate.mjs --list > /tmp/local-steps.txt
+          node tools/validate.mjs --min-floor --list > /tmp/floor-steps.txt
+          if ! diff -u /tmp/floor-steps.txt /tmp/local-steps.txt; then
+            echo '::error::upgraded install runs different steps locally than CI --min-floor'
+            exit 1
+          fi
+          echo 'step-list parity after upgrade: OK'
 
   placeholder-residue:
     runs-on: ubuntu-latest
@@ -480,17 +652,50 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
-      - name: Bootstrap and grep for unrendered placeholders
+      - name: Bootstrap and scan for unrendered placeholders (shared scanner)
         run: |
           node installer/cli.mjs init --dir "$RUNNER_TEMP/residue" --yes \
             --set PROJECT_NAME="Residue App" \
             --set GITHUB_OWNER=selftest-owner \
             --set SECURITY_OWNERS=@selftest-owner
-          cd "$RUNNER_TEMP/residue"
-          residue=$(grep -rIn -E '\{\{[A-Z_]*\}\}' . --exclude-dir=.git | grep -v '^\./\.harness/manifest\.json:' || true)
-          if [ -n "$residue" ]; then
-            echo "$residue"
-            echo '::error::unrendered {{PLACEHOLDER}} tokens leaked into the scaffold'
-            exit 1
+          node scripts/check-residue.mjs "$RUNNER_TEMP/residue"
+
+  # Every opt-in module renders, placeholder-clean and syntax-valid, on one
+  # scaffold — a module with broken packaging or leaked placeholders is dead on
+  # arrival for the first consumer who enables it. (Module workflow YAML is
+  # actionlinted by lint.yml against the raw template files.)
+  module-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Render the scaffold with EVERY module enabled
+        run: |
+          node installer/cli.mjs init --dir "$RUNNER_TEMP/allmods" --yes --tier core \
+            --set PROJECT_NAME="All Modules" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+          for m in ci-windows-release ci-windows-e2e ci-macos ci-provenance mutation \
+                   gate-a11y-deep crash-reporting ops-backup eval-live observability; do
+            node installer/cli.mjs enable "$m" --dir "$RUNNER_TEMP/allmods"
+          done
+      - name: Rendered tree is placeholder-clean and syntax-valid
+        run: |
+          node scripts/check-residue.mjs "$RUNNER_TEMP/allmods"
+          node scripts/check-syntax.mjs "$RUNNER_TEMP/allmods"
+      - name: Doctor accepts the all-modules install
+        run: |
+          if node installer/cli.mjs doctor --dir "$RUNNER_TEMP/allmods"; then
+            echo 'doctor: clean'
+          else
+            code=$?
+            if [ "$code" -eq 1 ]; then echo '::error::doctor reports BROKEN on a fresh all-modules install'; exit 1; fi
+            echo "doctor exit $code (warnings only) — acceptable on a fresh render"
           fi
-          echo 'placeholder residue: none'

@@ -1,31 +1,35 @@
 [
   {
+    "groups": ["tuning-constants"],
     "id": "harness/doctrine",
-    "sha256": "",
+    "sha256": "4ca86c3ad58dbe4ce369d1a7c3c590a609ad100cc475b0723c5cb9b6f247a552",
     "text": "The Stop hook, `pnpm validate`, and CI all execute the same config-driven gate chain (tools/harness.config.mjs). Done means green gate. The gate surface is write-guard-protected; CI re-runs a hardcoded floor so a weakened local config cannot weaken CI.",
     "title": "Harness doctrine: one gate config, three enforcement layers, tamper evidence",
     "url": "docs/harness/README.md",
     "version": "0.1.0"
   },
   {
+    "groups": ["rls-policy"],
     "id": "postgres/rls-force",
-    "sha256": "",
+    "sha256": "80aa4ad1a043c1abe16b10b71a53f64ebe63ae0a4d3ad6471ac5d06afb2ef02d",
     "text": "Row security policies restrict which rows a command can return or modify. FORCE ROW LEVEL SECURITY also applies policies to the table owner. Policies are per-command (SELECT/INSERT/UPDATE/DELETE); USING filters reads, WITH CHECK validates writes.",
     "title": "PostgreSQL row security policies; FORCE ROW LEVEL SECURITY; USING vs WITH CHECK",
     "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html",
     "version": "16"
   },
   {
+    "groups": ["rls-policy", "guc-identity"],
     "id": "postgres/rls-initplan",
-    "sha256": "",
+    "sha256": "49d376b43e99bfe73a51fea54c78330c2895d0619433d5413e8254977b97fd3b",
     "text": "Wrapping a stable function call as (select current_setting('app.user_id', true)) lets Postgres evaluate it once per statement as an initPlan instead of once per row — orders of magnitude faster on large tables. The second argument true returns NULL instead of erroring when the GUC is unset, so unauthenticated sessions match no rows rather than failing.",
     "title": "RLS performance: wrap current_setting() in (select ...) for an initPlan",
     "url": "https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET",
     "version": "16"
   },
   {
+    "groups": ["guc-identity"],
     "id": "postgres/guc-set-local",
-    "sha256": "",
+    "sha256": "ebdcf1b004579f965489e5b9fdb7c9e94eb4321338b4afbbc95cb97ff3cf4103",
     "text": "SET LOCAL (or set_config(name, value, true)) scopes a setting to the current transaction. Session-scoped GUCs (set_config(..., false)) leak across pooled connections: the next request on the same connection inherits the previous user's identity. RLS identity GUCs must therefore always be transaction-local, set inside the same transaction as the query.",
     "title": "Transaction-local GUCs: SET LOCAL / set_config(..., true) — pooling identity leak otherwise",
     "url": "https://www.postgresql.org/docs/current/sql-set.html",
@@ -33,31 +37,34 @@
   },
   {
     "id": "postgres/recursive-cycle",
-    "sha256": "",
+    "sha256": "cc6bbfe4d5deb3879d8f820a68e01d3c2d706d3d3d40ab4b5e48ea09f1bb4ee5",
     "text": "A recursive query over graph data with cycles will loop indefinitely unless terminated. Use the SQL-standard CYCLE clause (Postgres 14+) or carry a visited-path array and test against it in the recursive term.",
     "title": "WITH RECURSIVE over graphs needs a CYCLE clause or visited guard",
     "url": "https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-CYCLE",
     "version": "16"
   },
   {
+    "groups": ["vector-index"],
     "id": "pgvector/hnsw",
-    "sha256": "",
+    "sha256": "a30da959b7791a2a2131278c4d67ab9a8232f7e59afa98aaf0ff0b8883036365",
     "text": "HNSW indexes give better query performance than IVFFlat at the cost of slower builds and more memory, and can be created on an empty table (IVFFlat needs training data). Distance opclass must match the query operator (vector_cosine_ops for <=>). Declare the column with a fixed dimension so inserts are type-checked.",
     "title": "pgvector index selection: HNSW vs IVFFlat; opclass must match the query operator",
     "url": "https://github.com/pgvector/pgvector#hnsw",
     "version": "0.8"
   },
   {
+    "groups": ["token-verification"],
     "id": "entra/jwt-verify",
-    "sha256": "",
+    "sha256": "9e8e122b153821cd60bd135704d16e051faca53efef10bab6c2f94e221a3460b",
     "text": "Access tokens from Microsoft Entra ID must be validated server-side: verify the signature against the tenant JWKS (discovery: https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration), and pin issuer (tenant-specific), audience (your API's Application ID URI / client id), and allowed algorithms. Never trust an unverified token or one validated only client-side.",
     "title": "Entra ID access-token validation: JWKS + pinned iss/aud/alg",
     "url": "https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens",
     "version": "v2.0"
   },
   {
+    "groups": ["token-verification"],
     "id": "jose/clock-tolerance",
-    "sha256": "",
+    "sha256": "e9a1b88e24d6caab6399f80427aa76032fc28b455475f49c1dd5392cf029a2ef",
     "text": "jwtVerify accepts clockTolerance to absorb clock skew between the token issuer and the verifying server when checking exp/nbf/iat. Keep it small (minutes, not hours): 300 seconds absorbs typical enterprise clock drift without materially extending token lifetime.",
     "title": "jose jwtVerify clockTolerance: bounded skew allowance for exp/nbf",
     "url": "https://github.com/panva/jose/blob/main/docs/jwt/verify/interfaces/JWTVerifyOptions.md",
@@ -65,7 +72,7 @@
   },
   {
     "id": "tauri/isolation",
-    "sha256": "",
+    "sha256": "85bee32b43c0d40ac3bee00930007d7a5ce4e309e3aa9d706729b62f20799d57",
     "text": "The isolation pattern injects a sandboxed <iframe> between the frontend and Tauri Core: every IPC message passes through the isolation application, which can verify and reject unexpected messages before they reach the host. Recommended whenever the frontend includes any third-party code. Configured via app.security.pattern { use: 'isolation', options.dir }.",
     "title": "Tauri isolation pattern: intercept and verify IPC before it reaches Core",
     "url": "https://tauri.app/security/isolation/",
@@ -73,7 +80,7 @@
   },
   {
     "id": "tauri/csp",
-    "sha256": "",
+    "sha256": "5cee5efaf55d85a71d9f0f433f0fb08c1582813d37efea0235a2afd8cb06ae95",
     "text": "tauri.conf.json app.security.csp is applied to all app windows; Tauri appends nonces/hashes for its own injected scripts. A null CSP disables the protection entirely. connect-src must enumerate the API origins the webview may reach; keep default-src 'self' and never add remote script sources.",
     "title": "Tauri CSP: committed policy, connect-src pinned to the API origin, never null",
     "url": "https://tauri.app/security/csp/",
@@ -81,7 +88,7 @@
   },
   {
     "id": "tauri/capabilities",
-    "sha256": "",
+    "sha256": "1f3e66bd7807d7601ab389e6cb752c9fab750bcdba94d566e97d4cae7a0c1067",
     "text": "Capabilities grant permissions to windows/webviews; grant the least privilege the window needs. Remote-URL capabilities extend IPC to remote content and should not be used for local-first apps. Prefer adding a typed #[tauri::command] over granting shell/process/fs plugin permissions.",
     "title": "Tauri capabilities: least privilege per window; no remote IPC; commands over broad plugin grants",
     "url": "https://tauri.app/security/capabilities/",
@@ -89,7 +96,7 @@
   },
   {
     "id": "tauri/webview2-offline",
-    "sha256": "",
+    "sha256": "967ae3a606ab33c8dc76a85838dfaf8c95c378acc8db145ba7af1e5b3c2d2b10",
     "text": "webviewInstallMode offlineInstaller embeds the ~127MB WebView2 installer so installation needs no network — required for locked-down/offline enterprise targets. downloadBootstrapper is smaller but silently fails on machines without egress; skip assumes a preinstalled runtime.",
     "title": "WebView2 install modes: offlineInstaller for enterprise/offline targets",
     "url": "https://tauri.app/distribute/windows-installer/#webview2-installation-options",
@@ -97,7 +104,7 @@
   },
   {
     "id": "tauri/updater-signing",
-    "sha256": "",
+    "sha256": "f886c063dce1147b722d3644c29feb9fd2a48e81e3b40beca5f972fd744375e0",
     "text": "Updater artifacts are signed with a minisign keypair; the public key ships in tauri.conf.json and the private key must exist only in CI secrets. A leaked private key lets an attacker ship arbitrary 'updates' to every install.",
     "title": "Tauri updater signing: minisign keypair; private key never leaves CI secrets",
     "url": "https://tauri.app/plugin/updater/",
@@ -105,7 +112,7 @@
   },
   {
     "id": "windows/code-signing",
-    "sha256": "",
+    "sha256": "12cf97bbc26014ed3827ecfafc5536b5d75d80989cdf68b96797a9bd9128336f",
     "text": "Windows executables should be Authenticode-signed; unsigned or fresh-certificate binaries trip SmartScreen reputation warnings. Azure Trusted Signing provides managed certificates with short-lived keys and integrates with signtool in CI; EV certificates grant faster reputation. Verify with signtool verify /pa /all after signing.",
     "title": "Windows code signing: Authenticode, SmartScreen reputation, Azure Trusted Signing",
     "url": "https://learn.microsoft.com/en-us/azure/trusted-signing/",
@@ -113,7 +120,7 @@
   },
   {
     "id": "react/compiler",
-    "sha256": "",
+    "sha256": "423af0b0b7669912634e79e95282859d043e62e658598c881c2402a4be2c4f18",
     "text": "React Compiler memoizes automatically at build time; code must follow the Rules of React (components/hooks pure, no conditional hooks). Adopt with an exact-pinned babel-plugin-react-compiler and the eslint-plugin-react-hooks compiler rules so violations fail lint instead of silently deoptimizing.",
     "title": "React Compiler: build-time auto-memoization, Rules-of-React enforced by lint",
     "url": "https://react.dev/learn/react-compiler",
@@ -121,15 +128,16 @@
   },
   {
     "id": "wcag/character-key-shortcuts",
-    "sha256": "",
+    "sha256": "43551654bb12c239ff7594bae18d9dff76b28957f9abd860964146948b3eae94",
     "text": "WCAG 2.1.4 (Character Key Shortcuts, Level A): if a keyboard shortcut uses only a single printable character, users must be able to turn it off or remap it, or it must only fire on focus. Speech-input and screen-reader users otherwise trigger shortcuts accidentally. Registering all shortcuts in one auditable registry makes this testable.",
     "title": "WCAG 2.1.4: no bare single-character global shortcuts",
     "url": "https://www.w3.org/WAI/WCAG22/Understanding/character-key-shortcuts.html",
     "version": "2.2"
   },
   {
+    "groups": ["llm-sampling"],
     "id": "llamacpp/json-schema",
-    "sha256": "",
+    "sha256": "e00216a6b3b4854c18e6f325e23c4a3bb9a953804e8b126c2fd0ef0ab45759d5",
     "text": "llama.cpp's OpenAI-compatible server supports constrained decoding via json_schema response_format / GBNF grammars: the sampler masks tokens so output always parses. The schema→grammar converter supports a subset of JSON Schema — validate the schema converts cleanly and still run a deterministic validator on the output; constrained decoding guarantees syntax, not semantics.",
     "title": "llama.cpp constrained decoding: grammar guarantees syntax, validators guarantee semantics",
     "url": "https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md",
@@ -137,18 +145,84 @@
   },
   {
     "id": "drizzle/migrations-append-only",
-    "sha256": "",
+    "sha256": "674ad14c52d09c2d479ea8aa81faf4be4240b613e0359b969fae257e1b817260",
     "text": "Generated migrations are ordered, immutable steps; editing an already-applied migration desynchronizes databases that ran the original. Schema changes go through a NEW migration (drizzle-kit generate) — never edit an existing file, never `drizzle-kit push` outside local prototyping.",
     "title": "Migration discipline: append-only files, generate over push",
     "url": "https://orm.drizzle.team/docs/migrations",
     "version": "1.0"
   },
   {
+    "groups": ["tuning-constants"],
     "id": "hono/sse-abort",
-    "sha256": "",
+    "sha256": "9756948f10e02db0b11538b6d819c598465ceb0ef774b509ec48c5b9e2b433dd",
     "text": "When streaming (SSE) from Hono, honor request abort: the streaming helper's onAbort / the request signal must terminate the generator and release resources, otherwise disconnected clients leak server work — critical for long-lived LLM token streams.",
     "title": "Hono streaming: propagate client abort into the generator",
     "url": "https://hono.dev/docs/helpers/streaming",
     "version": "4"
+  },
+  {
+    "id": "wcag/contrast-aa",
+    "sha256": "99959ffffcf0a8048d4ff5d7948f188d9f2d60ae4e5d5c08f0984b2146c0f8f5",
+    "text": "SC 1.4.3 Contrast (Minimum), Level AA: text and images of text need a contrast ratio of at least 4.5:1 (3:1 for large-scale text). SC 1.4.11 Non-text Contrast requires 3:1 against adjacent colors for UI components and meaningful graphical objects. Purely decorative elements carry no minimum but must never be the sole carrier of meaning.",
+    "title": "WCAG 2.2 contrast minimums: SC 1.4.3 text 4.5:1 (3:1 large), SC 1.4.11 non-text 3:1",
+    "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html",
+    "version": "2.2"
+  },
+  {
+    "id": "tauri/specta-bindings",
+    "sha256": "2271243206a6bcb59f240c6061a65e29524f56192774bd223d634a7562739f38",
+    "text": "tauri-specta v2 derives a TypeScript bindings file from the registered #[tauri::command] functions: the runtime invoke handler and the exported frontend types come from the same builder, so they cannot drift from the Rust signatures. The generated bindings are committed and regenerated deterministically; rc versions are pinned exactly because rc bumps change the emitted file layout.",
+    "title": "tauri-specta v2: typed IPC bindings generated from #[tauri::command], committed and drift-checked",
+    "url": "https://github.com/specta-rs/tauri-specta",
+    "version": "2.0.0-rc"
+  },
+  {
+    "id": "tauri/vite-integration",
+    "sha256": "49881440a8b86540fad95e8f92544e4861f18d8f29eefa7df95a5922636b493c",
+    "text": "Tauri's Vite integration fixes the dev server port with strictPort so tauri.conf.json devUrl never points at a drifted port, excludes src-tauri from the watcher, and pins build.target to the webview engines actually shipped: Chromium/WebView2 (>=105) on Windows and WebKit (WKWebView/WebKitGTK) on macOS and Linux.",
+    "title": "Tauri 2 + Vite: fixed strict dev port, build targets pinned to the shipped webview engines",
+    "url": "https://tauri.app/start/frontend/vite/",
+    "version": "2"
+  },
+  {
+    "id": "tauri/windows-longpath",
+    "sha256": "c8cbeaf76546750446527c6996b1c58282a3003b69a072b4baedf707958ad24f",
+    "text": "Win32 path APIs are limited to MAX_PATH (260 characters) unless the process opts out: from Windows 10 version 1607, the limit is lifted for processes whose application manifest sets the longPathAware element (with the LongPathsEnabled setting). Tauri embeds a custom Windows manifest via tauri_build::WindowsAttributes::app_manifest; a replacement manifest must re-declare everything the default provided (Common Controls v6, asInvoker execution level) alongside the addition.",
+    "title": "Windows long paths: MAX_PATH is 260 chars unless the application manifest declares longPathAware",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation",
+    "version": "Windows 10 1607"
+  },
+  {
+    "id": "tauri/webview-process-failed",
+    "sha256": "be8023137e4f0cfd93822ba2a42f78ed8dbd451bfcbaaf426e8c709db82f1aef",
+    "text": "WebView2 runs its browser and renderer processes separately from the host app, so the webview can crash or hang while the host keeps running; applications must handle the ProcessFailed event and recover or report instead of leaving a live window with a dead renderer. Tauri 2's safe API surface does not expose ProcessFailed, so the base app routes failure details through one stable logging function that the crash-reporting module wires to the raw event.",
+    "title": "WebView2 process model: the renderer can fail independently of the host — handle ProcessFailed, never a silent blank window",
+    "url": "https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/process-model",
+    "version": "2026"
+  },
+  {
+    "id": "tauri/rust-lints",
+    "sha256": "f6414c862ad37f50edf8b43bf2d11529ff78256fafc63c48919800fbb4746c66",
+    "text": "The [lints] table in Cargo.toml (stable since Rust 1.74) declares lint levels for the whole package. forbid is stronger than deny: inner allow attributes cannot override it, so [lints.rust] unsafe_code = \"forbid\" structurally keeps unsafe blocks out of the crate, and a deny-by-default clippy profile (unwrap_used, panic, print_stdout) rides in the same table.",
+    "title": "Cargo [lints] table: manifest-enforced lint levels; unsafe_code = \"forbid\" cannot be re-allowed in code",
+    "url": "https://doc.rust-lang.org/cargo/reference/lints.html",
+    "version": "Rust 1.74"
+  },
+  {
+    "id": "tauri/release-profile",
+    "sha256": "870cbd797e824129bf13c9e13dde05423c098fda16210d4a3258b5a8dc5f485e",
+    "text": "Tauri's app-size guidance tunes [profile.release] for the shipped binary: codegen-units = 1 and lto = true enable whole-program optimization, opt-level \"s\"/\"z\" optimizes for size over speed, strip = true removes debug symbols, and panic = \"abort\" drops unwinding machinery. The trade is longer compile times for a smaller, faster installer.",
+    "title": "Tauri app-size guide: release profile with codegen-units 1, LTO, size opt-level, strip, panic abort",
+    "url": "https://tauri.app/concept/size/",
+    "version": "2"
+  },
+  {
+    "groups": ["llm-sampling"],
+    "id": "llamacpp/sampling",
+    "sha256": "2b9a9b616b92ba4a740448fa5e75b7b5f3eab481d8218ccfabfbfc373a5b9711",
+    "text": "The llama.cpp server exposes decoding-time sampling controls per request: temperature, top_p, top_k and related parameters. Higher temperature flattens the token distribution; temperature 0 collapses sampling to greedy decoding, making output run-to-run deterministic for the same model and prompt — which evaluation harnesses require for comparable scores.",
+    "title": "llama.cpp sampling parameters: temperature/top_p per request; temperature 0 is greedy, deterministic decoding",
+    "url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+    "version": "2026"
   }
 ]

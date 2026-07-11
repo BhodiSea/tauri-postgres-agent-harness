@@ -1,0 +1,56 @@
+{
+  "comment": "Falsifiability registry: every step in VALIDATE_STEPS ∪ STOP_HOOK_STEPS must carry at least one mechanical proof that it CAN go red. Proof kinds: 'fixture' (a repo test file that spawns the real gate and asserts exit 1 — ref must exist), 'selftest' (a literal step-name string that must appear in .github/workflows/selftest.yml), 'runner' (the step wraps a vendor tool whose non-zero exit is the red; OUR wiring's failure propagation is proven by the validate-runner tests — ref must exist). scripts/check-canary-coverage.mjs enforces bidirectional closure: an unregistered step OR a stale registry entry reds the PR that caused it. hookRules pins the guard-rule counts and one grep-able deny example per surface — adding a hook rule without a deny test breaks this lockstep.",
+  "steps": {
+    "format": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "biome ci exits non-zero on any diff" }],
+    "gate-integrity": [{ "kind": "fixture", "ref": "tests/gates/check-gate-integrity.test.mjs" }],
+    "rust-fmt": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "types": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "tsc -b exits non-zero on type errors" }],
+    "lint": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "eslint --max-warnings 0 exits non-zero on any finding" }],
+    "provenance": [
+      { "kind": "selftest", "ref": "Canary 3: strip SOURCE citations from decision sites → provenance must FAIL" },
+      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs" }
+    ],
+    "tauri-policy": [{ "kind": "selftest", "ref": "Canary 1: weaken tauri.conf CSP to null → tauri-policy must FAIL" }],
+    "version-sync": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "prompts": [
+      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
+      { "kind": "selftest", "ref": "Canary 7: tamper a hash-locked prompt → prompts must FAIL" }
+    ],
+    "licenses": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "schema-rls": [
+      { "kind": "selftest", "ref": "Canary 4: remove FORCE RLS from the migration → schema-rls must FAIL" },
+      { "kind": "fixture", "ref": "tests/gates/check-rls-manifest.test.mjs" }
+    ],
+    "migrations": [{ "kind": "selftest", "ref": "Canary 2: edit an existing migration → migrations must FAIL" }],
+    "contracts": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "dead-code": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "knip --strict exits non-zero on unused exports/files" }],
+    "architecture": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "depcruise exits non-zero on rule violations; the DAL-boundary rules were proven firing when added" }],
+    "build": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "rust-check": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "styleguide": [
+      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
+      { "kind": "selftest", "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL" }
+    ],
+    "perf-budget": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "route-manifest": [
+      { "kind": "fixture", "ref": "tests/gates/check-route-manifest.test.mjs" },
+      { "kind": "selftest", "ref": "Canary 6: unregistered features directory → route-manifest must FAIL" }
+    ],
+    "e2e": [{ "kind": "fixture", "ref": "tests/gates/check-e2e.test.mjs" }],
+    "docs-sync": [{ "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs" }],
+    "validate": [{ "kind": "fixture", "ref": "tests/gates/validate-runner.test.mjs" }],
+    "rls-isolation": [{ "kind": "selftest", "ref": "RLS runner FAILS CLOSED without a database (CI=true)" }],
+    "unit": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "vitest exits non-zero on failing tests or coverage-threshold misses" }]
+  },
+  "hookRules": {
+    "pretool-bash-guard.mjs": {
+      "blockedMessages": 18,
+      "denyExamples": ["rm -rf node_modules", "git push --force origin main", "psql \"$MIGRATOR_DATABASE_URL\" -c \"select 1\""]
+    },
+    "pretool-write-guard.mjs": {
+      "denySites": 10,
+      "protectedPaths": 34,
+      "denyExamples": ["tools/harness.config.mjs", "dangerouslySetInnerHTML", "tools/route-allowlist.json"]
+    }
+  }
+}

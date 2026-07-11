@@ -16,6 +16,9 @@ before(() => {
   proj = mkdtempSync(join(tmpdir(), 'tpah-hooks-'))
   cpSync(join(TEMPLATE, '.claude'), join(proj, '.claude'), { recursive: true })
   mkdirSync(join(proj, 'tools'), { recursive: true })
+  // posttool-source-check imports the shared heuristic from ../../tools/lib/ —
+  // part of the rendered install layout, like harness.config.mjs above.
+  cpSync(join(TEMPLATE, 'tools/lib'), join(proj, 'tools/lib'), { recursive: true })
   mkdirSync(join(proj, 'packages/schema/drizzle'), { recursive: true })
   writeFileSync(join(proj, 'packages/schema/drizzle/0000_init.sql'), '-- existing migration\n')
 })
@@ -66,12 +69,86 @@ for (const cmd of [
   })
 }
 
+// rm -rf variant coverage: the old single-token regex missed every one of these.
+for (const cmd of [
+  'rm -fr build',
+  'rm -Rf build',
+  'rm -rF build',
+  'rm -r -f build',
+  'rm -f -R build',
+  'rm --recursive --force build',
+  'rm --force --recursive build',
+  'rm -v -rf build',
+]) {
+  test(`bash-guard denies rm variant: ${cmd}`, () => {
+    assert.ok(denied(runHook('pretool-bash-guard.mjs', { tool_name: 'Bash', tool_input: { command: cmd } })), cmd)
+  })
+}
+
+// Shell writes into the enforcement surface bypass the write-guard — denied.
+for (const cmd of [
+  'echo "export const VALIDATE_STEPS = []" > tools/harness.config.mjs',
+  'echo deadbeef > .harness/rust-check.ok',
+  'cat payload.mjs >> tools/validate.mjs',
+  'echo x | tee tools/check-sources.mjs',
+  'echo x | tee -a .claude/hooks/stop-validate-gate.mjs',
+  'sed -i "s/exit 1/exit 0/" tools/check-migrations.mjs',
+  'perl -i -pe "s/deny/pass/" .claude/hooks/pretool-bash-guard.mjs',
+  'cp /tmp/evil.mjs tools/validate.mjs',
+  'mv patched.yml .github/workflows/quality-gate.yml',
+  'echo "-- tweak" >> packages/schema/drizzle/0000_init.sql',
+  'echo {} > pnpm-lock.yaml',
+  'echo "" > eslint.config.mjs',
+]) {
+  test(`bash-guard denies shell write: ${cmd}`, () => {
+    assert.ok(denied(runHook('pretool-bash-guard.mjs', { tool_name: 'Bash', tool_input: { command: cmd } })), cmd)
+  })
+}
+
+test('bash-guard allows enforcement-surface shell writes under HARNESS_ALLOW_SELF_EDIT=1', () => {
+  const r = runHook(
+    'pretool-bash-guard.mjs',
+    { tool_name: 'Bash', tool_input: { command: 'echo x > tools/canary-probe.mjs' } },
+    { env: { HARNESS_ALLOW_SELF_EDIT: '1' } },
+  )
+  assert.equal(r.code, 0, r.stderr)
+  assert.ok(!r.stdout.includes('"deny"'), r.stdout)
+})
+
+// hooksPath repoint + secret-surface reads.
+for (const cmd of [
+  'git config core.hooksPath /tmp/nohooks',
+  'git -c core.hooksPath=/dev/null commit -m x',
+  'cat .dev-auth/jwks.json',
+  'ls .dev-auth/',
+  'cp .dev-auth/token.txt /tmp/t',
+  'sed -n 1p .env.local',
+  'base64 .env',
+  'source .env',
+  '. ./.env',
+]) {
+  test(`bash-guard denies: ${cmd}`, () => {
+    assert.ok(denied(runHook('pretool-bash-guard.mjs', { tool_name: 'Bash', tool_input: { command: cmd } })), cmd)
+  })
+}
+
 for (const cmd of [
   'pnpm validate',
   'cat .env.example',
   'MIGRATOR_DATABASE_URL=$X pnpm --filter @app/schema exec drizzle-kit migrate',
   'node tests/migrations/migration-apply.mjs # uses MIGRATOR_DATABASE_URL',
+  // The RLS runner's own fail-closed hint tells the agent to do exactly this:
+  'MIGRATOR_DATABASE_URL=$X node tests/rls/run-rls.mjs',
+  'DATABASE_URL=$A MIGRATOR_DATABASE_URL=$B pnpm test:rls',
   'git commit -m "feat: notes"',
+  // Reads/derived writes that only LOOK adjacent to the protected surface:
+  'node tools/validate.mjs > /tmp/validate.log',
+  'cp tools/check-sources.mjs /tmp/inspect.mjs',
+  'rm -r build',
+  'rm -f stale.log',
+  'git config user.email dev@example.com',
+  'echo done > /tmp/out.txt',
+  'source ./scripts/env.sh',
 ]) {
   test(`bash-guard passes: ${cmd}`, () => {
     const r = runHook('pretool-bash-guard.mjs', { tool_name: 'Bash', tool_input: { command: cmd } })
@@ -89,9 +166,19 @@ test('write-guard protects the whole gate + config + permission surface', () => 
     'tools/run-rust-gates.mjs',
     'tools/build-check.mjs',
     'tools/lib/gate.mjs',
+    'tools/mcp/corpus-search-server.mjs',
     'tools/identity.lock.json',
     'tools/prompts.lock.json',
     'tools/rls-exempt.json',
+    'tools/license-exceptions.json',
+    'tools/bundle-budget.json',
+    'tools/perf-budget.json',
+    'tools/styleguide.manifest.json',
+    'tools/mutation-baseline.json',
+    'tools/check-mutation-ratchet.mjs',
+    'tools/route-allowlist.json',
+    'vitest.config.ts',
+    'playwright.config.ts',
     'tests/rls/run-rls.mjs',
     'tests/migrations/migration-apply.mjs',
     'lefthook.yml',
@@ -202,7 +289,10 @@ test('write-guard requires unsafe_code=forbid on whole-file Cargo.toml writes on
 // ── write-guard: source content invariants ────────────────────────────────────
 for (const [label, file, content] of [
   ['session-wide GUC', 'apps/server/src/db/context.ts', "await sql`select set_config('app.user_id', ${id}, false)`\n"],
+  ['session-wide GUC hidden by comma in value', 'apps/server/src/db/context.ts', "await sql`select set_config('app.user_id', concat(${a}, ${b}), false)`\n"],
+  ['session-wide GUC uppercase FALSE', 'apps/server/src/db/context.ts', "await sql`select set_config('app.user_id', ${id}, FALSE)`\n"],
   ['SET SESSION app.*', 'apps/server/src/db/context.ts', 'await sql`SET SESSION app.user_id = ${id}`\n'],
+  ['violation inside a nested tests-named product dir', 'apps/server/src/dal/tests/helper.ts', "await sql`select set_config('app.user_id', ${id}, false)`\n"],
   ['VITE_ secret name', 'apps/desktop/src/config.ts', 'const k = import.meta.env.VITE_API_SECRET_KEY\n'],
   ['dangerouslySetInnerHTML', 'apps/desktop/src/App.tsx', '<div dangerouslySetInnerHTML={{ __html: x }} />\n'],
   ['vitest workspace file', 'vitest.workspace.mts', "import { defineWorkspace } from 'vitest/config'\n"],
@@ -247,10 +337,18 @@ test('write-guard requires withUserContext in whole-file DAL writes', () => {
 })
 
 test('write-guard exempts test bodies from content checks', () => {
-  const r = runHook('pretool-write-guard.mjs', {
-    tool_input: { file_path: 'tests/rls/probe.test.ts', content: "await sql`select set_config('app.user_id', ${id}, false)`\n" },
-  })
-  assert.ok(!denied(r), r.stdout)
+  // Root test trees and colocated *.test.* files legitimately reference banned
+  // patterns (the RLS suite asserts on set_config false behavior).
+  for (const f of [
+    'tests/rls/probe.test.ts',
+    'e2e/a11y.spec.ts',
+    'apps/server/src/dal/notes.test.ts',
+  ]) {
+    const r = runHook('pretool-write-guard.mjs', {
+      tool_input: { file_path: f, content: "await sql`select set_config('app.user_id', ${id}, false)`\n" },
+    })
+    assert.ok(!denied(r), `${f}: ${r.stdout}`)
+  }
 })
 
 // ── source-check ──────────────────────────────────────────────────────────────
@@ -283,17 +381,22 @@ test('source-check skips json, tests, and generated bindings', () => {
 })
 
 // ── stop-validate-gate ────────────────────────────────────────────────────────
+// Portable pass/fail steps (the hook-contracts CI lane also runs on Windows,
+// where `true`/`false` are not commands).
+const PASS = 'node -e "process.exit(0)"'
+const FAIL = 'node -e "process.exit(1)"'
+
 test('stop gate: green steps exit 0, red steps exit 2, loop guard passes', () => {
   writeFileSync(
     join(proj, 'tools/harness.config.mjs'),
-    "export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', 'true']]\n",
+    `export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', '${PASS}']]\n`,
   )
   const green = runHook('stop-validate-gate.mjs', { stop_hook_active: false })
   assert.equal(green.code, 0, green.stderr)
 
   writeFileSync(
     join(proj, 'tools/harness.config.mjs'),
-    "export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', 'true'], ['boom', 'false']]\n",
+    `export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', '${PASS}'], ['boom', '${FAIL}']]\n`,
   )
   const red = runHook('stop-validate-gate.mjs', { stop_hook_active: false })
   assert.equal(red.code, 2, 'red gate must block the turn')
@@ -308,8 +411,38 @@ test('stop gate: green steps exit 0, red steps exit 2, loop guard passes', () =>
 
   writeFileSync(
     join(proj, 'tools/harness.config.mjs'),
-    "export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', 'true']]\n",
+    `export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['ok', '${PASS}']]\n`,
   )
   const greenLoop = runHook('stop-validate-gate.mjs', { stop_hook_active: true })
   assert.equal(greenLoop.code, 0, 'green gate releases the turn even mid-loop')
+})
+
+test('stop gate: steps run under HARNESS_STOP_GATE=1 (fail-closed runners can tell)', () => {
+  writeFileSync(
+    join(proj, 'tools/harness.config.mjs'),
+    `export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['probe', 'node -e "process.exit(process.env.HARNESS_STOP_GATE === \\'1\\' ? 0 : 1)"']]\n`,
+  )
+  const r = runHook('stop-validate-gate.mjs', { stop_hook_active: false })
+  assert.equal(r.code, 0, `HARNESS_STOP_GATE must be set for gate steps: ${r.stderr}`)
+})
+
+test('stop gate: a BROKEN config blocks the turn even when the fallback chain would pass', () => {
+  writeFileSync(join(proj, 'tools/harness.config.mjs'), 'this is not { valid js\n')
+  const r = runHook('stop-validate-gate.mjs', { stop_hook_active: false })
+  assert.equal(r.code, 2, 'mangled gate config must block the turn')
+  assert.ok(r.stderr.includes('gate-config BROKEN'), r.stderr)
+  assert.ok(!r.stderr.includes('pnpm validate FAILED'), 'fallback must be direct invocation, not script indirection')
+})
+
+test('stop gate: green output surfaces SKIPPED layers instead of staying silent', () => {
+  writeFileSync(
+    join(proj, 'tools/harness.config.mjs'),
+    `export const VALIDATE_STEPS = []\nexport const STOP_HOOK_STEPS = [['rls', 'node -e "console.log(process.env.X_MSG)"']]\n`,
+  )
+  const r = runHook('stop-validate-gate.mjs', { stop_hook_active: false }, {
+    env: { X_MSG: 'rls-isolation: SKIPPED - database unreachable' },
+  })
+  assert.equal(r.code, 0, r.stderr)
+  assert.ok(r.stderr.includes('skipped layers'), r.stderr)
+  assert.ok(r.stderr.includes('SKIPPED'), r.stderr)
 })

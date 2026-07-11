@@ -1,22 +1,22 @@
-import postgres from 'postgres'
+import { sql } from 'drizzle-orm'
+import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import { getClient } from './client.js'
 
-let client: postgres.Sql | undefined
+// The drizzle handle wraps the ONE postgres.js client (see ./client.ts) and is
+// itself created lazily for the same reason: importing the app must never
+// require a database.
+let db: PostgresJsDatabase | undefined
 
-// Lazy so that importing the app (tests, OpenAPI emission) never requires a
-// database. The connection string must be the app_api role — NOT the migrator:
-// app_api is subject to FORCE ROW LEVEL SECURITY on every table.
-function getDb(): postgres.Sql {
-  if (client === undefined) {
-    const url = process.env['DATABASE_URL']
-    if (url === undefined || url === '') {
-      throw new Error(
-        'DATABASE_URL is not set — run `pnpm db:up`, apply migrations, and export the app_api connection string',
-      )
-    }
-    client = postgres(url)
-  }
-  return client
+function getDb(): PostgresJsDatabase {
+  db ??= drizzle(getClient())
+  return db
 }
+
+/**
+ * The transaction-scoped, RLS-identity-bound drizzle handle DAL functions
+ * receive. Typed queries only — the raw driver never crosses this boundary.
+ */
+export type UserTx = Parameters<Parameters<PostgresJsDatabase['transaction']>[0]>[0]
 
 /**
  * Every DAL function runs inside this wrapper (BUILD-SPEC DAL law): it opens a
@@ -26,24 +26,14 @@ function getDb(): postgres.Sql {
  */
 export async function withUserContext<T>(
   userId: string,
-  fn: (tx: postgres.TransactionSql) => Promise<T>,
+  fn: (tx: UserTx) => Promise<T>,
 ): Promise<T> {
-  const result = await getDb().begin(async (tx) => {
+  return getDb().transaction(async (tx) => {
     // set_config(..., true) is transaction-local (SET LOCAL) — the RLS identity
     // GUC can never leak across pooled connections; policies read
     // (select current_setting('app.user_id', true)::uuid) once per statement.
     // SOURCE: postgres GUC discipline [corpus: postgres/guc-set-local]
-    await tx`select set_config('app.user_id', ${userId}, true)`
+    await tx.execute(sql`select set_config('app.user_id', ${userId}, true)`)
     return fn(tx)
   })
-  return result as T
-}
-
-/** Graceful-shutdown hook used by src/index.ts. Safe to call when never connected. */
-export async function closeDb(): Promise<void> {
-  if (client !== undefined) {
-    const closing = client
-    client = undefined
-    await closing.end({ timeout: 5 })
-  }
 }

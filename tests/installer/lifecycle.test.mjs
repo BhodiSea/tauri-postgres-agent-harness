@@ -37,24 +37,13 @@ const SETS = [
   '--set', 'SECURITY_OWNERS=@fixture-owner/security',
 ]
 
-// Walk a scaffold looking for unrendered {{PLACEHOLDER}} tokens. Binary assets
-// and the manifest (which records raw template metadata) are excluded.
+// Residue scanning goes through the ONE shared scanner (scripts/check-residue.mjs)
+// — the selftest lanes run the same script, so the residue definition cannot fork.
+const RESIDUE = fileURLToPath(new URL('../../scripts/check-residue.mjs', import.meta.url))
 function placeholderResidue(dir) {
-  const hits = []
-  ;(function walk(d) {
-    for (const entry of readdirSync(d)) {
-      const p = join(d, entry)
-      if (statSync(p).isDirectory()) {
-        if (entry === '.harness' || entry === 'node_modules' || entry === '.git') continue
-        walk(p)
-        continue
-      }
-      if (/\.(png|ico|icns)$/.test(entry)) continue
-      const text = readFileSync(p, 'utf8')
-      if (/\{\{[A-Z0-9_]+\}\}/.test(text)) hits.push(p.slice(dir.length + 1))
-    }
-  })(dir)
-  return hits
+  const res = spawnSync('node', [RESIDUE, dir], { encoding: 'utf8' })
+  if (res.status === 0) return []
+  return `${res.stdout ?? ''}${res.stderr ?? ''}`.trim().split('\n').slice(1)
 }
 
 test('bootstrap init renders the monorepo layout with manifest modes', () => {
@@ -132,6 +121,12 @@ test('bootstrap init renders the monorepo layout with manifest modes', () => {
   assert.equal(manifest.files['packages/schema/drizzle/0000_init.sql'].mode, 'seeded')
   assert.equal(manifest.files['pnpm-workspace.yaml'].mode, 'seeded')
   assert.equal(manifest.files['AGENTS.md'].mode, 'seeded')
+
+  // Manifest keys are POSIX on every OS — path.win32.join separators broke
+  // every prefix-based mode rule and made manifests non-portable (v0.1.1 bug
+  // class). This assertion is load-bearing on the windows-latest CI leg.
+  const backslashed = Object.keys(manifest.files).filter((k) => k.includes('\\'))
+  assert.deepEqual(backslashed, [], 'manifest keys must use POSIX separators on every OS')
 })
 
 test('dry-run writes nothing', () => {
@@ -194,6 +189,141 @@ test('retrofit: non-clobber configs, merged workspace yaml, no stack app code', 
   assert.ok(cfg.includes('node tools/validate.mjs'), 'stop gate must invoke the runner directly')
 })
 
+test('retrofit non-clobber is universal: project memory, ignore rules, settings, compose, workflows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-retro2-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'existing', dependencies: { hono: '^4.0.0' } }))
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'apps/*'\n")
+  mkdirSync(join(dir, 'apps/server'), { recursive: true })
+  writeFileSync(join(dir, 'apps/server/package.json'), '{"name":"server"}\n')
+
+  const theirAgents = '# My project memory\nDo not touch.\n'
+  writeFileSync(join(dir, 'AGENTS.md'), theirAgents)
+  const theirCompose = 'services:\n  api:\n    image: theirs\n'
+  writeFileSync(join(dir, 'docker-compose.yml'), theirCompose)
+  writeFileSync(join(dir, '.gitignore'), '# mine\nnode_modules/\n')
+  mkdirSync(join(dir, '.claude'), { recursive: true })
+  writeFileSync(
+    join(dir, '.claude/settings.json'),
+    JSON.stringify({ permissions: { allow: ['Bash(make test)'], defaultMode: 'default' } }, null, 2),
+  )
+  mkdirSync(join(dir, '.github/workflows'), { recursive: true })
+  const theirWorkflow = 'name: theirs\non: push\njobs: {}\n'
+  writeFileSync(join(dir, '.github/workflows/quality-gate.yml'), theirWorkflow)
+
+  const r = run(['init', '--dir', dir, '--yes', ...SETS])
+  assert.equal(r.code, 2, r.out)
+
+  // Byte-preserved: their project memory, compose file, and workflow.
+  assert.equal(readFileSync(join(dir, 'AGENTS.md'), 'utf8'), theirAgents)
+  assert.equal(readFileSync(join(dir, 'docker-compose.yml'), 'utf8'), theirCompose)
+  assert.equal(readFileSync(join(dir, '.github/workflows/quality-gate.yml'), 'utf8'), theirWorkflow)
+  // Ours parked OUTSIDE active paths (a sibling in workflows/ would execute).
+  for (const parked of [
+    '.harness/conflicts/AGENTS.md',
+    '.harness/conflicts/docker-compose.yml',
+    '.harness/conflicts/.github/workflows/quality-gate.yml',
+  ]) {
+    assert.ok(existsSync(join(dir, parked)), `missing parked copy: ${parked}`)
+  }
+
+  // .gitignore merged: theirs kept, harness patterns appended.
+  const gi = readFileSync(join(dir, '.gitignore'), 'utf8')
+  assert.ok(gi.startsWith('# mine\nnode_modules/\n'), gi)
+  assert.ok(gi.includes('.dev-auth/'), 'harness ignore patterns must be appended')
+
+  // .claude/settings.json merged: their permission posture kept, hooks wired.
+  const settings = JSON.parse(readFileSync(join(dir, '.claude/settings.json'), 'utf8'))
+  assert.equal(settings.permissions.defaultMode, 'default')
+  assert.ok(settings.permissions.allow.includes('Bash(make test)'))
+  assert.ok(JSON.stringify(settings.hooks).includes('stop-validate-gate'), 'Stop hook must be wired')
+})
+
+test('re-running init on an installed project is refused; --force re-renders with carried answers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-reinit-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  // Tune an owned file, then attempt re-init: must refuse before touching anything.
+  const tuned = join(dir, 'tools/harness.config.mjs')
+  const tunedContent = `${readFileSync(tuned, 'utf8')}// tuned\n`
+  writeFileSync(tuned, tunedContent)
+  const again = run(['init', '--dir', dir, '--yes', ...SETS])
+  assert.equal(again.code, 1, again.out)
+  assert.ok(again.out.includes('already has a harness'), again.out)
+  assert.equal(readFileSync(tuned, 'utf8'), tunedContent, 'refused init must not touch files')
+
+  // --force re-renders; prior answers carry over without repeating --set.
+  const forced = run(['init', '--dir', dir, '--yes', '--force'])
+  assert.equal(forced.code, 0, forced.out)
+  const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+  assert.equal(pkg.name, 'fixture-app', 'answers must carry over from the prior manifest')
+
+  // Corrupt manifest: never advise re-init.
+  writeFileSync(join(dir, '.harness/manifest.json'), '{ corrupted')
+  const broken = run(['doctor', '--dir', dir])
+  assert.equal(broken.code, 1, broken.out)
+  assert.ok(broken.out.includes('restore it from git'), broken.out)
+  const initOnCorrupt = run(['init', '--dir', dir, '--yes'])
+  assert.equal(initOnCorrupt.code, 1)
+  assert.ok(initOnCorrupt.out.includes('restore it from git'), initOnCorrupt.out)
+})
+
+test('init rejects invalid placeholder values, unknown --set keys, unknown tiers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-val-'))
+
+  const longId = run(['init', '--dir', dir, '--yes', ...SETS,
+    '--set', 'PRODUCT_IDENTIFIER=com.example.a-very-long-identifier-that-breaks-msi'])
+  assert.equal(longId.code, 1, longId.out)
+  assert.ok(longId.out.includes('30'), longId.out)
+  assert.ok(!existsSync(join(dir, 'package.json')), 'nothing may be written on invalid answers')
+
+  const badOrigin = run(['init', '--dir', dir, '--yes', ...SETS, '--set', 'API_ORIGIN=api.example.com/v1'])
+  assert.equal(badOrigin.code, 1, badOrigin.out)
+  assert.ok(badOrigin.out.includes('connect-src'), badOrigin.out)
+
+  const unknownSet = run(['init', '--dir', dir, '--yes', ...SETS, '--set', 'TYPO_VAR=x'])
+  assert.equal(unknownSet.code, 1, unknownSet.out)
+  assert.ok(unknownSet.out.includes('unknown placeholder'), unknownSet.out)
+
+  const badTier = run(['init', '--dir', dir, '--yes', '--tier', 'strictest', ...SETS])
+  assert.equal(badTier.code, 1, badTier.out)
+  assert.ok(badTier.out.includes('unknown tier'), badTier.out)
+})
+
+test('enable: dry-run writes nothing, binary assets survive, drift is parked not clobbered', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-enable-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+
+  // dry-run: reports but writes nothing, manifest unchanged.
+  const before = readFileSync(join(dir, '.harness/manifest.json'), 'utf8')
+  const dry = run(['enable', 'gate-a11y-deep', '--dir', dir, '--dry-run'])
+  assert.equal(dry.code, 0, dry.out)
+  assert.equal(readFileSync(join(dir, '.harness/manifest.json'), 'utf8'), before, 'dry-run must not touch the manifest')
+
+  // real enable, then disable round-trips (raw-byte hashing must hold for any
+  // binary assets a module ships).
+  const en = run(['enable', 'gate-a11y-deep', '--dir', dir])
+  assert.equal(en.code, 0, en.out)
+  const manifest = JSON.parse(readFileSync(join(dir, '.harness/manifest.json'), 'utf8'))
+  assert.ok(manifest.modules.includes('gate-a11y-deep'))
+  const moduleFiles = Object.entries(manifest.files).filter(([, m]) => m.module === 'gate-a11y-deep')
+  assert.ok(moduleFiles.length > 0, 'enable must record module files')
+
+  // Locally modify one module file, re-enable: local content kept, incoming parked.
+  const [modRel] = moduleFiles.find(([ip]) => ip.endsWith('.mjs')) ?? moduleFiles[0]
+  const modAbs = join(dir, modRel)
+  const localContent = `${readFileSync(modAbs, 'utf8')}\n// local tuning\n`
+  writeFileSync(modAbs, localContent)
+  const re = run(['enable', 'gate-a11y-deep', '--dir', dir])
+  assert.equal(re.code, 0, re.out)
+  assert.equal(readFileSync(modAbs, 'utf8'), localContent, 're-enable must not clobber local changes')
+  assert.ok(existsSync(join(dir, '.harness/pending', modRel)), 'incoming module version must be parked')
+
+  const dis = run(['disable', 'gate-a11y-deep', '--dir', dir])
+  assert.equal(dis.code, 0, dis.out)
+  const after = JSON.parse(readFileSync(join(dir, '.harness/manifest.json'), 'utf8'))
+  assert.ok(!after.modules.includes('gate-a11y-deep'))
+})
+
 test('retrofit rejects Next.js projects and non-workspace layouts with clear messages', () => {
   const nextDir = mkdtempSync(join(tmpdir(), 'tpah-next-'))
   writeFileSync(join(nextDir, 'package.json'), JSON.stringify({ dependencies: { next: '16.0.0' } }))
@@ -249,6 +379,40 @@ test('update refreshes unmodified owned files, preserves drift, never touches se
   assert.equal(readFileSync(seeded, 'utf8'), '# mine now\n', 'seeded file must never be touched')
 })
 
+test('backslash manifest keys: doctor trips, update heals', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-bslash-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
+
+  // Simulate a manifest written by a pre-0.1.3 Windows install: rewrite one
+  // seeded and one owned key with Windows separators.
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const key of ['apps/server/src/app.ts', 'tools/validate.mjs']) {
+    manifest.files[key.split('/').join('\\')] = manifest.files[key]
+    delete manifest.files[key]
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  // doctor: hard error (exit 1) naming the migration path.
+  const doc = run(['doctor', '--dir', dir])
+  assert.equal(doc.code, 1, doc.out)
+  assert.ok(doc.out.includes('Windows-separator'), doc.out)
+
+  // update: rewrites the keys to POSIX; a follow-up doctor is quiet about
+  // separators and the owned file keeps drift protection under its POSIX key.
+  const upd = run(['update', '--dir', dir])
+  assert.notEqual(upd.code, 1, upd.out)
+  const healed = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  assert.deepEqual(
+    Object.keys(healed.files).filter((k) => k.includes('\\')),
+    [],
+    'update must rewrite backslash keys to POSIX',
+  )
+  assert.ok(healed.files['apps/server/src/app.ts'], 'healed seeded key must survive under POSIX form')
+  const docAfter = run(['doctor', '--dir', dir])
+  assert.ok(!docAfter.out.includes('Windows-separator'), docAfter.out)
+})
+
 test('doctor exit codes: clean=0, drift=2, broken=1; CLAUDE.md purity enforced', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-doc-'))
   assert.equal(run(['init', '--dir', dir, '--yes', ...SETS]).code, 0)
@@ -285,14 +449,12 @@ test('doctor exit codes: clean=0, drift=2, broken=1; CLAUDE.md purity enforced',
 
 test('enable/disable flips a module and its manifest entries', (t) => {
   const modulesRoot = join(TEMPLATE, 'modules')
-  let moduleName = 'gate-styleguide'
+  let moduleName = 'gate-a11y-deep'
   if (!existsSync(join(modulesRoot, moduleName))) {
     const available = existsSync(modulesRoot)
       ? readdirSync(modulesRoot).filter((e) => statSync(join(modulesRoot, e)).isDirectory())
       : []
     if (available.length === 0) {
-      // TODO: drop this skip once template/modules/gate-styleguide lands —
-      // then this test always runs against a real module tree.
       t.skip('no template/modules/* trees exist yet')
       return
     }
@@ -319,6 +481,98 @@ test('enable/disable flips a module and its manifest entries', (t) => {
   for (const [ip] of moduleFiles) {
     assert.ok(!existsSync(join(dir, ip)), `disabled module file still present: ${ip}`)
     assert.ok(!(ip in disabled.files), `disabled module file still in manifest: ${ip}`)
+  }
+})
+
+test('refresh-seeded: overwrite when untouched, park on drift, error on unknown path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-refresh-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+  const ip = 'apps/desktop/src/App.tsx'
+  const abs = join(dir, ip)
+  const templateContent = readFileSync(abs, 'utf8')
+
+  // Simulate "installed by an older template, untouched since": plant old
+  // content AND record its sha as the installed state.
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const oldContent = '// old template version\n'
+  writeFileSync(abs, oldContent)
+  manifest.files[ip].sha256 = sha256(oldContent)
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  const refreshed = run(['update', '--dir', dir, '--refresh-seeded', ip])
+  assert.equal(refreshed.code, 0, refreshed.out)
+  assert.equal(readFileSync(abs, 'utf8'), templateContent, 'untouched seeded file must refresh to the template version')
+  const after = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  assert.equal(after.files[ip].mode, 'seeded', 'mode must stay seeded after refresh')
+
+  // Local drift: kept, template version parked.
+  const localWork = `${templateContent}\n// my project's real work\n`
+  writeFileSync(abs, localWork)
+  const parked = run(['update', '--dir', dir, '--refresh-seeded', ip])
+  assert.equal(readFileSync(abs, 'utf8'), localWork, 'local changes must never be clobbered')
+  assert.ok(existsSync(join(dir, '.harness/pending', ip)), 'template version must be parked')
+  assert.ok(parked.out.includes('parked'), parked.out)
+
+  // Unknown path: loud error with candidates.
+  const unknown = run(['update', '--dir', dir, '--refresh-seeded', 'apps/desktop/App.tsx'])
+  assert.equal(unknown.code, 1, unknown.out)
+  assert.ok(unknown.out.includes('did you mean'), unknown.out)
+  assert.ok(unknown.out.includes(ip), unknown.out)
+})
+
+test('doctor: seeded divergence from the current template is an info advisory, never an error', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-seedadv-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+  writeFileSync(join(dir, 'apps/desktop/src/App.tsx'), '// project rewrote its app\n')
+  const r = run(['doctor', '--dir', dir])
+  assert.notEqual(r.code, 1, r.out)
+  assert.ok(r.out.includes('refresh-seeded'), r.out)
+  assert.ok(r.out.includes('apps/desktop/src/App.tsx'), r.out)
+})
+
+test('update survives a manifest that still lists a RETIRED module (0.1.1 → now)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-retiredup-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  manifest.modules = [...(manifest.modules ?? []), 'gate-styleguide', 'gate-perf-budget']
+  manifest.harnessVersion = '0.1.1'
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  const r = run(['update', '--dir', dir])
+  // The guard against planning a retired module's deleted template dir must
+  // hold at ANY version — this crash was the bug.
+  assert.notEqual(r.code, 1, r.out)
+
+  // Pruning itself is applied by the "0.1.3" migration record, which only
+  // activates once the installer version reaches it (release bump). Assert
+  // version-aware so this test tightens automatically at the bump; the
+  // machinery is unit-covered in migrations.test.mjs either way.
+  const pkgVersion = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
+  ).version
+  const after = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const bumped = pkgVersion
+    .split('.')
+    .map(Number)
+    .reduce((acc, n, i) => acc + n * 1000 ** (2 - i), 0) >= 1003 // >= 0.1.3
+  if (bumped) {
+    assert.ok(!after.modules.includes('gate-styleguide'), 'promoted module must be pruned from the module list')
+    assert.ok(!after.modules.includes('gate-perf-budget'), 'promoted module must be pruned from the module list')
+  } else {
+    assert.ok(after.modules.includes('gate-styleguide'), 'pre-bump: migration record not yet active — update must still succeed')
+  }
+})
+
+test('enable of a retired (promoted) module fails with the promotion story, not "unknown"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-retired-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+  for (const name of ['gate-styleguide', 'gate-perf-budget']) {
+    const res = run(['enable', name, '--dir', dir])
+    assert.equal(res.code, 1, res.out)
+    assert.ok(res.out.includes('promoted into the default gate chain'), res.out)
+    assert.ok(res.out.includes('update'), res.out)
   }
 })
 

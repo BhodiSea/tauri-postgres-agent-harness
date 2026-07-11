@@ -15,9 +15,10 @@
 // must never be mistakable for a pass.
 export const VALIDATE_STEPS = [
   ['format', 'pnpm exec biome ci .'],
+  ['gate-integrity', 'node tools/check-gate-integrity.mjs'],
   ['rust-fmt', 'node tools/run-rust-gates.mjs fmt'],
   ['types', 'pnpm exec tsc -b'],
-  ['lint', 'pnpm exec eslint . --max-warnings 0'],
+  ['lint', 'pnpm exec eslint . --max-warnings 0 --cache'],
   ['provenance', 'node tools/check-sources.mjs'],
   ['tauri-policy', 'node tools/check-tauri-policy.mjs'],
   ['version-sync', 'node tools/check-version-sync.mjs'],
@@ -30,10 +31,11 @@ export const VALIDATE_STEPS = [
   ['architecture', 'pnpm exec depcruise apps packages --config .dependency-cruiser.cjs'],
   ['build', 'node tools/build-check.mjs'],
   ['rust-check', 'node tools/run-rust-gates.mjs check'],
-  // Opt-in gates — uncomment after installing the matching module and its prerequisites
-  // (see docs/harness/gates-catalog.md for what each gate needs before it can pass):
-  // ['styleguide', 'node tools/check-styleguide-manifest.mjs'],
-  // ['perf-budget', 'node tools/check-perf-budget.mjs'],
+  ['styleguide', 'node tools/check-styleguide-manifest.mjs'],
+  ['perf-budget', 'node tools/check-perf-budget.mjs'],
+  ['route-manifest', 'node tools/check-route-manifest.mjs'],
+  ['e2e', 'node tools/check-e2e.mjs'],
+  ['docs-sync', 'node tools/check-docs-sync.mjs'],
 ]
 
 // What the Stop hook runs before a turn may end. These invoke the gate DIRECTLY —
@@ -44,7 +46,11 @@ export const VALIDATE_STEPS = [
 // config and those runners are all write-guard-protected.
 // SOURCE: docs/harness/README.md (tamper evidence) [corpus: harness/doctrine]
 export const STOP_HOOK_STEPS = [
-  ['validate', 'node tools/validate.mjs'],
+  // --report-all: the Stop block must show EVERY red at once — serial
+  // one-red-per-turn discovery would exhaust the agent's block budget.
+  ['validate', 'node tools/validate.mjs --report-all'],
   ['rls-isolation', 'node tests/rls/run-rls.mjs'],
-  ['unit', 'pnpm exec vitest run --silent'],
+  // --coverage enforces the thresholds in vitest.config.ts (write-guard-protected)
+  // so a turn cannot end with a coverage-cratering change.
+  ['unit', 'pnpm exec vitest run --coverage --silent'],
 ]

@@ -11,7 +11,7 @@
 // SOURCE: docs/harness/README.md (version-sync gate) [corpus: harness/doctrine]
 import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { failures, ok, skipOrFail } from './lib/gate.mjs'
+import { failures, inCI, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'version-sync'
 const errs = []
@@ -88,8 +88,19 @@ if (existsSync('node_modules')) {
         `zod resolves to ${found.size} versions (${[...found].join(', ')}) — catalog-pin it so exactly one instance exists (instanceof breaks otherwise)`,
       )
     }
-  } catch {
-    // pnpm list can fail on partial installs; the CI run (full install) is authoritative.
+  } catch (e) {
+    // A silent pass here would vacate the single-instance assert exactly where
+    // it matters. Partial local installs may legitimately break `pnpm list`;
+    // CI (full install) must never swallow it.
+    if (inCI()) {
+      errs.push(
+        `pnpm list failed — cannot verify the single-zod-instance invariant: ${(e.stderr?.toString() ?? e.message).slice(0, 300)}`,
+      )
+    } else {
+      console.log(
+        `${GATE}: NOTE — zod single-instance check skipped (pnpm list failed on this partial install; CI verifies it)`,
+      )
+    }
   }
 }
 

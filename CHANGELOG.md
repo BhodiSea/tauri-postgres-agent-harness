@@ -3,6 +3,62 @@
 All notable changes to the harness are documented here. Consuming projects
 pick up fixes with `npx --yes github:BhodiSea/tauri-postgres-agent-harness update`.
 
+## [0.1.3] — 2026-07-10
+
+The four-pillar milestone: the default chain grows 16 → **22 gates**, every gate
+is provably able to fail, and `update` becomes a real cross-version vehicle.
+Existing installs receive everything via `update` (gate steps are injected into
+the consumer's config, promoted modules fold in, canonical commands heal).
+
+- **New default gates**: `gate-integrity` (sha over the enforcement surface),
+  `styleguide` (tokens-only design system — erased Tailwind palette, no raw
+  hex/px/inline styles, family closure, accent budget), `perf-budget`
+  (median-of-N render budget, re-measure-once), `route-manifest` (every screen
+  registered with loading/empty/error states; features-dir closure), `e2e` (the
+  whole Playwright lane — axe per state, keyboard walk with computed
+  focus-visibility, focus traps — at agent time), `docs-sync` (AGENTS.md gate
+  list must equal the chain). `gate-styleguide`/`gate-perf-budget` modules are
+  retired (promoted); `enable` explains the promotion.
+- **RLS performance is enforced**: owner columns need a leading-column index
+  (static gate + pg_catalog check + a 10k-row EXPLAIN plan probe asserting
+  index access with a once-per-statement InitPlan — no Seq Scan, no per-row
+  SubPlan). The RLS suite now runs on a scratch database (`<db>_rls`) under an
+  advisory lock — test runs can no longer drop dev data, and concurrent runners
+  serialize instead of corrupting each other.
+- **Server exemplar hardened**: one error envelope
+  (`{ error: { code, message, requestId } }`) with declared 4xx/5xx everywhere,
+  `.max()` bounds on every wire string, `bodyLimit`, keyset pagination
+  (`{ items, nextCursor }`, microsecond-faithful cursors) with an unconditional
+  DAL LIMIT, a typed drizzle DAL (driver confined to `db/client`, context
+  DAL-only — depcruise-enforced), and a statement-count invariance test that
+  makes the N+1 class unable to land silently.
+- **Trustworthy gates**: the schema-rls parser is statement-level (the v0.1.1
+  regex was defeated by the shipped migration's own syntax), provenance
+  citations must RESOLVE against a sha-pinned corpus covering every decision
+  group, the Stop hook fails CLOSED when an RLS surface exists and no database
+  is reachable (after auto-starting docker compose), and every failure carries
+  a `FIX[gate]:` line with the exact reproduce command.
+- **Falsifiability closure**: `tests/canary/injections.json` registers a
+  mechanical red-proof for all 25 steps (validate ∪ Stop chains);
+  `scripts/check-canary-coverage.mjs` reds any PR adding a gate without a
+  canary or a hook rule without a deny test.
+- **Feedback + speed**: `validate --report-all` (the Stop hook shows every red
+  at once), per-step elapsed-ms, `eslint --cache`, and content-hash stamps that
+  make warm `build`/`contracts`/`licenses`/`rust-check` skip in milliseconds
+  (CI always re-runs). Coverage floors run in the Stop hook
+  (`vitest run --coverage`) and over the installer itself in CI.
+- **Installer**: cross-version migrations (removed/renamed/promotedModules/
+  configSteps/configCommandUpdates), `update --refresh-seeded <path>`
+  (park-on-drift channel for template improvements to project-owned files),
+  doctor advisories (seeded divergence, parked upgrades, dormant lefthook),
+  POSIX-normalized manifests with a Windows unit-test matrix, and a module
+  render lane proving every module ships placeholder-clean and syntax-valid.
+- **Fixed**: ci-windows-e2e drove a nonexistent `<productName>.exe` (Tauri 2
+  names the binary after the Cargo bin — `desktop.exe`); the provenance sweep
+  ENOBUFS-crashed on large trees (64 MB buffer); pnpm's CI banner polluted the
+  openapi regen diff (`--silent`); a jsdom teardown race in the desktop unit
+  tests (network-stubbed test setup + RTL cleanup).
+
 ## [0.1.1] — 2026-07-10
 
 Windows fixes surfaced by the v0.1.0 selftest matrix. The npx channel was

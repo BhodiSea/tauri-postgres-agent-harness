@@ -30,6 +30,21 @@ append-only (the write-guard denies edits to any existing
 `packages/schema/drizzle/*.sql`), so the migration is composed completely and written
 ONCE as a new file, with its `meta/_journal.json` entry.
 
+Per-layer non-negotiables the gates enforce (see the skill references for the
+worked patterns — a slice missing any of these arrives pre-red):
+
+- migration: ENABLE + FORCE RLS, four per-op initPlan policies, AND a
+  leading-column index on the owner column, all in the same migration; the table
+  wired into `tests/rls/db-context.ts` ISOLATION_TARGETS.
+- DAL: drizzle query builder through `withUserContext`, Zod-parse at exit,
+  keyset pagination with an unconditional LIMIT, a statement-count test.
+- contracts: `.max()` bounds on every wire string; errors through the
+  `{ error: { code, message, requestId } }` envelope with declared 4xx/5xx.
+- desktop: tokens-only styling (erased default palette — no raw hex/px/inline
+  style), shortcuts via the registry, loading/empty/error states.
+- tests: enough to hold the coverage floor (`vitest run --coverage` runs in the
+  Stop hook).
+
 For invariant-touching work (auth, RLS, migrations, CSP/capabilities), it is strongly
 recommended to write `specs/$1.md` first and get sign-off before implementing.
 

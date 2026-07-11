@@ -24,7 +24,9 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Full-library net: every TS mutant. Nightly/manual only; measures, never breaks.
+  # Full-library net: every TS mutant. Nightly/manual only. The set-based
+  # ratchet step CAN fail the night: new survivors red the run; killed baseline
+  # survivors invite tightening (tools/check-mutation-ratchet.mjs --write).
   # ---------------------------------------------------------------------------
   mutation-full:
     name: stryker (nightly full)
@@ -53,6 +55,11 @@ jobs:
 
       - name: Mutation testing (StrykerJS, full)
         run: pnpm exec stryker run stryker.config.mjs
+
+      # The nightly CAN fail: any surviving mutant not in the committed baseline
+      # is a red. Killing baseline survivors prints a ratchet-tighten hint.
+      - name: Mutation ratchet (set of survivors vs committed baseline)
+        run: node tools/check-mutation-ratchet.mjs
 
   # ---------------------------------------------------------------------------
   # Per-PR incremental StrykerJS on the CRITICAL modules only. ADVISORY until a

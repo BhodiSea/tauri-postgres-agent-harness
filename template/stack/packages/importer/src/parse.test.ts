@@ -4,6 +4,14 @@ import { describe, expect, it } from 'vitest'
 import type { Table } from './index.js'
 import { parseTable, serializeTable } from './index.js'
 
+// Deterministic PBT: a FIXED seed and run count, so a red here reproduces
+// byte-identically on every machine and in CI — a randomly-seeded property
+// test is a flake generator wearing a rigor costume. Explore new seeds
+// DELIBERATELY (fc.assert override in a scratch run), then pin what you keep.
+// SOURCE: fast-check runner parameters (seed/numRuns)
+// https://fast-check.dev/docs/configuration/user-definable-values/
+const FC_PARAMS = { seed: 420, numRuns: 200 } as const
+
 // Cells drawn from plain strings plus strings dense in the characters that
 // exercise the grammar: quotes, both delimiters, and record separators.
 const trickyChar = fc.constantFrom('"', ',', '\t', '\r', '\n', 'x', 'é')
@@ -30,6 +38,7 @@ describe('parseTable properties', () => {
       fc.property(tableArb, delimiterArb, (table, delimiter) => {
         expect(parseTable(serializeTable(table, { delimiter }), { delimiter })).toEqual(table)
       }),
+      FC_PARAMS,
     )
   })
 
@@ -38,6 +47,7 @@ describe('parseTable properties', () => {
       fc.property(anyTextArb, delimiterArb, (text, delimiter) => {
         expect(() => parseTable(text, { delimiter })).not.toThrow()
       }),
+      FC_PARAMS,
     )
   })
 
@@ -48,6 +58,7 @@ describe('parseTable properties', () => {
         expect(header.length).toBeGreaterThan(0)
         for (const row of rows) expect(row).toHaveLength(header.length)
       }),
+      FC_PARAMS,
     )
   })
 })

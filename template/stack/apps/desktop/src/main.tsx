@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { attachConsole, isTauri } from './ipc'
 import './styles.css'
 
@@ -17,6 +18,10 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    {/* Boundary at the root: a render exception must surface as a styled,
+        recoverable alert — never a silent blank desktop window. */}
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

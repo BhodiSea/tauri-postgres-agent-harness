@@ -8,16 +8,14 @@
 //           full run), and clippy -D warnings runs in the CI rust lane, not here.
 // SOURCE: docs/harness/README.md (rust gates; stamp) [corpus: harness/doctrine]
 import { execSync, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { fail, inCI, ok, skipOrFail } from './lib/gate.mjs'
+import { existsSync, readFileSync } from 'node:fs'
+import { fail, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const mode = process.argv[2]
 const GATE = mode === 'fmt' ? 'rust-fmt' : 'rust-check'
 const CRATE = 'apps/desktop/src-tauri'
 const MANIFEST = `${CRATE}/Cargo.toml`
-const STAMP = '.harness/rust-check.ok'
 
 if (!['fmt', 'check'].includes(mode)) fail(GATE, 'usage: run-rust-gates.mjs <fmt|check>')
 if (!existsSync(MANIFEST)) skipOrFail(GATE, `${MANIFEST} not found (no Rust surface yet)`)
@@ -46,26 +44,12 @@ if (mode === 'fmt') {
 }
 
 // ---- check mode ----
-function treeHash() {
-  const h = createHash('sha256')
-  ;(function walk(dir) {
-    for (const entry of readdirSync(dir).sort()) {
-      if (entry === 'target' || entry === 'gen') continue
-      const p = join(dir, entry)
-      if (statSync(p).isDirectory()) walk(p)
-      else {
-        h.update(p)
-        h.update(readFileSync(p))
-      }
-    }
-  })(CRATE)
-  return h.digest('hex')
-}
-
-const current = treeHash()
-if (!inCI() && existsSync(STAMP) && readFileSync(STAMP, 'utf8').trim() === current) {
-  ok(GATE, 'Rust tree unchanged since last green check (stamp hit; CI always runs the real thing)')
-}
+// Stamped via the shared helper (lib/gate.mjs stampGate). The declared inputs in
+// tools/lib/stamp-inputs.mjs include the committed bindings — they are one of
+// this gate's ASSERTED outputs: a stamp that ignored them would return
+// "unchanged" after someone hand-edits or reverts bindings.ts, silently skipping
+// the drift check it exists to run.
+const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 try {
   run(`cargo check --locked --manifest-path ${MANIFEST}`)
@@ -109,6 +93,5 @@ if (/fn\s+export_bindings/.test(libSrc)) {
   }
 }
 
-mkdirSync('.harness', { recursive: true })
-writeFileSync(STAMP, `${current}\n`)
+recordGreen()
 ok(GATE, 'cargo check clean; specta bindings in sync (stamp refreshed)')

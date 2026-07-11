@@ -1,5 +1,8 @@
 // Central keyboard-shortcut registry. Every shortcut in the app MUST be
-// declared here — ad-hoc key handlers bypass the WCAG 2.1.4 test below.
+// declared here — ad-hoc key handlers bypass the WCAG 2.1.4 test below — and
+// every declared shortcut MUST have a handler: App.tsx builds a
+// Record<ShortcutId, () => void>, so an entry added here without a handler is
+// a COMPILE error (tsc gate), not a dead footer hint.
 
 export interface Shortcut {
   readonly id: string
@@ -14,8 +17,9 @@ export interface Shortcut {
 // real modifier (or be focus-scoped/remappable), otherwise speech-input and
 // screen-reader users trigger it accidentally. registry.test.ts iterates this
 // array and fails the build on violations. [corpus: wcag/character-key-shortcuts]
-export const SHORTCUTS: readonly Shortcut[] = [
+export const SHORTCUTS = [
   { id: 'command-palette', keys: 'mod+k', description: 'Command palette', scope: 'global' },
-  { id: 'new-note', keys: 'mod+n', description: 'New note', scope: 'global' },
   { id: 'show-shortcuts', keys: 'mod+/', description: 'Keyboard shortcuts', scope: 'global' },
-]
+] as const satisfies readonly Shortcut[]
+
+export type ShortcutId = (typeof SHORTCUTS)[number]['id']

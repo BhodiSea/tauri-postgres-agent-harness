@@ -86,3 +86,28 @@ export async function stubHealthz(page: Page, stub: HealthzStub): Promise<void> 
     })
   })
 }
+
+// Data stub for the home screen's notes panel (the ready state): a NotesPage
+// body of full NoteDto rows built from the given titles — NotesPanel Zod-parses
+// the wire body, so stubs must honor the @app/schema contract exactly. The
+// loading / empty / error behavior classes are driven in e2e/states.spec.ts.
+export async function stubNotes(page: Page, titles: readonly string[]): Promise<void> {
+  const items = titles.map((title, index) => ({
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    ownerId: '00000000-0000-4000-8000-0000000000aa',
+    title,
+    body: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    embedding: null,
+    sourceConfidence: null,
+    sourceModel: null,
+  }))
+  await page.route('**/api/notes', async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: CORS_HEADERS,
+      contentType: 'application/json',
+      body: JSON.stringify({ items, nextCursor: null }),
+    })
+  })
+}

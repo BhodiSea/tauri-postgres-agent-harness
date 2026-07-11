@@ -1,0 +1,32 @@
+{
+  "//": "Per-version upgrade records applied by `update` to already-installed harnesses. Keys are released versions; each entry may carry: removed (stale template paths to delete when sha-unmodified), renamed (old path -> new path), promotedModules (opt-in modules folded into the default harness), configSteps (gate steps injected into the consumer's VALIDATE_STEPS: {name, cmd, after}). Entries are applied in version order for manifest.harnessVersion < v <= installer version. See installer/lib/migrations.mjs.",
+  "0.1.3": {
+    "removed": ["e2e/a11y-routes.ts"],
+    "promotedModules": ["gate-styleguide", "gate-perf-budget"],
+    "configSteps": [
+      { "name": "gate-integrity", "cmd": "node tools/check-gate-integrity.mjs", "after": "format" },
+      { "name": "styleguide", "cmd": "node tools/check-styleguide-manifest.mjs", "after": "rust-check" },
+      { "name": "perf-budget", "cmd": "node tools/check-perf-budget.mjs", "after": "styleguide" },
+      { "name": "route-manifest", "cmd": "node tools/check-route-manifest.mjs", "after": "perf-budget" },
+      { "name": "e2e", "cmd": "node tools/check-e2e.mjs", "after": "route-manifest" },
+      { "name": "docs-sync", "cmd": "node tools/check-docs-sync.mjs", "after": "e2e" }
+    ],
+    "configCommandUpdates": [
+      {
+        "name": "lint",
+        "from": "pnpm exec eslint . --max-warnings 0",
+        "to": "pnpm exec eslint . --max-warnings 0 --cache"
+      },
+      {
+        "name": "validate",
+        "from": "node tools/validate.mjs",
+        "to": "node tools/validate.mjs --report-all"
+      },
+      {
+        "name": "unit",
+        "from": "pnpm exec vitest run --silent",
+        "to": "pnpm exec vitest run --coverage --silent"
+      }
+    ]
+  }
+}

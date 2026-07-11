@@ -19,13 +19,15 @@ SOURCE: docs/harness/README.md (security-invariants rule)
   `drizzle-kit push` and `drizzle-kit drop` are blocked. Destructive DDL requires
   `-- adr: docs/adr/<file>`; DML requires `-- harness-allow-dml: <reason>`.
 - **`MIGRATOR_DATABASE_URL` is the RLS-bypassing role** (schema owner). Only
-  drizzle-kit migrate/generate/check and `tests/migrations/` may use it — never
-  app, test-assertion, or script code.
-- **Every table ships `ENABLE` + `FORCE ROW LEVEL SECURITY`** and four
+  drizzle-kit migrate/generate/check and the harness RLS runners
+  (`tests/migrations/`, `tests/rls/` — plan-probe seeding + ANALYZE) may use
+  it — never app, test-assertion, or script code.
+- **Every table ships `ENABLE` + `FORCE ROW LEVEL SECURITY`**, four
   per-operation policies scoped to
-  `(select current_setting('app.user_id', true)::uuid)` (initPlan pattern), in
-  the same migration that creates it. Exemptions live only in the human-reviewed
-  `tools/rls-exempt.json`.
+  `(select current_setting('app.user_id', true)::uuid)` (initPlan pattern), and
+  a leading-column index on the owner column (every policy filters by it on
+  every statement), in the same migration that creates it. Exemptions live only
+  in the human-reviewed `tools/rls-exempt.json`.
 - **Desktop-bundle purity.** `apps/desktop` never imports `postgres`,
   `drizzle-orm`, `pg`, `@hono/*`, `pino`, or anything in `apps/server`; Tauri
   APIs (`@tauri-apps/*`) are imported only inside `src/ipc/**` and

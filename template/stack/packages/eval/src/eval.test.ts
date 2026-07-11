@@ -6,7 +6,12 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { ExtractionResult } from './extract.js'
-import { extractionResultSchema, loadExtractionPrompt } from './extract.js'
+import {
+  extractionResultSchema,
+  loadExtractionPrompt,
+  parseExtraction,
+  verifyEvidence,
+} from './extract.js'
 import { FakeEmbeddingProvider, FakeInferenceProvider } from './fake.js'
 import type { ScoredItem } from './score.js'
 import { scoreItems } from './score.js'
@@ -35,13 +40,40 @@ describe('holdout fixture integrity', () => {
     expect(holdout.items).toHaveLength(4)
   })
 
-  it('every canned evidence span is a verbatim substring at its stated offsets', () => {
+  it('every canned recording passes parseExtraction (schema-valid AND evidence-grounded)', () => {
     for (const item of holdout.items) {
-      const canned = extractionResultSchema.parse(item.canned)
-      for (const { evidence } of canned.tags) {
-        expect(item.input.slice(evidence.start, evidence.end)).toBe(evidence.quote)
-      }
+      const canned = parseExtraction(item.input, item.canned)
+      expect(verifyEvidence(item.input, canned)).toEqual([])
     }
+  })
+})
+
+describe('evidence grounding (the accept-without-audit path must not exist)', () => {
+  const grounded = {
+    tags: [
+      {
+        axis: 'subject',
+        code: 'MATH',
+        evidence: { quote: 'solve', start: 0, end: 5 },
+      },
+    ],
+  }
+
+  it('rejects a plausible quote whose offsets point at different text', () => {
+    expect(() =>
+      parseExtraction('solve for x', {
+        tags: [{ ...grounded.tags[0], evidence: { quote: 'solve', start: 6, end: 11 } }],
+      }),
+    ).toThrow(/does not ground/)
+  })
+
+  it('rejects internally-inconsistent offsets at the schema layer (no input needed)', () => {
+    const bad = { tags: [{ ...grounded.tags[0], evidence: { quote: 'solve', start: 5, end: 5 } }] }
+    expect(extractionResultSchema.safeParse(bad).success).toBe(false)
+  })
+
+  it('accepts a fully grounded extraction', () => {
+    expect(parseExtraction('solve for x', grounded)).toEqual(grounded)
   })
 })
 

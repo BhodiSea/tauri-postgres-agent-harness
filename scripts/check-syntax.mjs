@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // Syntax-check every shipped JS module (installer + scripts + template),
 // including .tmpl-suffixed files (checked via a temp copy), and validate all
-// shipped JSON.
+// shipped JSON. With a directory argument it scans THAT whole tree instead —
+// the module render lane points it at a fully-rendered scaffold.
+//   usage: node scripts/check-syntax.mjs [rendered-dir]
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // fileURLToPath, not URL.pathname (which yields /D:/… on Windows)
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
+const ARG_DIR = process.argv[2] ? resolve(process.argv[2]) : null
+const ROOT = ARG_DIR ?? fileURLToPath(new URL('..', import.meta.url))
 const failures = []
 const tmp = mkdtempSync(join(tmpdir(), 'nsah-syntax-'))
 let jsCount = 0
@@ -47,7 +50,13 @@ function walk(dir) {
   }
 }
 
-for (const dir of ['installer', 'scripts', 'template', 'tests']) walk(join(ROOT, dir))
+if (ARG_DIR) {
+  walk(ROOT)
+} else {
+  for (const dir of ['installer', 'scripts', 'template', 'tests']) {
+    if (existsSync(join(ROOT, dir))) walk(join(ROOT, dir))
+  }
+}
 
 if (failures.length) {
   console.error(`SYNTAX: FAIL (${failures.length})`)

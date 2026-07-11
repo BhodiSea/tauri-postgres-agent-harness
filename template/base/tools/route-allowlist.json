@@ -1,0 +1,17 @@
+{
+  "comment": "Feature directories under apps/desktop/src/features/ that are components/overlays, NOT navigable screens — exempt from the ROUTES-manifest closure in tools/check-route-manifest.mjs. Every entry must be {\"name\": string, \"reason\": non-empty string}; an entry without a reviewed reason is a gate bypass. Screens NEVER belong here — register them in apps/desktop/src/routes.ts so the states/a11y e2e suites cover them.",
+  "allow": [
+    {
+      "name": "connection",
+      "reason": "header status indicator rendered inside every screen's banner — not a navigable screen; covered by a11y.spec.ts and degraded-network.spec.ts"
+    },
+    {
+      "name": "palette",
+      "reason": "mod+k command palette overlay reachable from every screen — its modal dialog surface is covered by a11y.spec.ts (trap/restore) and App.test.tsx"
+    },
+    {
+      "name": "shortcuts",
+      "reason": "mod+/ shortcuts overlay — registry-driven modal dialog covered by a11y.spec.ts (trap/restore) and App.test.tsx"
+    }
+  ]
+}

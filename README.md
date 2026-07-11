@@ -13,7 +13,7 @@ Packaged once, installable into any new or existing project — sibling of
 same doctrine, rebuilt for the desktop stack.
 
 ```sh
-# Bootstrap a new monorepo (green out of the box: all 16 gates + RLS suite + unit tests)
+# Bootstrap a new monorepo (green out of the box: all 22 gates + RLS suite + unit tests)
 npx --yes github:BhodiSea/tauri-postgres-agent-harness init
 
 # Retrofit an existing Tauri + Hono pnpm workspace (merge, never clobber, diff report)
@@ -43,21 +43,33 @@ Prompts are advisory; these are not.
 
 `pnpm validate` runs `tools/validate.mjs`, driven by a single config
 (`tools/harness.config.mjs`) shared by the Stop hook and CI so the three can never
-drift (16 steps, cheap → expensive):
+drift (22 steps, cheap → expensive):
 
-format (biome) → rust-fmt → types (`tsc -b`, max strictness) → lint (typescript-eslint
+format (biome) → **gate-integrity** (manifest sha over the gate scripts/hooks — tampering
+is turn-fatal) → rust-fmt → types (`tsc -b`, max strictness) → lint (typescript-eslint
 **strictTypeChecked** + jsx-a11y strict + React Compiler rules + cognitive-complexity ≤ 15
-+ import bans) → provenance (`SOURCE:` on every decision site) → **tauri-policy**
-(isolation pattern on, CSP pinned + non-null, identifier lock, offline WebView2,
-least-privilege capabilities) → version-sync (one version everywhere, exact pins for
-rc-churn tools, single zod instance) → prompts (hash-locked, versioned LLM prompts) →
-licenses (allowlist on the production tree) → **schema-rls** (every `pgTable` has FORCE
-RLS + per-operation policies or a reviewed exemption) → migrations (append-only, DML-free,
-destructive-needs-ADR) → contracts (openapi regen-diff + tsconfig-references sync) →
-dead-code (`knip --strict`, zero ignores) → architecture (dependency-cruiser: desktop
-never imports server/db, no circulars) → build (vite build + **bundle-purity grep**) →
-rust-check (`cargo check --locked` + tauri-specta bindings drift, content-hash stamped:
-warm validate ≈ 7s, cold ≈ 60s).
++ import bans, `--cache`) → provenance (`SOURCE:` on every decision site; citations must
+RESOLVE against a sha-pinned corpus) → **tauri-policy** (isolation pattern on, CSP pinned +
+non-null + no wildcard/plaintext origins, identifier lock, offline WebView2,
+least-privilege capabilities, zero-flash backgroundColor) → version-sync (one version
+everywhere, exact pins for rc-churn tools, single zod instance) → prompts (hash-locked,
+versioned LLM prompts) → licenses (allowlist on the production tree) → **schema-rls**
+(every `pgTable` has FORCE RLS + per-operation initPlan policies + a leading-column owner
+index + runtime isolation-matrix wiring, or a reviewed exemption) → migrations
+(append-only, DML-free, destructive-needs-ADR) → contracts (openapi regen-diff +
+tsconfig-references sync) → dead-code (`knip --strict`, zero ignores) → architecture
+(dependency-cruiser: desktop never imports server/db, driver confined to `db/client`,
+`db/context` DAL-only, no circulars) → build (vite build + **bundle-purity grep** + gzip
+byte budgets) → rust-check (`cargo check --locked` + tauri-specta bindings drift) →
+**styleguide** (tokens-only design system: erased default palette, no raw hex/px/inline
+styles, accent budget) → perf-budget (median-of-N render budget, re-measure-once) →
+**route-manifest** (every screen registered with loading/empty/error states; features-dir
+closure) → **e2e** (the whole Playwright lane — axe per state, keyboard walk with computed
+focus-visibility, focus traps — as an agent-time gate) → docs-sync (AGENTS.md gate list ==
+the chain; advertised commands exist). The expensive gates are content-hash **stamped**:
+unchanged inputs make a warm validate skip build/contracts/licenses/rust-check in
+milliseconds — measured on the fresh scaffold: cold ≈ 67 s (real cargo check + real
+chromium e2e), warm ≈ 7 s for all 22 steps (CI always re-runs everything).
 
 Rust/database gates **skip loudly** without the toolchain locally and **fail closed in
 CI** (`HARNESS_REQUIRE_TOOLCHAINS=1`) — a skip is never mistakable for a pass.
@@ -142,7 +154,7 @@ pgvector column, a zero-dep importer with property-based tests, and an LLM eval
 package (swappable providers, hash-locked prompt, fixture-scored — no live calls).
 
 Bootstrap is verified **green out of the box** in CI: fresh install → `pnpm install` →
-`pnpm validate` (16 gates incl. a real `cargo check`) → RLS suite against a live
+`pnpm validate` (22 gates incl. a real `cargo check` and the Playwright e2e lane) → RLS suite against a live
 Postgres → unit tests, on ubuntu and **windows-latest on every PR** — plus a canary job
 that injects one violation per gate and asserts it fails (a gate that cannot fail is
 deleted), and a nightly Windows `tauri build` that silent-installs and uninstalls the

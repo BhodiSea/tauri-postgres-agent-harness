@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import { apiError } from '../errors.js'
 import type { AppEnv } from '../types.js'
 
 // Identity registry so the route-coverage unit test can prove every /api/*
@@ -28,8 +29,8 @@ export function createSkewMiddleware(serverVersion: string): MiddlewareHandler<A
       const clientMajor = majorOf(clientVersion)
       if (clientMajor === null || clientMajor !== serverMajor) {
         // SOURCE: version-skew doctrine — desktop fleets update slowly; a hard 409 with a
-        // stable machine-readable body beats silent contract drift [corpus: harness/doctrine]
-        return c.json({ error: 'version_skew' }, 409)
+        // stable machine-readable code beats silent contract drift [corpus: harness/doctrine]
+        return apiError(c, 409, 'version_skew', 'client major version does not match the server')
       }
     }
     await next()

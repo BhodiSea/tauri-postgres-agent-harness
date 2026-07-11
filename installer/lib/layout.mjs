@@ -24,14 +24,20 @@ export const MODULES = [
   'ci-macos',
   'ci-provenance',
   'mutation',
-  'gate-perf-budget',
   'gate-a11y-deep',
-  'gate-styleguide',
   'crash-reporting',
   'ops-backup',
   'eval-live',
   'observability',
 ]
+
+// Modules folded into the default harness by a release (template/migrations.json
+// promotedModules). `enable` refuses these with the promotion story instead of a
+// bare "unknown module".
+export const RETIRED_MODULES = new Map([
+  ['gate-styleguide', 'promoted into the default gate chain in the 0.1.3 release — run `update`; the styleguide gate now ships in tools/ by default'],
+  ['gate-perf-budget', 'promoted into the default gate chain in the 0.1.3 release — run `update`; the perf-budget gate now ships in tools/ by default'],
+])
 
 export const TIERS = {
   core: [],
@@ -61,8 +67,15 @@ export const SEEDED_FILES = new Set([
   'docker-compose.yml',
   'tools/aliveness-manifest.mjs',
   'tools/rls-exempt.json',
+  'tools/license-exceptions.json',
   'tools/identity.lock.json',
   'tools/prompts.lock.json',
+  // Human-tuned budget/design data: write-guard-protected against agents, but a
+  // project raises them deliberately — update must plant-when-absent, never clobber.
+  'tools/styleguide.manifest.json',
+  'tools/perf-budget.json',
+  'tools/bundle-budget.json',
+  'tools/route-allowlist.json',
   'tests/rls/db-context.ts',
 ])
 

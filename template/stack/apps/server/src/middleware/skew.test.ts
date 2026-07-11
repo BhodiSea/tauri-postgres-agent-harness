@@ -1,3 +1,4 @@
+import { ApiError } from '@app/schema'
 import { describe, expect, it } from 'vitest'
 import { type AppOptions, createApp } from '../app.js'
 import type { NotesDal } from '../types.js'
@@ -6,7 +7,7 @@ import { isSkewMiddleware } from './skew.js'
 const USER_ID = '11111111-1111-4111-8111-111111111111'
 
 const emptyDal: NotesDal = {
-  list: () => Promise.resolve([]),
+  list: () => Promise.resolve({ items: [], nextCursor: null }),
   create: () => Promise.reject(new Error('not under test')),
   get: () => Promise.resolve(null),
   remove: () => Promise.resolve(false),
@@ -26,15 +27,16 @@ describe('version-skew middleware', () => {
       headers: { ...authed, 'x-client-version': '1.0.0' },
     })
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual([])
+    await expect(res.json()).resolves.toEqual({ items: [], nextCursor: null })
   })
 
-  it('rejects a major mismatch with 409 version_skew', async () => {
+  it('rejects a major mismatch with a 409 version_skew envelope', async () => {
     const res = await createApp(options).request('/api/notes', {
       headers: { ...authed, 'x-client-version': '2.0.0' },
     })
     expect(res.status).toBe(409)
-    await expect(res.json()).resolves.toEqual({ error: 'version_skew' })
+    const body = ApiError.parse(await res.json())
+    expect(body.error.code).toBe('version_skew')
   })
 
   it('rejects an unparsable client version', async () => {
@@ -54,7 +56,8 @@ describe('version-skew middleware', () => {
       headers: { 'x-client-version': '1.0.0' },
     })
     expect(res.status).toBe(401)
-    await expect(res.json()).resolves.toEqual({ error: 'unauthorized' })
+    const body = ApiError.parse(await res.json())
+    expect(body.error.code).toBe('unauthorized')
   })
 
   it('exempts /healthz from both the skew gate and auth', async () => {

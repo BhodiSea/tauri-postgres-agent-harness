@@ -1,14 +1,31 @@
 import { readFileSync } from 'node:fs'
-import { ApiError, HealthResponse, type NewNote, NewNoteInput, NoteDto } from '@app/schema'
+import {
+  ApiError,
+  HealthResponse,
+  type NewNote,
+  NewNoteInput,
+  NoteDto,
+  NotesListQuery,
+  NotesPage,
+} from '@app/schema'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
 import { createTokenVerifier, type TokenVerifier } from './auth/verify.js'
+import { decodeNotesCursor } from './dal/cursor.js'
 import { notesDal } from './dal/notes.js'
+import { apiError, notFoundHandler, onErrorHandler, requestId, validationHook } from './errors.js'
 import { createSkewMiddleware } from './middleware/skew.js'
 import type { AppEnv, NotesDal } from './types.js'
 
 const SSE_DEMO_TICKS = 3
+
+// 1 MiB cap on /api/* request bodies: the largest legal payload (a note with a
+// 20 000-char body) is < 100 KiB even at 4-byte UTF-8, so 1 MiB is generous
+// headroom while still refusing memory-amplification uploads before they buffer.
+// SOURCE: Hono bodyLimit middleware https://hono.dev/docs/middleware/builtin/body-limit
+const MAX_API_BODY_BYTES = 1024 * 1024
 
 const PackageJsonDto = z.object({ version: z.string() })
 
@@ -30,6 +47,22 @@ function readPackageVersion(): string {
 // z.guid() matches the postgres uuid type (any 8-4-4-4-12 hex, no RFC variant check).
 const NoteParamsDto = z.object({ id: z.guid() })
 
+const errorResponse = (description: string) => ({
+  content: { 'application/json': { schema: ApiError } },
+  description,
+})
+
+// Failure modes shared by every authenticated /api route: request validation
+// (400, via the defaultHook), the auth guard (401), the version-skew guard
+// (409), and the onError backstop (500). Every route declares what it can
+// actually emit — the envelope meta-test walks the spec to keep this honest.
+const guardedRouteErrors = {
+  400: errorResponse('Request validation failed (envelope code bad_request)'),
+  401: errorResponse('Missing or unverifiable bearer token'),
+  409: errorResponse('Client major version does not match the server (code version_skew)'),
+  500: errorResponse('Unexpected server error — correlate via error.requestId'),
+}
+
 const healthRoute = createRoute({
   method: 'get',
   path: '/healthz',
@@ -39,6 +72,7 @@ const healthRoute = createRoute({
         'Liveness probe — no auth, no version gate; the desktop status indicator polls it',
       content: { 'application/json': { schema: HealthResponse } },
     },
+    500: errorResponse('Unexpected server error — correlate via error.requestId'),
   },
 })
 
@@ -46,11 +80,15 @@ const listNotesRoute = createRoute({
   method: 'get',
   path: '/api/notes',
   security: [{ Bearer: [] }],
+  request: { query: NotesListQuery },
   responses: {
     200: {
-      description: 'All notes owned by the authenticated user (scoped by RLS)',
-      content: { 'application/json': { schema: z.array(NoteDto) } },
+      description:
+        'One keyset page of the notes owned by the authenticated user (scoped by RLS), ' +
+        'newest first; follow nextCursor until it is null',
+      content: { 'application/json': { schema: NotesPage } },
     },
+    ...guardedRouteErrors,
   },
 })
 
@@ -69,6 +107,8 @@ const createNoteRoute = createRoute({
       description: 'The created note',
       content: { 'application/json': { schema: NoteDto } },
     },
+    ...guardedRouteErrors,
+    413: errorResponse('Request body exceeds the 1 MiB /api/* limit'),
   },
 })
 
@@ -82,10 +122,8 @@ const getNoteRoute = createRoute({
       description: 'The requested note',
       content: { 'application/json': { schema: NoteDto } },
     },
-    404: {
-      description: 'No such note visible to this user',
-      content: { 'application/json': { schema: ApiError } },
-    },
+    ...guardedRouteErrors,
+    404: errorResponse('No such note visible to this user'),
   },
 })
 
@@ -96,10 +134,8 @@ const deleteNoteRoute = createRoute({
   request: { params: NoteParamsDto },
   responses: {
     204: { description: 'Note deleted' },
-    404: {
-      description: 'No such note visible to this user',
-      content: { 'application/json': { schema: ApiError } },
-    },
+    ...guardedRouteErrors,
+    404: errorResponse('No such note visible to this user'),
   },
 })
 
@@ -123,7 +159,13 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   const sseTickMs = options.sseTickMs ?? 250
   const onSseAbort = options.onSseAbort
 
-  const app = new OpenAPIHono<AppEnv>()
+  // defaultHook: EVERY route's validation failure becomes the ApiError envelope.
+  const app = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
+
+  // Error envelope wiring — no error path may bypass src/errors.ts.
+  app.use(requestId)
+  app.notFound(notFoundHandler)
+  app.onError(onErrorHandler)
 
   app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
     type: 'http',
@@ -140,7 +182,7 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
         ? authorization.slice('Bearer '.length)
         : undefined
     if (token === undefined || token === '') {
-      return c.json({ error: 'unauthorized' }, 401)
+      return apiError(c, 401, 'unauthorized', 'missing bearer token')
     }
     try {
       const { userId } = await verifyToken(token)
@@ -148,20 +190,38 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
     } catch {
       // Verification failures collapse to a bare 401: token errors must not leak
       // why a credential was rejected.
-      return c.json({ error: 'unauthorized' }, 401)
+      return apiError(c, 401, 'unauthorized', 'invalid bearer token')
     }
     await next()
     return undefined
   }
 
-  // Every /api/* route sits behind BOTH guards; /healthz and /openapi.json are
-  // deliberately outside. The skew unit test walks app.routes to prove coverage.
+  // Every /api/* route sits behind ALL THREE guards; /healthz and /openapi.json
+  // are deliberately outside. The skew unit test walks app.routes to prove
+  // coverage. Order matters: reject skewed/unauthenticated requests before the
+  // body limit ever buffers a byte for them.
   app.use('/api/*', createSkewMiddleware(version))
   app.use('/api/*', requireAuth)
+  app.use(
+    '/api/*',
+    bodyLimit({
+      maxSize: MAX_API_BODY_BYTES,
+      // Explicitly typed: bodyLimit's own onError context is untyped (any env).
+      onError: (c: Context<AppEnv>) =>
+        apiError(c, 413, 'payload_too_large', 'request body exceeds 1 MiB'),
+    }),
+  )
 
   app.openapi(listNotesRoute, async (c) => {
-    const notes = await dal.list(c.get('userId'))
-    return c.json(notes, 200)
+    const query = c.req.valid('query')
+    const cursor = query.cursor === undefined ? undefined : decodeNotesCursor(query.cursor)
+    if (cursor === null) {
+      // Well-formed base64url that this server never minted — reject at the
+      // edge, before the DAL sees it.
+      return apiError(c, 400, 'bad_request', 'cursor is not a page token this server issued')
+    }
+    const page = await dal.list(c.get('userId'), { cursor, limit: query.limit })
+    return c.json(page, 200)
   })
 
   app.openapi(createNoteRoute, async (c) => {
@@ -173,13 +233,13 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   app.openapi(getNoteRoute, async (c) => {
     const { id } = c.req.valid('param')
     const note = await dal.get(c.get('userId'), id)
-    return note === null ? c.json({ error: 'not_found' }, 404) : c.json(note, 200)
+    return note === null ? apiError(c, 404, 'not_found', 'no such note') : c.json(note, 200)
   })
 
   app.openapi(deleteNoteRoute, async (c) => {
     const { id } = c.req.valid('param')
     const removed = await dal.remove(c.get('userId'), id)
-    return removed ? c.body(null, 204) : c.json({ error: 'not_found' }, 404)
+    return removed ? c.body(null, 204) : apiError(c, 404, 'not_found', 'no such note')
   })
 
   // SSE demo: streams three ticks then closes. Not part of the OpenAPI surface

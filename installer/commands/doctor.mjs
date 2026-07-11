@@ -1,15 +1,21 @@
 // `doctor` — integrity + wiring check for an installed harness. Read-only;
-// CI-friendly exit codes (0 clean, 1 broken, 2 drift/attention).
-import { existsSync, readFileSync } from 'node:fs'
+// CI-friendly exit codes (0 clean, 1 broken, 2 drift/attention). Seeded-surface
+// divergence is reported as info only — project-owned files are EXPECTED to
+// evolve; the advisory exists so template improvements are discoverable.
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { planTree } from '../lib/copy.mjs'
+import { RETIRED_MODULES } from '../lib/layout.mjs'
 import { readManifest, sha256 } from '../lib/manifest.mjs'
+import { readTemplateMigrations, requiredConfigSteps } from '../lib/migrations.mjs'
 
 export async function doctor(opts) {
   const targetDir = opts.dir
   const manifest = readManifest(targetDir)
   const errors = []
   const warnings = []
+  const infos = []
 
   if (!manifest) {
     console.error('doctor: no .harness/manifest.json — run `init` first')
@@ -18,6 +24,16 @@ export async function doctor(opts) {
 
   const major = Number(process.versions.node.split('.')[0])
   if (major < 22) errors.push(`node ${process.versions.node} < required 22`)
+
+  // Manifests written by pre-0.1.3 Windows installs keyed files with
+  // backslashes, which broke every prefix-based mode rule. Hard-error as a
+  // migration tripwire — `update` rewrites the keys to POSIX.
+  const backslashKeys = Object.keys(manifest.files ?? {}).filter((k) => k.includes('\\'))
+  if (backslashKeys.length > 0) {
+    errors.push(
+      `manifest has ${backslashKeys.length} Windows-separator file key(s) (e.g. ${backslashKeys[0]}) — run \`update\` to migrate them to POSIX paths`,
+    )
+  }
 
   for (const [ip, meta] of Object.entries(manifest.files ?? {})) {
     const dest = join(targetDir, ip)
@@ -70,6 +86,19 @@ export async function doctor(opts) {
     const cfg = await import(pathToFileURL(join(targetDir, 'tools/harness.config.mjs')).href)
     if (!Array.isArray(cfg.VALIDATE_STEPS) || cfg.VALIDATE_STEPS.length === 0) errors.push('tools/harness.config.mjs exports no VALIDATE_STEPS')
     if (!Array.isArray(cfg.STOP_HOOK_STEPS) || cfg.STOP_HOOK_STEPS.length === 0) errors.push('tools/harness.config.mjs exports no STOP_HOOK_STEPS')
+    // Every default gate introduced at or before this install's version must
+    // be present locally — otherwise CI (--min-floor) runs steps the Stop hook
+    // never does, and the FLOOR ↔ VALIDATE_STEPS lockstep is silently broken.
+    if (Array.isArray(cfg.VALIDATE_STEPS)) {
+      const present = new Set(cfg.VALIDATE_STEPS.map(([name]) => name))
+      for (const step of requiredConfigSteps(readTemplateMigrations(), manifest.harnessVersion)) {
+        if (!present.has(step.name)) {
+          errors.push(
+            `tools/harness.config.mjs is missing the '${step.name}' gate required since v${step.since ?? manifest.harnessVersion} — add ['${step.name}', '${step.cmd}'] to VALIDATE_STEPS (or re-run \`update\`)`,
+          )
+        }
+      }
+    }
   } catch (err) {
     errors.push(`tools/harness.config.mjs failed to import: ${err.message}`)
   }
@@ -92,8 +121,71 @@ export async function doctor(opts) {
     }
   }
 
+  // Parked upgrades awaiting a human merge: everything under .harness/pending/
+  // is a deferred decision (update/enable kept local work and parked the
+  // incoming version). Keep naming them until reconciled — parked forever is
+  // how upgrades silently stop reaching a project.
+  const pendingRoot = join(targetDir, '.harness', 'pending')
+  if (existsSync(pendingRoot)) {
+    const parked = []
+    ;(function walk(d) {
+      for (const entry of readdirSync(d)) {
+        const p = join(d, entry)
+        if (statSync(p).isDirectory()) walk(p)
+        else parked.push(p.slice(pendingRoot.length + 1).split('\\').join('/'))
+      }
+    })(pendingRoot)
+    for (const rel of parked) {
+      warnings.push(
+        `parked upgrade awaiting merge: .harness/pending/${rel} — reconcile it into ${rel}, then delete the parked copy`,
+      )
+    }
+  }
+
+  // Commit-time layer: lefthook must actually be INSTALLED into .git/hooks —
+  // a committed lefthook.yml with uninstalled hooks is a silently dormant gate.
+  if (existsSync(join(targetDir, '.git')) && existsSync(join(targetDir, 'lefthook.yml'))) {
+    const preCommit = join(targetDir, '.git', 'hooks', 'pre-commit')
+    const installed = existsSync(preCommit) && readFileSync(preCommit, 'utf8').includes('lefthook')
+    if (!installed) {
+      warnings.push(
+        'lefthook hooks are not installed into .git/hooks — commit-time gates are dormant; run `pnpm install` (prepare) or `pnpm exec lefthook install`',
+      )
+    }
+  }
+
+  // Seeded-surface advisory: which project-owned files diverge from the
+  // CURRENT template (info-level; never flips the exit code). A newer template
+  // improving a seeded exemplar is invisible otherwise — `update` deliberately
+  // never touches these; `update --refresh-seeded <path>` is the pull channel.
+  try {
+    const answers = manifest.answers
+    const plan = [...planTree('base', answers), ...planTree('stack', answers)]
+    for (const m of manifest.modules ?? []) {
+      if (RETIRED_MODULES.has(m)) continue
+      plan.push(...planTree(`modules/${m}`, answers))
+    }
+    const diverged = []
+    for (const entry of plan) {
+      const meta = manifest.files?.[entry.installPath]
+      if (meta?.mode !== 'seeded') continue
+      const dest = join(targetDir, entry.installPath)
+      if (!existsSync(dest)) continue // missing files are reported above
+      const incoming = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content)
+      if (!readFileSync(dest).equals(incoming)) diverged.push(entry.installPath)
+    }
+    if (diverged.length > 0) {
+      infos.push(
+        `${diverged.length} seeded (project-owned) file(s) differ from the current template — expected; pull a template improvement deliberately with \`update --refresh-seeded <path>\`:\n${diverged.map((p) => `          ${p}`).join('\n')}`,
+      )
+    }
+  } catch {
+    // template tree not resolvable in this invocation context — advisory only
+  }
+
   for (const e of errors) console.error(`  ERROR ${e}`)
   for (const w of warnings) console.warn(`  warn  ${w}`)
+  for (const i of infos) console.log(`  info  ${i}`)
   if (errors.length === 0 && warnings.length === 0) console.log('doctor: CLEAN')
   return errors.length ? 1 : warnings.length ? 2 : 0
 }

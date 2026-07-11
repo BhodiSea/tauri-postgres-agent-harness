@@ -13,6 +13,17 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['apps/*/src/**', 'packages/*/src/**'],
+      // Coverage floor, enforced wherever `--coverage` runs (the Stop hook's unit
+      // step and CI): calibrated ~5-10 points under the fresh-scaffold measurement
+      // so shipped code starts green while a feature landing without tests turns
+      // the gate red. Raising floors as real coverage grows is a reviewed human
+      // decision — this config is write-guard-protected.
+      thresholds: {
+        statements: 70,
+        branches: 60,
+        functions: 65,
+        lines: 70,
+      },
     },
     projects: [
       {
@@ -31,6 +42,9 @@ export default defineConfig({
         test: {
           name: 'unit-dom',
           environment: 'jsdom',
+          // Determinism: RTL cleanup after every test + a pending-forever fetch
+          // stub (unit tests never touch the network) — see the setup file.
+          setupFiles: ['apps/desktop/src/test-setup.ts'],
           include: [
             'apps/desktop/src/**/*.test.{ts,tsx}',
             'apps/desktop/tests/unit/**/*.test.{ts,tsx}',

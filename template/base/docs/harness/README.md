@@ -30,18 +30,19 @@ gate could enforce deterministically.
 ## One gate config, three enforcement layers
 
 `tools/harness.config.mjs` is the single source of truth for what "done" means:
-`VALIDATE_STEPS` (the 16-step chain `pnpm validate` runs) and `STOP_HOOK_STEPS` (what the
+`VALIDATE_STEPS` (the 22-step chain `pnpm validate` runs) and `STOP_HOOK_STEPS` (what the
 Stop hook runs — validate plus the RLS and unit suites). Three enforcement layers consume
 it and can therefore never disagree:
 
 1. **`pnpm validate`** → `node tools/validate.mjs` — the developer/agent fast path.
-2. **The Stop hook** → runs `STOP_HOOK_STEPS` **directly** (`node tools/validate.mjs`,
-   `node tests/rls/run-rls.mjs`, `pnpm exec vitest run --silent`) — never through a
+2. **The Stop hook** → runs `STOP_HOOK_STEPS` **directly** (`node tools/validate.mjs
+   --report-all` — every red at once, `node tests/rls/run-rls.mjs`, `pnpm exec vitest run
+   --coverage --silent`) — never through a
    package.json script name, because script indirection would let an agent redefine
    `validate` to `true` in package.json (an auto-accepted, unguarded edit) and pass a
    hollow gate. **The Stop gate defines done** locally.
 3. **CI** → re-runs `node tools/validate.mjs --min-floor`, which merges in a hardcoded
-   copy of all 16 canonical steps. **The CI floor** means editing the config can ADD
+   copy of all 22 canonical steps. **The CI floor** means editing the config can ADD
    steps but can never weaken the non-negotiable ones on a PR.
 
 The gate config is harness-protected and mirrored in CI: `harness.config.mjs`,

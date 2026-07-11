@@ -5,6 +5,29 @@
 - Feature dir: `apps/desktop/src/features/<feature>/` — components + colocated
   `*.test.tsx` (the `unit-dom` vitest project, jsdom). Compose classes with Tailwind
   CSS 4 utilities and `cn()` from `src/lib/utils`.
+- **Styling is tokens-only** (the `styleguide` gate enforces it): the `@theme` in
+  `src/styles.css` + `tools/styleguide.manifest.json` are the ENTIRE design
+  vocabulary — colors `canvas/surface/edge/ink/ink-muted/accent`, text `xs..2xl`,
+  radius `sm/md/lg`, shadow `sm/md`, fonts `sans/mono`, weights
+  `normal/medium/semibold/bold`. The default Tailwind palette and scales are
+  ERASED: `text-red-500` or `text-7xl` compiles to NOTHING (a silent no-op). Raw
+  hex, raw `px`, and inline `style={}` are gate-red; extending the system means
+  editing styles.css AND the manifest together in one reviewed diff. Accent
+  utilities are budgeted (10 uses) — the single-accent design is a feature.
+- Unit tests never touch the network: `src/test-setup.ts` stubs `fetch` with a
+  pending-forever promise and runs RTL cleanup after every test. Drive
+  loading/empty/error states by stubbing at your hook/fetcher seam per test;
+  real HTTP outcomes belong to e2e (`page.route`).
+- **Every screen is REGISTERED** in `apps/desktop/src/routes.ts` (`ROUTES`):
+  `{ id, label, path, features: [...], states: { loading, empty, error } }` —
+  the states are `data-testid`s your UI must render for each state
+  (`NotesPanel.tsx` + `useListQuery.ts` are the worked pattern;
+  `e2e/states.spec.ts` drives every declared state and runs axe on it). A
+  `src/features/<dir>` not referenced by any ROUTES entry (or allowlisted with a
+  reason in `tools/route-allowlist.json` — human decision) fails the
+  `route-manifest` gate; the `e2e` gate then runs the whole browser lane.
+  Every screen needs real loading/empty/error surfaces — an error state must
+  contain its retry affordance.
 - Data access: typed `fetch` against the API using the Zod contracts from
   `@app/schema` — parse every response body (see
   `features/connection/ConnectionStatus.tsx`). The API origin is

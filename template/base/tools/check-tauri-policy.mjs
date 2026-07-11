@@ -45,6 +45,23 @@ if (typeof csp !== 'string' || csp.length === 0) {
   if (!/default-src[^;]*'self'/.test(csp)) errs.push("CSP must include default-src 'self'")
   if (!/connect-src/.test(csp)) errs.push('CSP must declare connect-src (pin the API origin)')
   if (/unsafe-eval/.test(csp)) errs.push("CSP must not allow 'unsafe-eval'")
+  // Substring-shallow checks pass wildcard/plain-http origins — inspect the
+  // actual source tokens: no bare *, no *.tld wildcards, and http:// only on
+  // loopback (the committed dev default); production API origins are https.
+  for (const directive of csp.split(';')) {
+    const [name, ...sources] = directive.trim().split(/\s+/)
+    if (name === undefined || name === '') continue
+    for (const src of sources) {
+      if (src === '*' || /^\*\./.test(src) || /^https?:\/\/\*/.test(src)) {
+        errs.push(`CSP ${name} allows wildcard source "${src}" — pin exact origins`)
+      }
+      if (/^http:\/\//.test(src) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(src)) {
+        errs.push(
+          `CSP ${name} allows plaintext-HTTP origin "${src}" — non-loopback API origins must be https`,
+        )
+      }
+    }
+  }
 }
 // 3. dangerous* keys, recursively
 ;(function scan(obj, path) {
@@ -54,6 +71,17 @@ if (typeof csp !== 'string' || csp.length === 0) {
     scan(v, `${path}${k}.`)
   }
 })(conf, '')
+
+// 3b. zero-flash launch: every window declares a backgroundColor so the OS
+// paints the canvas color before the webview loads — without it, launch is a
+// white flash on the dark theme. Keep in lockstep with --color-canvas.
+for (const [i, win] of (conf?.app?.windows ?? []).entries()) {
+  if (typeof win?.backgroundColor !== 'string' || win.backgroundColor.length === 0) {
+    errs.push(
+      `app.windows[${i}] (label ${JSON.stringify(win?.label ?? '?')}): missing backgroundColor — set it to the --color-canvas hex so launch never flashes white`,
+    )
+  }
+}
 
 // 4. identifier lock
 if (existsSync(LOCK)) {

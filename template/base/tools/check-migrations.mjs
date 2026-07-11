@@ -9,10 +9,10 @@
 //   3. destructive DDL (DROP TABLE/COLUMN, TRUNCATE) requires `-- adr: docs/adr/<file>`
 //      pointing at an existing ADR
 // SOURCE: docs/harness/README.md (migration discipline) [corpus: drizzle/migrations-append-only]
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { failures, ok, skipOrFail } from './lib/gate.mjs'
+import { fail, failures, inCI, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'migrations'
 const DIR = 'packages/schema/drizzle'
@@ -20,21 +20,35 @@ const DIR = 'packages/schema/drizzle'
 if (!existsSync(DIR)) skipOrFail(GATE, `${DIR} not found (no migrations surface yet)`)
 const errs = []
 
-// 1. append-only
+// 1. append-only — a git failure must never silently VACATE this check: an
+// unresolvable base ref in CI (shallow clone) previously returned [] and the
+// append-only rule passed without ever diffing. execFileSync (no shell), and
+// the failure mode is explicit per environment.
 function changedAgainst(ref) {
+  let out
   try {
-    const out = execSync(`git diff --name-status ${ref} -- "${DIR}/*.sql"`, {
+    out = execFileSync('git', ['diff', '--name-status', ref, '--', `${DIR}/*.sql`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return out
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => l.split('\t'))
-      .filter(([status]) => status.startsWith('M') || status.startsWith('D'))
-  } catch {
+  } catch (e) {
+    const reason = (e.stderr?.toString() ?? e.message).trim().split('\n')[0]
+    if (inCI()) {
+      fail(
+        GATE,
+        `git diff against ${ref} failed (${reason}) — the append-only check cannot run. In CI this usually means a shallow checkout: set fetch-depth: 0.`,
+      )
+    }
+    console.log(
+      `${GATE}: NOTE — append-only diff skipped locally (${reason}); content rules still run`,
+    )
     return []
   }
+  return out
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.split('\t'))
+    .filter(([status]) => status.startsWith('M') || status.startsWith('D'))
 }
 const base = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : 'HEAD'
 for (const [status, file] of changedAgainst(base)) {
@@ -53,7 +67,9 @@ for (const f of readdirSync(DIR)
     .filter((l) => !l.trim().startsWith('--'))
     .join('\n')
   if (
-    /\b(INSERT\s+INTO|UPDATE\s+[a-z"]|DELETE\s+FROM)\b/i.test(code) &&
+    /\b(INSERT\s+INTO|UPDATE\s+[a-z"]|DELETE\s+FROM|MERGE\s+INTO|COPY\s+[a-z"][^;]*\bFROM\b)\b/i.test(
+      code,
+    ) &&
     !/--\s*harness-allow-dml:/.test(text)
   ) {
     errs.push(

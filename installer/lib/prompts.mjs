@@ -17,10 +17,32 @@ export async function collectAnswers({ yes, sets, ctx }) {
       continue
     }
     rl ??= readline.createInterface({ input: process.stdin, output: process.stdout })
-    const reply = await rl.question(`${spec.prompt} [${def}]: `)
-    answers[name] = reply.trim() === '' ? def : reply.trim()
+    // Re-prompt on invalid input instead of baking a bad value into committed
+    // identity/CSP surfaces.
+    for (;;) {
+      const reply = await rl.question(`${spec.prompt} [${def}]: `)
+      const value = reply.trim() === '' ? def : reply.trim()
+      const problem = spec.validate?.(value) ?? null
+      if (problem === null) {
+        answers[name] = value
+        break
+      }
+      console.error(`  ${name} ${problem}`)
+    }
   }
   rl?.close()
+
+  // Non-interactive values (--set, --yes defaults, --force carry-over) get the
+  // same validation — fail loud before a single file is written.
+  const problems = Object.entries(PLACEHOLDERS)
+    .map(([name, spec]) => {
+      const problem = spec.validate?.(String(answers[name] ?? '')) ?? null
+      return problem === null ? null : `${name} ${problem} (got: ${JSON.stringify(answers[name])})`
+    })
+    .filter(Boolean)
+  if (problems.length > 0) {
+    throw new Error(`invalid placeholder value(s):\n  ${problems.join('\n  ')}`)
+  }
   return answers
 }
 
@@ -29,7 +51,13 @@ export function parseSets(setArgs) {
   for (const s of setArgs ?? []) {
     const eq = s.indexOf('=')
     if (eq === -1) throw new Error(`--set expects VAR=value, got: ${s}`)
-    sets[s.slice(0, eq)] = s.slice(eq + 1)
+    const name = s.slice(0, eq)
+    // An unknown key would render nothing and leave {{TOKENS}} in the scaffold
+    // — reject it here instead of shipping placeholder residue.
+    if (!(name in PLACEHOLDERS)) {
+      throw new Error(`--set ${name}: unknown placeholder (known: ${Object.keys(PLACEHOLDERS).join(' ')})`)
+    }
+    sets[name] = s.slice(eq + 1)
   }
   return sets
 }

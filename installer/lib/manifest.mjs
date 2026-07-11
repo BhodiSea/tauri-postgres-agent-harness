@@ -22,10 +22,20 @@ export function manifestPath(targetDir) {
 }
 
 export function readManifest(targetDir) {
+  let raw
   try {
-    return JSON.parse(readFileSync(manifestPath(targetDir), 'utf8'))
+    raw = readFileSync(manifestPath(targetDir), 'utf8')
   } catch {
-    return null
+    return null // genuinely absent — "run `init` first" advice is correct
+  }
+  try {
+    return JSON.parse(raw)
+  } catch {
+    // A CORRUPT manifest must never be advised into a re-init: init would
+    // rebuild ownership records from scratch and clobber tuned files.
+    throw new Error(
+      '.harness/manifest.json exists but is not valid JSON — restore it from git history (do NOT re-run `init`)',
+    )
   }
 }
 

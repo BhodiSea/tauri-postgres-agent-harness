@@ -1,10 +1,19 @@
 // Template tree walker: resolves storage names to installed paths, strips
 // .tmpl suffixes, applies top-level dotless renames, and renders placeholders.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RENAMES } from './layout.mjs'
 import { render } from './placeholders.mjs'
+
+// Manifest keys, mode prefixes (SEEDED_PREFIXES 'apps/'), RETROFIT_ADDITIVE
+// lookups, and doctor's '.claude/hooks/' classifier all assume POSIX
+// separators. path.join yields backslashes on Windows, which silently
+// reclassified every stack file as 'owned' there and made manifests
+// non-portable across OSes — normalize once, at the only emit point.
+export function toPosix(p) {
+  return p.split(sep).join('/')
+}
 
 export function templateRoot() {
   // fileURLToPath, NOT URL.pathname: on Windows the latter yields /D:/… which
@@ -42,11 +51,11 @@ export function planTree(tree, answers) {
         walk(abs, join(relInstall, name))
         continue
       }
-      const installPath = join(relInstall, name.replace(/\.tmpl$/, ''))
+      const installPath = toPosix(join(relInstall, name.replace(/\.tmpl$/, '')))
       const content = BINARY_EXT.test(name)
         ? readFileSync(abs) // Buffer, verbatim — no placeholder rendering
         : render(readFileSync(abs, 'utf8'), answers)
-      out.push({ storagePath: join(tree, relInstall, entry), installPath, content })
+      out.push({ storagePath: toPosix(join(tree, relInstall, entry)), installPath, content })
     }
   }
 }

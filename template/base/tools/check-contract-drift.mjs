@@ -9,10 +9,10 @@
 //      topologies (workspace deps, project refs, knip map) desynchronize into
 //      confusing type errors otherwise. Pure static check, no install needed.
 // SOURCE: docs/harness/README.md (contracts gate) [corpus: harness/doctrine]
-import { execSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { failures, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
+import { parseJsonc } from './lib/jsonc.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'contracts'
@@ -24,47 +24,6 @@ const errs = []
 // tsconfig reference paths are POSIX; join()/relative() yield backslashes on
 // Windows — normalize every compared path or the sync check false-fails there.
 const posix = (p) => p.split(sep).join('/')
-
-// tsconfig files are JSONC (TypeScript allows // and /* */ comments and trailing
-// commas). Strip them before JSON.parse. String-aware so a `//` inside a string
-// value (e.g. a path) is preserved.
-function parseJsonc(text) {
-  let out = ''
-  let inStr = false
-  let strCh = ''
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]
-    const next = text[i + 1]
-    if (inStr) {
-      out += c
-      if (c === '\\') {
-        out += next ?? ''
-        i++
-      } else if (c === strCh) inStr = false
-      continue
-    }
-    if (c === '"' || c === "'") {
-      inStr = true
-      strCh = c
-      out += c
-      continue
-    }
-    if (c === '/' && next === '/') {
-      while (i < text.length && text[i] !== '\n') i++
-      out += '\n'
-      continue
-    }
-    if (c === '/' && next === '*') {
-      i += 2
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
-      i++
-      continue
-    }
-    out += c
-  }
-  // drop trailing commas before } or ]
-  return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
-}
 
 // ---- 2. tsconfig references sync (run first: static, always possible) ----
 const pkgDirs = []
@@ -121,11 +80,7 @@ if (existsSync(EMIT)) {
   try {
     // --silent: under CI=true pnpm prints its auto-install/verify banner to
     // STDOUT, which would pollute the captured JSON and false-fail the diff.
-    const regenerated = execSync(`pnpm --silent exec tsx ${EMIT} --stdout`, {
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const regenerated = runCmd(`pnpm --silent exec tsx ${EMIT} --stdout`)
     const committed = existsSync(COMMITTED) ? readFileSync(COMMITTED, 'utf8') : ''
     if (regenerated.trim() !== committed.trim()) {
       errs.push(

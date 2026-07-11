@@ -5,10 +5,11 @@
 // the module render lane points it at a fully-rendered scaffold.
 //   usage: node scripts/check-syntax.mjs [rendered-dir]
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { walkFiles } from '../installer/lib/fs-walk.mjs'
 
 // fileURLToPath, not URL.pathname (which yields /D:/… on Windows)
 const ARG_DIR = process.argv[2] ? resolve(process.argv[2]) : null
@@ -19,13 +20,9 @@ let jsCount = 0
 let jsonCount = 0
 
 function walk(dir) {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === '.git') continue
-    const p = join(dir, entry)
-    if (statSync(p).isDirectory()) {
-      walk(p)
-      continue
-    }
+  for (const rel of walkFiles(dir, { excludeDirs: ['node_modules', '.git'] })) {
+    const entry = rel.split('/').at(-1)
+    const p = join(dir, rel)
     if (/\.(mjs|js)(\.tmpl)?$/.test(entry)) {
       let target = p
       if (entry.endsWith('.tmpl')) {
@@ -51,6 +48,12 @@ function walk(dir) {
 }
 
 if (ARG_DIR) {
+  // A gate that scans nothing is a false green — a missing scan target must
+  // fail loudly (walkFiles yields [] for an unreadable root).
+  if (!existsSync(ROOT)) {
+    console.error(`SYNTAX: FAIL — directory not found: ${ROOT}`)
+    process.exit(1)
+  }
   walk(ROOT)
 } else {
   for (const dir of ['installer', 'scripts', 'template', 'tests']) {

@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import process from 'node:process'
-import { fail, ok, skipOrFail } from './lib/gate.mjs'
+import { fail, MAX_BUFFER, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'e2e'
 const TIMEOUT_MS = 10 * 60 * 1000
@@ -49,7 +49,7 @@ const res = spawnSync('pnpm exec playwright test', {
   encoding: 'utf8',
   timeout: TIMEOUT_MS,
   killSignal: 'SIGKILL',
-  maxBuffer: 64 * 1024 * 1024,
+  maxBuffer: MAX_BUFFER,
   env: process.env,
 })
 

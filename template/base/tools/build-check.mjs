@@ -7,11 +7,10 @@
 // JS. The budget is the deterministic performance floor: a 15 MB unsplit bundle is
 // a shipped regression whether or not anyone profiles it.
 // SOURCE: docs/harness/README.md (build gate; desktop-bundle purity) [corpus: harness/doctrine]
-import { execSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
-import { fail, failures, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { walkFiles } from './lib/fs-walk.mjs'
+import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'build'
@@ -28,16 +27,12 @@ if (!existsSync('node_modules')) skipOrFail(GATE, 'node_modules missing — run 
 const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 try {
-  execSync(`pnpm --filter desktop exec vite build`, {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  runCmd(`pnpm --filter desktop exec vite build`)
 } catch (e) {
   fail(GATE, `vite build failed:\n${(e.stderr?.toString() ?? e.message).slice(-2000)}`)
 }
 
-const dist = join(APP, 'dist')
+const dist = `${APP}/dist`
 if (!existsSync(dist)) fail(GATE, `vite build produced no ${dist}/`)
 
 // Forbidden markers in the shipped client bundle. postgresql:// is the
@@ -54,22 +49,19 @@ const FORBIDDEN = [
 
 const hits = []
 const files = [] // { path, gzipBytes, isJs }
-;(function walk(dir) {
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    if (statSync(p).isDirectory()) walk(p)
-    else {
-      const raw = readFileSync(p)
-      files.push({ path: p, gzipBytes: gzipSync(raw).length, isJs: /\.js$/.test(entry) })
-      if (/\.(js|css|html)$/.test(entry)) {
-        const text = raw.toString('utf8')
-        for (const [marker, why] of FORBIDDEN) {
-          if (text.includes(marker)) hits.push(`${p}: contains "${marker}" — ${why}`)
-        }
-      }
+// dist is walked EXHAUSTIVELY (no exclude set): purity markers and byte budgets
+// must see every emitted file.
+for (const rel of walkFiles(dist)) {
+  const p = `${dist}/${rel}`
+  const raw = readFileSync(p)
+  files.push({ path: p, gzipBytes: gzipSync(raw).length, isJs: /\.js$/.test(rel) })
+  if (/\.(js|css|html)$/.test(rel)) {
+    const text = raw.toString('utf8')
+    for (const [marker, why] of FORBIDDEN) {
+      if (text.includes(marker)) hits.push(`${p}: contains "${marker}" — ${why}`)
     }
   }
-})(dist)
+}
 
 // Byte budgets: gzip (what the WebView actually parses off disk is closer to
 // raw, but gzip normalizes minifier noise and matches how budgets are quoted).

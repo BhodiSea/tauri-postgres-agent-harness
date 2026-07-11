@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
+import { toPosix } from './fs-walk.mjs'
 
 // Decision-site keyword groups for THIS stack. Each group's key must be covered by
 // at least one corpus entry's `groups` tag in tools/mcp/corpus/index.json — the gate
@@ -83,7 +84,7 @@ export const GATE_FILE_GLOBS = [
 // OS-native absolute path from tool_input — normalize to POSIX at this
 // boundary so the `/`-based excludes hold on Windows (`apps\desktop\...`).
 export function hookScansFile(file) {
-  const posix = file.replaceAll('\\', '/')
+  const posix = toPosix(file)
   return (
     SCANNABLE_FILE.test(posix) &&
     !SCAN_EXCLUDES.some((re) => re.test(posix)) &&

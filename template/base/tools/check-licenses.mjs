@@ -5,9 +5,8 @@
 // {"exceptions": [{"package", "reason"}]}). Rust crates are covered by cargo-deny in
 // the CI rust lane.
 // SOURCE: docs/harness/README.md (license gate) [corpus: harness/doctrine]
-import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { fail, failures, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'licenses'
@@ -74,11 +73,7 @@ if (existsSync(EXCEPTIONS_FILE)) {
 
 let parsed
 try {
-  const out = execSync('pnpm licenses list --prod --json', {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  const out = runCmd('pnpm licenses list --prod --json')
   parsed = JSON.parse(out)
 } catch (e) {
   skipOrFail(GATE, `pnpm licenses failed (${e.message?.slice(0, 120)})`)

@@ -2,10 +2,11 @@
 // CI-friendly exit codes (0 clean, 1 broken, 2 drift/attention). Seeded-surface
 // divergence is reported as info only — project-owned files are EXPECTED to
 // evolve; the advisory exists so template improvements are discoverable.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { planTree } from '../lib/copy.mjs'
+import { renderEntry, walkTemplate } from '../lib/copy.mjs'
+import { walkFiles } from '../lib/fs-walk.mjs'
 import { RETIRED_MODULES } from '../lib/layout.mjs'
 import { readManifest, sha256 } from '../lib/manifest.mjs'
 import { readTemplateMigrations, requiredConfigSteps } from '../lib/migrations.mjs'
@@ -126,20 +127,10 @@ export async function doctor(opts) {
   // incoming version). Keep naming them until reconciled — parked forever is
   // how upgrades silently stop reaching a project.
   const pendingRoot = join(targetDir, '.harness', 'pending')
-  if (existsSync(pendingRoot)) {
-    const parked = []
-    ;(function walk(d) {
-      for (const entry of readdirSync(d)) {
-        const p = join(d, entry)
-        if (statSync(p).isDirectory()) walk(p)
-        else parked.push(p.slice(pendingRoot.length + 1).split('\\').join('/'))
-      }
-    })(pendingRoot)
-    for (const rel of parked) {
-      warnings.push(
-        `parked upgrade awaiting merge: .harness/pending/${rel} — reconcile it into ${rel}, then delete the parked copy`,
-      )
-    }
+  for (const rel of walkFiles(pendingRoot)) {
+    warnings.push(
+      `parked upgrade awaiting merge: .harness/pending/${rel} — reconcile it into ${rel}, then delete the parked copy`,
+    )
   }
 
   // Commit-time layer: lefthook must actually be INSTALLED into .git/hooks —
@@ -160,18 +151,20 @@ export async function doctor(opts) {
   // never touches these; `update --refresh-seeded <path>` is the pull channel.
   try {
     const answers = manifest.answers
-    const plan = [...planTree('base', answers), ...planTree('stack', answers)]
+    const entries = [...walkTemplate('base'), ...walkTemplate('stack')]
     for (const m of manifest.modules ?? []) {
       if (RETIRED_MODULES.has(m)) continue
-      plan.push(...planTree(`modules/${m}`, answers))
+      entries.push(...walkTemplate(`modules/${m}`))
     }
     const diverged = []
-    for (const entry of plan) {
+    for (const entry of entries) {
       const meta = manifest.files?.[entry.installPath]
       if (meta?.mode !== 'seeded') continue
       const dest = join(targetDir, entry.installPath)
       if (!existsSync(dest)) continue // missing files are reported above
-      const incoming = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content)
+      // Rendered lazily: only seeded entries pay the render cost.
+      const content = renderEntry(entry, answers)
+      const incoming = Buffer.isBuffer(content) ? content : Buffer.from(content)
       if (!readFileSync(dest).equals(incoming)) diverged.push(entry.installPath)
     }
     if (diverged.length > 0) {

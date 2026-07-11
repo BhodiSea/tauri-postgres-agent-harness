@@ -6,13 +6,9 @@
 // The lock file itself is write-guard-protected: updating it is a deliberate act.
 // SOURCE: docs/harness/README.md (prompt versioning) [corpus: llamacpp/json-schema]
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, ok } from './lib/gate.mjs'
-
-// Lock keys are POSIX paths; join() yields backslashes on Windows — normalize
-// discovered paths or every prompt reads as "not in the lock" there.
-const posix = (p) => p.split(sep).join('/')
 
 const GATE = 'prompts'
 const LOCK = 'tools/prompts.lock.json'
@@ -26,22 +22,14 @@ if (existsSync(LOCK)) {
   }
 }
 
-// Discover prompt files: packages/*/prompts/** and apps/*/prompts/**
-function walk(dir) {
-  if (!existsSync(dir)) return []
-  const out = []
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else out.push(posix(p))
-  }
-  return out
-}
+// Discover prompt files: packages/*/prompts/** and apps/*/prompts/**. Lock keys
+// are POSIX paths by contract — the shared walker's output already is.
 const promptFiles = []
 for (const scope of ['packages', 'apps']) {
   if (!existsSync(scope)) continue
   for (const pkg of readdirSync(scope)) {
-    promptFiles.push(...walk(join(scope, pkg, 'prompts')))
+    const root = `${scope}/${pkg}/prompts`
+    promptFiles.push(...walkFiles(root).map((rel) => `${root}/${rel}`))
   }
 }
 

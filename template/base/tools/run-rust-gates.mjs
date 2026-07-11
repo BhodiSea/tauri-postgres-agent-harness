@@ -7,9 +7,9 @@
 //           unchanged Rust → instant OK locally. CI ignores the stamp (fail closed,
 //           full run), and clippy -D warnings runs in the CI rust lane, not here.
 // SOURCE: docs/harness/README.md (rust gates; stamp) [corpus: harness/doctrine]
-import { execSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { fail, ok, skipOrFail, stampGate } from './lib/gate.mjs'
+import { fail, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const mode = process.argv[2]
@@ -23,17 +23,9 @@ if (!existsSync(MANIFEST)) skipOrFail(GATE, `${MANIFEST} not found (no Rust surf
 const cargoPresent = spawnSync('cargo', ['--version'], { stdio: 'ignore' }).status === 0
 if (!cargoPresent) skipOrFail(GATE, 'cargo not on PATH (install rustup to run Rust gates locally)')
 
-function run(cmd) {
-  execSync(cmd, {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-}
-
 if (mode === 'fmt') {
   try {
-    run(`cargo fmt --manifest-path ${MANIFEST} -- --check`)
+    runCmd(`cargo fmt --manifest-path ${MANIFEST} -- --check`)
   } catch (e) {
     fail(
       GATE,
@@ -52,7 +44,7 @@ if (mode === 'fmt') {
 const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 try {
-  run(`cargo check --locked --manifest-path ${MANIFEST}`)
+  runCmd(`cargo check --locked --manifest-path ${MANIFEST}`)
 } catch (e) {
   fail(GATE, `cargo check failed:\n${(e.stderr?.toString() ?? e.message).slice(-2500)}`)
 }
@@ -63,7 +55,7 @@ const libSrc = existsSync(`${CRATE}/src/lib.rs`) ? readFileSync(`${CRATE}/src/li
 if (/fn\s+export_bindings/.test(libSrc)) {
   let exported = true
   try {
-    run(`cargo test --locked --manifest-path ${MANIFEST} export_bindings`)
+    runCmd(`cargo test --locked --manifest-path ${MANIFEST} export_bindings`)
   } catch (e) {
     const errText = e.stderr?.toString() ?? e.message
     // Windows loader quirk, not a bindings problem: the test exe links the full

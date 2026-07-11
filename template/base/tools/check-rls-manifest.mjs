@@ -15,6 +15,7 @@
 // SOURCE: docs/harness/README.md (schema-rls gate) [corpus: postgres/rls-force]
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'schema-rls'
@@ -27,16 +28,12 @@ if (!existsSync(SCHEMA_DIR)) skipOrFail(GATE, `${SCHEMA_DIR} not found (no schem
 
 // 1. Declared tables from Drizzle schema source: pgTable('name', ...)
 const declaredTables = new Set()
-;(function walk(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, entry.name)
-    if (entry.isDirectory()) walk(p)
-    else if (/\.ts$/.test(entry.name) && !/\.(test|spec)\.ts$/.test(entry.name)) {
-      const src = readFileSync(p, 'utf8')
-      for (const m of src.matchAll(/pgTable\(\s*['"]([a-z0-9_]+)['"]/g)) declaredTables.add(m[1])
-    }
-  }
-})(SCHEMA_DIR)
+for (const rel of walkFiles(SCHEMA_DIR, {
+  filter: (p) => /\.ts$/.test(p) && !/\.(test|spec)\.ts$/.test(p),
+})) {
+  const src = readFileSync(`${SCHEMA_DIR}/${rel}`, 'utf8')
+  for (const m of src.matchAll(/pgTable\(\s*['"]([a-z0-9_]+)['"]/g)) declaredTables.add(m[1])
+}
 
 if (declaredTables.size === 0) skipOrFail(GATE, 'no pgTable declarations found yet')
 

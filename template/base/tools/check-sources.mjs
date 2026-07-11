@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import process from 'node:process'
-import { fail, ok } from './lib/gate.mjs'
+import { fail, MAX_BUFFER, ok } from './lib/gate.mjs'
 import {
   CORPUS_REF,
   DECISION_GROUPS,
@@ -40,12 +40,12 @@ function trackedFiles(globs) {
   // and any pattern with a shallow match collapses to just those files — the
   // deep tree silently drops out of the scan (found when Windows cmd, which
   // does not glob, scanned everything and flagged sites POSIX runs missed).
-  // 64 MB maxBuffer: the tree-wide sweep runs ls-files with NO pathspec, and
-  // node's 1 MB default ENOBUFS-crashes on large monorepos (or anything that
+  // MAX_BUFFER: the tree-wide sweep runs ls-files with NO pathspec, and node's
+  // 1 MB default ENOBUFS-crashes on large monorepos (or anything that
   // force-tracked node_modules) instead of failing with a named gate error.
   const out = execFileSync('git', ['ls-files', ...globs], {
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: MAX_BUFFER,
   })
   return out
     .split('\n')

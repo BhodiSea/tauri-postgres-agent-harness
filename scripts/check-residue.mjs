@@ -4,8 +4,9 @@
 // consumer — the installer lifecycle tests, the selftest bootstrap lane, and
 // the module render lane — so the residue definition can never fork.
 //   usage: node scripts/check-residue.mjs <scaffold-dir>
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { walkFiles } from '../installer/lib/fs-walk.mjs'
 
 const root = process.argv[2]
 if (!root) {
@@ -13,29 +14,27 @@ if (!root) {
   process.exit(1)
 }
 const dir = resolve(root)
+// A gate that scans nothing is a false green — a missing scaffold must fail
+// loudly (walkFiles yields [] for an unreadable root).
+if (!existsSync(dir)) {
+  console.error(`RESIDUE: FAIL — directory not found: ${dir}`)
+  process.exit(1)
+}
 
 const BINARY = /\.(png|jpe?g|gif|webp|ico|icns|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tar|exe|dll|so|dylib|gguf|node|lock)$/i
 const PLACEHOLDER = /\{\{[A-Z0-9_]+\}\}/g
 
 const hits = []
-;(function walk(d) {
-  for (const entry of readdirSync(d)) {
-    if (entry === 'node_modules' || entry === '.git' || entry === 'target' || entry === 'dist') continue
-    const p = join(d, entry)
-    if (statSync(p).isDirectory()) {
-      walk(p)
-      continue
-    }
-    if (BINARY.test(entry)) continue
-    // The manifest records raw template metadata (answers include the
-    // placeholder names by design).
-    if (p.endsWith(join('.harness', 'manifest.json'))) continue
-    const text = readFileSync(p, 'utf8')
-    for (const m of text.matchAll(PLACEHOLDER)) {
-      hits.push(`${p.slice(dir.length + 1)}: ${m[0]}`)
-    }
+for (const rel of walkFiles(dir, { excludeDirs: ['node_modules', '.git', 'target', 'dist'] })) {
+  if (BINARY.test(rel)) continue
+  // The manifest records raw template metadata (answers include the
+  // placeholder names by design).
+  if (rel.endsWith('.harness/manifest.json')) continue
+  const text = readFileSync(join(dir, rel), 'utf8')
+  for (const m of text.matchAll(PLACEHOLDER)) {
+    hits.push(`${rel}: ${m[0]}`)
   }
-})(dir)
+}
 
 if (hits.length > 0) {
   console.error(`RESIDUE: ${hits.length} unrendered placeholder(s):`)

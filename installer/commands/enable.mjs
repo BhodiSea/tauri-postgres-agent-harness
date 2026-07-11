@@ -1,9 +1,10 @@
 // `enable <module>` / `disable <module>` — flip an opt-in module's files.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { planTree } from '../lib/copy.mjs'
 import { MODULES, RETIRED_MODULES } from '../lib/layout.mjs'
 import { fileMode, readManifest, sha256, writeManifest } from '../lib/manifest.mjs'
+import { writeInstallFile } from '../lib/write-file.mjs'
 
 // Modules whose gate ships dormant until a config line is activated (none today —
 // the styleguide/perf-budget gates were promoted to defaults in 0.1.3; the pattern
@@ -42,12 +43,12 @@ export async function enable(opts, moduleName, on) {
         const recorded = files[entry.installPath]
         if (!currentRaw.equals(incomingRaw) && (!recorded || sha256(currentRaw) !== recorded.sha256)) {
           const pending = join('.harness', 'pending', entry.installPath)
-          if (!opts.dryRun) write(join(targetDir, pending), entry.content)
+          if (!opts.dryRun) writeInstallFile(join(targetDir, pending), entry.content)
           console.warn(`  DRIFT ${entry.installPath}: local file kept; module version parked at ${pending}`)
           continue
         }
       }
-      if (!opts.dryRun) write(dest, entry.content)
+      if (!opts.dryRun) writeInstallFile(dest, entry.content)
       files[entry.installPath] = { mode: fileMode(entry.installPath), sha256: sha256(entry.content), module: moduleName }
       console.log(`  + ${entry.installPath}${opts.dryRun ? ' (dry-run)' : ''}`)
     }
@@ -79,12 +80,4 @@ export async function enable(opts, moduleName, on) {
     writeManifest(targetDir, { ...manifest, modules: [...modules], files })
   }
   return 0
-}
-
-function write(dest, content) {
-  mkdirSync(dirname(dest), { recursive: true })
-  // Binary assets arrive as Buffers (never executable); shebanged scripts need
-  // the executable bit writeFileSync would otherwise drop.
-  const executable = typeof content === 'string' && content.startsWith('#!')
-  writeFileSync(dest, content, { mode: executable ? 0o755 : 0o644 })
 }

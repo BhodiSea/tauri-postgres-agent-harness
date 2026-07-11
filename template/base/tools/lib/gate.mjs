@@ -5,10 +5,12 @@
 // command + docs pointer) so an agent reading a red Stop block knows the next
 // action without spelunking — the feedback loop is part of the product.
 // SOURCE: docs/harness/README.md (skip-local / fail-closed-CI asymmetry) [corpus: harness/doctrine]
+import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
+import { toPosix, walkFiles } from './fs-walk.mjs'
 
 export const inCI = () =>
   process.env.CI === 'true' || process.env.HARNESS_REQUIRE_TOOLCHAINS === '1'
@@ -60,6 +62,23 @@ export function failures(gate, list, hint) {
   process.exit(1)
 }
 
+// ---- subprocess capture contract ----------------------------------------------
+// One ceiling for every captured gate subprocess: node's 1 MB default
+// ENOBUFS-crashes on real monorepo output instead of failing with a named
+// gate error.
+export const MAX_BUFFER = 64 * 1024 * 1024
+
+// runCmd: execSync under the shared capture contract — utf8, MAX_BUFFER, stdin
+// ignored, stdout/stderr piped so a failure still surfaces via e.stdout/e.stderr.
+export function runCmd(cmd, opts = {}) {
+  return execSync(cmd, {
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...opts,
+  })
+}
+
 // ---- content-addressed stamps (generalized from the rust-check stamp) ---------
 // hashInputs: one sha256 over the declared input paths (files or directories,
 // recursive, name+bytes, sorted walk so the digest is order-stable). A missing
@@ -68,22 +87,22 @@ const STAMP_EXCLUDES = new Set(['node_modules', 'target', 'dist', 'gen', 'test-r
 
 export function hashInputs(paths) {
   const h = createHash('sha256')
-  const visit = (p) => {
+  for (const p of [...paths].sort()) {
     if (!existsSync(p)) {
       h.update(`missing:${p}`)
-      return
+      continue
     }
     if (statSync(p).isDirectory()) {
-      for (const entry of readdirSync(p).sort()) {
-        if (STAMP_EXCLUDES.has(entry)) continue
-        visit(join(p, entry))
+      const root = toPosix(p)
+      for (const rel of walkFiles(p, { excludeDirs: STAMP_EXCLUDES })) {
+        h.update(`${root}/${rel}`)
+        h.update(readFileSync(`${p}/${rel}`))
       }
-      return
+      continue
     }
-    h.update(p.split('\\').join('/'))
+    h.update(toPosix(p))
     h.update(readFileSync(p))
   }
-  for (const p of [...paths].sort()) visit(p)
   return h.digest('hex')
 }
 

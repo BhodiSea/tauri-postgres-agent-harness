@@ -19,8 +19,8 @@
 //   5. accent budget — the near-monochrome + single-accent design survives on a
 //      usage BUDGET: accent-utility occurrences stay <= the documented budget.
 // SOURCE: docs/harness/gates-catalog.md (styleguide gate) [corpus: harness/doctrine]
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'styleguide'
@@ -139,17 +139,11 @@ const PALETTE = new RegExp(
   'g',
 )
 
-function walk(dir) {
-  const out = []
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else if (/\.(tsx|ts|css)$/.test(entry) && !/\.(test|spec)\.tsx?$/.test(entry)) out.push(p)
-  }
-  return out
-}
-
-const files = walk(SRC_DIR)
+// Shared walker (lib/fs-walk.mjs): POSIX-relative output, so allow-list
+// comparison holds on Windows without per-file normalization.
+const files = walkFiles(SRC_DIR, {
+  filter: (p) => /\.(tsx|ts|css)$/.test(p) && !/\.(test|spec)\.tsx?$/.test(p),
+})
 let accentUses = 0
 const usesByFile = []
 const accentPattern = new RegExp(
@@ -158,8 +152,8 @@ const accentPattern = new RegExp(
 )
 
 for (const file of files) {
-  const rel = file.split('\\').join('/')
-  const text = readFileSync(file, 'utf8')
+  const rel = `${SRC_DIR}/${file}`
+  const text = readFileSync(rel, 'utf8')
   const allowed = allowFiles.has(rel)
 
   if (!allowed) {

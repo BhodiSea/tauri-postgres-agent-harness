@@ -1,6 +1,6 @@
 // `init` — bootstrap a new project or retrofit an existing one.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { planTree } from '../lib/copy.mjs'
 import { detect, detectContext } from '../lib/detect.mjs'
 import { CONFLICTABLE, MODULES, RETROFIT_ADDITIVE, TIERS } from '../lib/layout.mjs'
@@ -11,6 +11,7 @@ import { mergePackageJson } from '../lib/merge-package-json.mjs'
 import { mergeWorkspaceYaml } from '../lib/merge-workspace-yaml.mjs'
 import { printReport } from '../lib/report.mjs'
 import { collectAnswers, parseSets } from '../lib/prompts.mjs'
+import { writeInstallFile } from '../lib/write-file.mjs'
 
 export async function init(opts) {
   const targetDir = opts.dir
@@ -109,7 +110,7 @@ export async function init(opts) {
     const res = mergeWorkspaceYaml(existingText, wsEntry.content)
     if (res === null) {
       const sibling = 'pnpm-workspace.harness.yaml'
-      if (!opts.dryRun) write(join(targetDir, sibling), wsEntry.content)
+      if (!opts.dryRun) writeInstallFile(join(targetDir, sibling), wsEntry.content)
       report.conflicts.push({ path: 'pnpm-workspace.yaml', detail: `could not auto-merge (exotic YAML); harness version at ${sibling} — merge manually` })
       report.written.push(sibling)
       wsEntry.content = null // handled; skip in main loop
@@ -162,7 +163,7 @@ export async function init(opts) {
         if (ip === '.gitignore') {
           const { merged, added } = mergeGitignore(current, String(entry.content))
           if (added.length > 0) {
-            if (!opts.dryRun) write(dest, merged)
+            if (!opts.dryRun) writeInstallFile(dest, merged)
             report.written.push(ip)
             report.notes.push(`.gitignore: kept yours, appended ${added.length} harness pattern(s)`)
           } else {
@@ -174,7 +175,7 @@ export async function init(opts) {
         if (ip === '.claude/settings.json') {
           const res = mergeClaudeSettings(current, String(entry.content))
           if (res !== null) {
-            if (!opts.dryRun) write(dest, res.merged)
+            if (!opts.dryRun) writeInstallFile(dest, res.merged)
             report.written.push(ip)
             files[ip] = { mode: fileMode(ip), sha256: sha256(res.merged) }
             report.notes.push(
@@ -191,7 +192,7 @@ export async function init(opts) {
         const conflictable = CONFLICTABLE.find((c) => c.installed === ip)
         if (conflictable) {
           const sibling = ip.replace(/(\.[a-z]+)$/, '.harness$1')
-          if (!opts.dryRun) write(join(targetDir, sibling), entry.content)
+          if (!opts.dryRun) writeInstallFile(join(targetDir, sibling), entry.content)
           report.conflicts.push({ path: ip, detail: `existing config kept; harness version at ${sibling} — merge manually` })
           report.written.push(sibling)
           continue
@@ -201,7 +202,7 @@ export async function init(opts) {
         // theirs stays byte-identical; ours parks OUTSIDE active paths — a
         // sibling inside .github/workflows/ would itself execute as a workflow.
         const parked = join('.harness', 'conflicts', ip)
-        if (!opts.dryRun) write(join(targetDir, parked), entry.content)
+        if (!opts.dryRun) writeInstallFile(join(targetDir, parked), entry.content)
         report.conflicts.push({ path: ip, detail: `existing file kept; harness version at ${parked} — merge manually` })
         continue
       }
@@ -211,7 +212,7 @@ export async function init(opts) {
       report.written.push(ip)
       continue
     }
-    write(dest, entry.content)
+    writeInstallFile(dest, entry.content)
     report.written.push(ip)
     files[ip] = { mode: fileMode(ip), sha256: sha256(entry.content) }
     if (entry.module) files[ip].module = entry.module
@@ -243,13 +244,4 @@ export async function init(opts) {
     report.notes.push('review .harness sibling configs and merge them into your existing configs')
   }
   return printReport(report, { json: opts.report === 'json' })
-}
-
-function write(dest, content) {
-  mkdirSync(dirname(dest), { recursive: true })
-  // Hooks/scripts with shebangs are invoked directly by Claude Code — they
-  // need the executable bit, which writeFileSync would otherwise drop.
-  // Binary assets arrive as Buffers and are never executable.
-  const executable = typeof content === 'string' && content.startsWith('#!')
-  writeFileSync(dest, content, { mode: executable ? 0o755 : 0o644 })
 }

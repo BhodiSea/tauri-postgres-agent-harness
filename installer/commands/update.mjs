@@ -6,9 +6,9 @@
 // untouched since install, park-on-drift when locally modified), so template
 // improvements to project-owned exemplars can reach existing installs
 // deliberately instead of never.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { planTree } from '../lib/copy.mjs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { renderEntry, toPosix, walkTemplate } from '../lib/copy.mjs'
 import { RETIRED_MODULES } from '../lib/layout.mjs'
 import {
   fileMode,
@@ -24,7 +24,9 @@ import {
   readTemplateMigrations,
   versionsBetween,
 } from '../lib/migrations.mjs'
+import { classifyDrift } from '../lib/reconcile.mjs'
 import { printReport } from '../lib/report.mjs'
+import { writeInstallFile } from '../lib/write-file.mjs'
 
 export async function update(opts, { migrations = readTemplateMigrations() } = {}) {
   const targetDir = opts.dir
@@ -37,28 +39,28 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
   // with backslashes: without this, every incoming POSIX path misses its
   // recorded entry and locally-modified files lose drift protection.
   manifest.files = Object.fromEntries(
-    Object.entries(manifest.files ?? {}).map(([k, v]) => [k.split('\\').join('/'), v]),
+    Object.entries(manifest.files ?? {}).map(([k, v]) => [toPosix(k), v]),
   )
 
   const answers = manifest.answers
-  const plan = [...planTree('base', answers)]
+  const entries = [...walkTemplate('base')]
   for (const m of manifest.modules ?? []) {
     // A module retired by THIS update (promoted into base) has no template dir
     // anymore — its manifest entry is pruned by the promotedModules migration
     // below; planning it here would crash the very update that migrates it.
     if (RETIRED_MODULES.has(m)) continue
-    const entries = planTree(`modules/${m}`, answers)
-    for (const e of entries) e.module = m
-    plan.push(...entries)
+    const moduleEntries = walkTemplate(`modules/${m}`)
+    for (const e of moduleEntries) e.module = m
+    entries.push(...moduleEntries)
   }
   // Stack files are all seeded (project-owned after init) — but new stack
   // files introduced by a newer template version should still be offered.
-  plan.push(...planTree('stack', answers))
+  entries.push(...walkTemplate('stack'))
 
   // Focused mode: refresh the requested SEEDED path(s) from the current
   // template and stop — no version migrations, no owned-file sweep.
   if (opts.refreshSeeded?.length) {
-    return refreshSeeded({ targetDir, manifest, plan, paths: opts.refreshSeeded, opts })
+    return refreshSeeded({ targetDir, manifest, entries, answers, paths: opts.refreshSeeded, opts })
   }
 
   const report = {
@@ -75,9 +77,10 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
   // A newer template must never plan ZERO files — that is a packaging
   // regression (empty tarball, broken walker), and recording a version bump
   // over it would be a false-green update. Checked before anything mutates.
-  if (plan.length === 0) {
+  if (entries.length === 0) {
     throw new Error('template plan is empty — refusing to record an update over a packaging regression')
   }
+  const plan = entries.map((e) => ({ ...e, content: renderEntry(e, answers) }))
 
   // Version migrations FIRST: removals/renames prune stale files before the
   // plan loop writes the current tree, and gate promotions must reach the
@@ -113,52 +116,54 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
     const mode = recorded?.mode ?? fileMode(ip)
     const incomingSha = sha256(entry.content)
 
-    if (!existsSync(dest)) {
+    // Raw bytes, not utf8: hashing a lossy utf8 decode of a binary asset would
+    // never match the manifest sha recorded over the true file content.
+    const current = existsSync(dest) ? readFileSync(dest) : null
+    if (current !== null && mode !== 'owned') {
+      report.skipped.push(ip)
+      continue
+    }
+    const kind = classifyDrift({
+      current,
+      recordedSha: recorded?.sha256,
+      incoming: entry.content,
+      force: opts.force,
+    })
+
+    if (kind === 'create') {
       if (opts.dryRun) {
         report.written.push(ip)
         continue
       }
-      write(dest, entry.content)
+      writeInstallFile(dest, entry.content)
       files[ip] = { mode, sha256: incomingSha, ...(entry.module ? { module: entry.module } : {}) }
       report.written.push(ip)
       continue
     }
-
-    if (mode !== 'owned') {
+    if (kind === 'skip-same') {
       report.skipped.push(ip)
       continue
     }
-
-    // Raw bytes, not utf8: hashing a lossy utf8 decode of a binary asset would
-    // never match the manifest sha recorded over the true file content.
-    const currentSha = sha256(readFileSync(dest))
-    if (!recorded || currentSha === recorded.sha256) {
-      if (currentSha === incomingSha) {
-        report.skipped.push(ip)
-        continue
-      }
+    if (kind === 'update-clean') {
       if (opts.dryRun) {
         report.written.push(ip)
         continue
       }
-      write(dest, entry.content)
+      writeInstallFile(dest, entry.content)
       files[ip] = { ...(files[ip] ?? { mode }), mode, sha256: incomingSha }
       report.written.push(ip)
       continue
     }
-
-    // Local content already matches the incoming version (e.g. a fix was
-    // applied by hand before updating): just re-record, no drift.
-    if (currentSha === incomingSha) {
+    if (kind === 'record-only') {
       if (!opts.dryRun) files[ip] = { ...(files[ip] ?? { mode }), mode, sha256: incomingSha }
       report.skipped.push(ip)
       continue
     }
-
-    // Local drift on an owned file: preserve it, park the incoming version.
-    if (opts.force) {
+    // Local drift on an owned file: preserve it, park the incoming version —
+    // unless --force deliberately overwrites.
+    if (kind === 'force-overwrite') {
       if (!opts.dryRun) {
-        write(dest, entry.content)
+        writeInstallFile(dest, entry.content)
         files[ip] = { ...(files[ip] ?? { mode }), mode, sha256: incomingSha }
       }
       report.written.push(ip)
@@ -166,7 +171,7 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
       continue
     }
     const pending = join('.harness', 'pending', ip)
-    if (!opts.dryRun) write(join(targetDir, pending), entry.content)
+    if (!opts.dryRun) writeInstallFile(join(targetDir, pending), entry.content)
     report.drift.push({ path: ip, pending })
   }
 
@@ -181,19 +186,12 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
   return printReport(report, { json: opts.report === 'json' })
 }
 
-function write(dest, content) {
-  mkdirSync(dirname(dest), { recursive: true })
-  // Binary assets arrive as Buffers and are never executable.
-  const executable = typeof content === 'string' && content.startsWith('#!')
-  writeFileSync(dest, content, { mode: executable ? 0o755 : 0o644 })
-}
-
 // `update --refresh-seeded <path>`: the deliberate channel for template
 // improvements to SEEDED (project-owned) surfaces. Unmodified-since-install →
 // overwrite + re-record; locally modified → park the template version under
 // .harness/pending/ (never clobber project work); unknown path → error naming
 // nearby candidates so a typo cannot silently no-op.
-function refreshSeeded({ targetDir, manifest, plan, paths, opts }) {
+function refreshSeeded({ targetDir, manifest, entries, answers, paths, opts }) {
   const report = {
     conflicts: [],
     drift: [],
@@ -206,11 +204,11 @@ function refreshSeeded({ targetDir, manifest, plan, paths, opts }) {
   let failed = false
 
   for (const rawPath of paths) {
-    const ip = rawPath.split('\\').join('/').replace(/^\.\//, '')
-    const entry = plan.find((e) => e.installPath === ip)
+    const ip = toPosix(rawPath).replace(/^\.\//, '')
+    const entry = entries.find((e) => e.installPath === ip)
     if (!entry) {
       const base = ip.split('/').at(-1)
-      const near = plan
+      const near = entries
         .filter((e) => e.installPath.endsWith(`/${base}`) || e.installPath === base)
         .map((e) => e.installPath)
       report.notes.push(
@@ -220,39 +218,44 @@ function refreshSeeded({ targetDir, manifest, plan, paths, opts }) {
       continue
     }
     const dest = join(targetDir, ip)
-    const incomingRaw = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content)
-    const incomingSha = sha256(entry.content)
+    const content = renderEntry(entry, answers)
+    const incomingSha = sha256(content)
     const recorded = files[ip]
     const mode = recorded?.mode ?? fileMode(ip)
 
-    if (!existsSync(dest)) {
+    const current = existsSync(dest) ? readFileSync(dest) : null
+    let kind = classifyDrift({ current, recordedSha: recorded?.sha256, incoming: content, force: opts.force })
+    // Stricter than update's sweep: with no manifest record we cannot prove
+    // the file untouched since install — park, never clobber project work.
+    if (kind === 'update-clean' && !recorded && !opts.force) kind = 'park'
+
+    if (kind === 'create') {
       if (!opts.dryRun) {
-        write(dest, entry.content)
+        writeInstallFile(dest, content)
         files[ip] = { ...(recorded ?? {}), mode, sha256: incomingSha }
       }
       report.written.push(ip)
       continue
     }
-    const currentRaw = readFileSync(dest)
-    if (currentRaw.equals(incomingRaw)) {
+    if (kind === 'skip-same' || kind === 'record-only') {
       report.skipped.push(ip)
       report.notes.push(`${ip} already matches the current template`)
       continue
     }
     // Untouched since install (or --force): safe to refresh.
-    if (opts.force || (recorded && sha256(currentRaw) === recorded.sha256)) {
+    if (kind === 'update-clean' || kind === 'force-overwrite') {
       if (!opts.dryRun) {
-        write(dest, entry.content)
+        writeInstallFile(dest, content)
         files[ip] = { ...(recorded ?? {}), mode, sha256: incomingSha }
       }
       report.written.push(ip)
-      if (opts.force && recorded && sha256(currentRaw) !== recorded.sha256) {
+      if (kind === 'force-overwrite') {
         report.notes.push(`--force overwrote locally-modified ${ip}`)
       }
       continue
     }
     const pending = join('.harness', 'pending', ip)
-    if (!opts.dryRun) write(join(targetDir, pending), entry.content)
+    if (!opts.dryRun) writeInstallFile(join(targetDir, pending), content)
     report.drift.push({ path: ip, pending })
     report.notes.push(
       `${ip} has local changes — kept; the current template version is parked at ${pending} (merge by hand, or re-run with --force)`,

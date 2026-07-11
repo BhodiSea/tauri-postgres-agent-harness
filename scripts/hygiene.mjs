@@ -4,9 +4,10 @@
 //    appear anywhere under template/ (the shipped artifact must be generic).
 // 2. Placeholder closure: every {{VAR}} used in template/ must exist in the
 //    installer's placeholder registry, and every registry var must be used.
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { walkFiles } from '../installer/lib/fs-walk.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TEMPLATE = join(ROOT, 'template')
@@ -45,26 +46,15 @@ const ALLOWLIST = new Map()
 
 const failures = []
 
-function walk(dir) {
-  if (!existsSync(dir)) return []
-  const out = []
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    const st = statSync(p)
-    if (st.isDirectory()) out.push(...walk(p))
-    else out.push(p)
-  }
-  return out
-}
-
-for (const file of walk(TEMPLATE)) {
+// The shipped template scans EVERYTHING — no excluded directories.
+for (const relPath of walkFiles(TEMPLATE)) {
   let text
   try {
-    text = readFileSync(file, 'utf8')
+    text = readFileSync(join(TEMPLATE, relPath), 'utf8')
   } catch {
     continue // binary
   }
-  const rel = file.slice(ROOT.length)
+  const rel = `template/${relPath}`
   for (const pattern of LEAK_PATTERNS) {
     if (!pattern.test(text)) continue
     const allowed = ALLOWLIST.get(rel)
@@ -82,10 +72,10 @@ if (existsSync(registryPath)) {
   const { PLACEHOLDERS } = await import(pathToFileURL(registryPath).href)
   const registered = new Set(Object.keys(PLACEHOLDERS))
   const used = new Set()
-  for (const file of walk(TEMPLATE)) {
+  for (const relPath of walkFiles(TEMPLATE)) {
     let text
     try {
-      text = readFileSync(file, 'utf8')
+      text = readFileSync(join(TEMPLATE, relPath), 'utf8')
     } catch {
       continue
     }

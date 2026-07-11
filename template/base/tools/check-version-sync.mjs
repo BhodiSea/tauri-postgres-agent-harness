@@ -9,9 +9,8 @@
 //   4. zod resolves to exactly one version across the workspace (two instances break
 //      instanceof checks in @hono/zod-openapi with incomprehensible errors)
 // SOURCE: docs/harness/README.md (version-sync gate) [corpus: harness/doctrine]
-import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { failures, inCI, ok, skipOrFail } from './lib/gate.mjs'
+import { failures, inCI, ok, runCmd, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'version-sync'
 const errs = []
@@ -68,11 +67,7 @@ if (existsSync('pnpm-workspace.yaml')) {
 // Single zod instance across the workspace (requires an install; skip honestly without one)
 if (existsSync('node_modules')) {
   try {
-    const out = execSync('pnpm list -r --depth Infinity zod --json', {
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const out = runCmd('pnpm list -r --depth Infinity zod --json')
     const found = new Set()
     ;(function collect(node) {
       if (Array.isArray(node)) return node.forEach(collect)

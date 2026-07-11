@@ -43,7 +43,8 @@ Usage:
            [--set VAR=value ...] [--dry-run] [--report json] [--consume]
   update   [--dir .] [--dry-run] [--force] [--report json]
            [--refresh-seeded <path> ...]  (pull the template version of a
-           seeded, project-owned file: overwrite when untouched, park on drift)
+           seeded, project-owned file or whole subtree — e.g. a trailing '/'
+           dir: overwrite when untouched, park on drift)
   doctor   [--dir .]
   enable   <module>   (ci-windows-release, ci-windows-e2e, ci-macos, ci-provenance,
            mutation, gate-a11y-deep, crash-reporting, ops-backup, eval-live,

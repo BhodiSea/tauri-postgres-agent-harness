@@ -4,7 +4,7 @@
 // previous release tag.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,13 +12,32 @@ import {
   applyFileMigrations,
   cmpVersions,
   injectConfigStep,
+  matchSeedOnInitOnly,
+  readTemplateMigrations,
   requiredConfigSteps,
+  seedOnInitOnlyPatterns,
   updateConfigCommand,
   versionsBetween,
 } from '../../installer/lib/migrations.mjs'
+import { walkTemplate } from '../../installer/lib/copy.mjs'
 import { sha256 } from '../../installer/lib/manifest.mjs'
 import { update } from '../../installer/commands/update.mjs'
 import { init } from '../../installer/commands/init.mjs'
+
+// Capture the printed report (update logs only through printReport) so a test
+// can assert on notes/skipped/written without a scaffold-side JSON round-trip.
+async function captureUpdate(opts, ctx) {
+  const lines = []
+  const orig = console.log
+  console.log = (...a) => lines.push(a.map(String).join(' '))
+  try {
+    const code = await update(opts, ctx)
+    return { code, out: lines.join('\n') }
+  } finally {
+    console.log = orig
+  }
+}
+const parseReport = (out) => JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1))
 
 const CONFIG_TEMPLATE = fileURLToPath(
   new URL('../../template/base/tools/harness.config.mjs', import.meta.url),
@@ -235,4 +254,156 @@ test('update applies a synthetic migration end-to-end (remove + configStep + pro
   await update({ dir, dryRun: false }, { migrations })
   const cfg2 = readFileSync(join(dir, 'tools/harness.config.mjs'), 'utf8')
   assert.equal(cfg2.split("['synthetic-gate',").length, 2, 'step must appear exactly once')
+})
+
+// ── v0.1.4 Stage 5: seedOnInitOnly — new seeded exemplars a newer template
+// ships as init-time-only starting content that `update` must NOT auto-plant. ──
+
+test('seedOnInitOnlyPatterns collects across ALL versions (timeless), deduped and POSIX-normalized', () => {
+  const m = {
+    '//': 'doc',
+    '0.1.4': { seedOnInitOnly: ['apps/desktop/src/features/matrix/', 'apps/desktop/src/router.ts'] },
+    // A LATER version repeats router.ts and adds a backslash-authored path — both
+    // must fold: dedup by normalized form, and the doc key is ignored.
+    '0.1.5': { seedOnInitOnly: ['apps/desktop/src/router.ts', 'apps\\desktop\\src\\theme\\'] },
+  }
+  assert.deepEqual(seedOnInitOnlyPatterns(m), [
+    'apps/desktop/src/features/matrix/',
+    'apps/desktop/src/router.ts',
+    'apps/desktop/src/theme/',
+  ])
+  assert.deepEqual(seedOnInitOnlyPatterns({ '//': 'doc', '0.1.4': {} }), [], 'absent key yields no patterns')
+})
+
+test('matchSeedOnInitOnly: prefix subtree vs exact file, Windows backslash input normalized', () => {
+  const patterns = ['apps/desktop/src/features/matrix/', 'apps/desktop/src/router.ts']
+  // '/'-suffixed pattern = subtree prefix.
+  assert.equal(
+    matchSeedOnInitOnly('apps/desktop/src/features/matrix/MatrixPanel.tsx', patterns),
+    'apps/desktop/src/features/matrix/',
+  )
+  // no slash = exact file; a sibling with the same stem must NOT match.
+  assert.equal(matchSeedOnInitOnly('apps/desktop/src/router.ts', patterns), 'apps/desktop/src/router.ts')
+  assert.equal(matchSeedOnInitOnly('apps/desktop/src/router.test.ts', patterns), null)
+  // a prefix must land on a real path boundary, not a partial segment.
+  assert.equal(matchSeedOnInitOnly('apps/desktop/src/features/matrixEXTRA.ts', patterns), null)
+  // Windows-supplied backslash paths normalize before matching (POSIX manifest keys).
+  assert.equal(
+    matchSeedOnInitOnly('apps\\desktop\\src\\features\\matrix\\MatrixGrid.tsx', patterns),
+    'apps/desktop/src/features/matrix/',
+  )
+  assert.equal(matchSeedOnInitOnly('apps\\desktop\\src\\router.ts', patterns), 'apps/desktop/src/router.ts')
+  assert.equal(matchSeedOnInitOnly('unrelated/file.ts', patterns), null)
+})
+
+test('the shipped 0.1.4 seedOnInitOnly record targets real template files only (no typo drift)', () => {
+  const patterns = seedOnInitOnlyPatterns(readTemplateMigrations())
+  assert.ok(patterns.length > 0, 'the shipped record must list exemplar paths')
+  const installPaths = walkTemplate('stack').map((e) => e.installPath)
+  for (const pattern of patterns) {
+    const hit = installPaths.some((ip) => (pattern.endsWith('/') ? ip.startsWith(pattern) : ip === pattern))
+    assert.ok(hit, `seedOnInitOnly pattern '${pattern}' resolves to no template file — stale/typo'd record`)
+  }
+})
+
+test('update withholds absent seedOnInitOnly exemplars (noted once per cluster), refreshes owned, still plants non-matched; dry-run parity + idempotent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-seedonly-'))
+  assert.equal(
+    await init({
+      dir,
+      tier: 'core',
+      yes: true,
+      set: ['PROJECT_NAME=Seed App', 'GITHUB_OWNER=o', 'SECURITY_OWNERS=@o'],
+    }),
+    0,
+  )
+
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const dropInstalled = (ip) => {
+    rmSync(join(dir, ip), { force: true })
+    delete manifest.files[ip]
+  }
+
+  // Simulate a pre-exemplar consumer: a prefix CLUSTER (features/matrix) and an
+  // exact FILE (router.ts) are absent, both gone from disk and manifest.
+  const matrixMembers = Object.keys(manifest.files).filter((ip) =>
+    ip.startsWith('apps/desktop/src/features/matrix/'),
+  )
+  assert.ok(matrixMembers.length >= 2, 'fixture expects the template to ship a matrix cluster')
+  for (const ip of matrixMembers) dropInstalled(ip)
+  const exactExemplar = 'apps/desktop/src/router.ts'
+  assert.ok(manifest.files[exactExemplar], 'fixture expects a router.ts exemplar')
+  dropInstalled(exactExemplar)
+
+  // A NEW seeded file NOT in the record → must still plant when absent.
+  const nonMatched = 'apps/server/src/app.ts'
+  assert.ok(manifest.files[nonMatched], 'fixture expects a seeded server app file')
+  dropInstalled(nonMatched)
+
+  // An owned file installed by an older harness (content differs, recorded as
+  // untouched) → must still be refreshed.
+  const ownedRel = '.claude/hooks/posttool-fast-check.mjs'
+  const oldOwned = '#!/usr/bin/env node\n// older harness build\n'
+  writeFileSync(join(dir, ownedRel), oldOwned)
+  manifest.files[ownedRel].sha256 = sha256(oldOwned)
+
+  manifest.harnessVersion = '0.1.3'
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  const migrations = {
+    '0.1.4': { seedOnInitOnly: ['apps/desktop/src/features/matrix/', 'apps/desktop/src/router.ts'] },
+  }
+
+  const manifestBefore = readFileSync(manifestPath, 'utf8')
+
+  // (c) Dry-run first: emits the plan, writes nothing.
+  const dry = await captureUpdate({ dir, dryRun: true, report: 'json' }, { migrations })
+  const dryReport = parseReport(dry.out)
+  assert.equal(readFileSync(manifestPath, 'utf8'), manifestBefore, 'dry-run must not touch the manifest')
+  assert.ok(!existsSync(join(dir, exactExemplar)), 'dry-run must not plant an exemplar')
+  assert.ok(!existsSync(join(dir, nonMatched)), 'dry-run must not plant the non-matched file either')
+
+  // Real run: identical report object, now applied.
+  const real = await captureUpdate({ dir, report: 'json' }, { migrations })
+  const realReport = parseReport(real.out)
+  assert.deepEqual(dryReport, realReport, 'dry-run must report exactly the plan the real run executes')
+
+  // (a) matched exemplars withheld: skipped, not written, not on disk, not recorded.
+  const afterManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const ip of [...matrixMembers, exactExemplar]) {
+    assert.ok(!existsSync(join(dir, ip)), `exemplar must not be planted: ${ip}`)
+    assert.ok(realReport.skipped.includes(ip), `exemplar must be counted skipped: ${ip}`)
+    assert.ok(!realReport.written.includes(ip), `exemplar must not be written: ${ip}`)
+    assert.ok(!afterManifest.files[ip], `exemplar must not be recorded in the manifest: ${ip}`)
+  }
+
+  // note fires ONCE per matched cluster (one prefix note, one exact note).
+  const clusterNotes = realReport.notes.filter((n) => n.includes('not auto-planted'))
+  assert.equal(clusterNotes.length, 2, `expected exactly two cluster notes, got: ${clusterNotes.join(' | ')}`)
+  assert.ok(
+    clusterNotes.some((n) => n.includes('apps/desktop/src/features/matrix/ — pull with')),
+    clusterNotes.join(' | '),
+  )
+  assert.ok(clusterNotes.some((n) => n.includes(`--refresh-seeded ${exactExemplar}`)), clusterNotes.join(' | '))
+
+  // non-matched new seeded file IS planted; owned file IS refreshed.
+  assert.ok(existsSync(join(dir, nonMatched)), 'non-matched new seeded file must still be planted')
+  assert.ok(realReport.written.includes(nonMatched), 'non-matched file must be reported written')
+  assert.ok(afterManifest.files[nonMatched], 'planted non-matched file must be recorded')
+  assert.notEqual(readFileSync(join(dir, ownedRel), 'utf8'), oldOwned, 'owned file must be refreshed')
+  assert.ok(realReport.written.includes(ownedRel), 'owned refresh must be reported')
+
+  // (e) Idempotence: a second update still withholds, still notes, never plants.
+  const second = await captureUpdate({ dir, report: 'json' }, { migrations })
+  const secondReport = parseReport(second.out)
+  for (const ip of [...matrixMembers, exactExemplar]) {
+    assert.ok(!existsSync(join(dir, ip)), `second update must still not plant: ${ip}`)
+    assert.ok(secondReport.skipped.includes(ip), `second update must still skip: ${ip}`)
+  }
+  assert.equal(
+    secondReport.notes.filter((n) => n.includes('not auto-planted')).length,
+    2,
+    'second update emits the same two cluster notes',
+  )
 })

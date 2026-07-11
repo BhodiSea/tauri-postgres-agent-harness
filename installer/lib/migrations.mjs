@@ -6,16 +6,22 @@
 //       "renamed":  { "tools/old.mjs": "tools/new.mjs" },
 //       "promotedModules": ["gate-perf-budget"],
 //       "configSteps": [{ "name": "e2e", "cmd": "node tools/check-e2e.mjs", "after": "build" }],
-//       "configCommandUpdates": [{ "name": "lint", "from": "old cmd", "to": "new cmd" }]
+//       "configCommandUpdates": [{ "name": "lint", "from": "old cmd", "to": "new cmd" }],
+//       "seedOnInitOnly": ["apps/desktop/src/features/matrix/", "apps/desktop/src/router.ts"]
 //     }
 //   }
 // Without this, a newer template can only ADD files to installed projects:
 // removals/renames leave stale gate scripts forever, and new default gates
 // reach CI (--min-floor) but never the consumer's Stop hook — silently
 // breaking the FLOOR ↔ VALIDATE_STEPS lockstep on every updated install.
+// seedOnInitOnly is the inverse guard: NEW seeded exemplars a newer template
+// ships as init-time-only starting content, which `update` must NOT auto-plant
+// into an existing install — the consumer's routes/app never reference them, so
+// planting would red route-manifest + knip. They stay pullable on demand via
+// `update --refresh-seeded <path>` (the documented opt-in channel).
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { templateRoot } from './copy.mjs'
+import { templateRoot, toPosix } from './copy.mjs'
 import { sha256 } from './manifest.mjs'
 
 export function readTemplateMigrations() {
@@ -50,6 +56,43 @@ export function versionsBetween(migrations, from, to) {
   return Object.keys(migrations)
     .filter((v) => VERSION_KEY.test(v) && cmpVersions(v, from) > 0 && cmpVersions(v, to) <= 0)
     .sort(cmpVersions)
+}
+
+// Every seedOnInitOnly pattern across ALL versions in the file — NOT just the
+// pending ones. These paths are init-time exemplars forever: their semantics are
+// timeless, so an 0.1.3→0.1.4→0.1.5 chain must withhold the same paths as a
+// direct 0.1.3→0.1.5 hop (a consumer who skipped 0.1.4 and never opted into its
+// exemplars must not have them silently auto-planted by a later update). Order-
+// and dedup-preserving; POSIX-normalized at the boundary so a Windows-authored
+// record still matches POSIX manifest keys.
+export function seedOnInitOnlyPatterns(migrations) {
+  const seen = new Set()
+  const out = []
+  for (const [v, entry] of Object.entries(migrations)) {
+    if (!VERSION_KEY.test(v)) continue
+    for (const pattern of entry.seedOnInitOnly ?? []) {
+      const norm = toPosix(pattern)
+      if (!seen.has(norm)) {
+        seen.add(norm)
+        out.push(norm)
+      }
+    }
+  }
+  return out
+}
+
+// Return the seedOnInitOnly pattern an installPath falls under, or null. A
+// trailing '/' matches the whole subtree (prefix); no slash matches an exact
+// file. The installPath is POSIX-normalized first, so a Windows-supplied
+// backslash path (`apps\desktop\src\router.ts`) still matches. Callers key the
+// "not auto-planted" report note off the returned pattern so the note fires once
+// per matched cluster, not once per file.
+export function matchSeedOnInitOnly(installPath, patterns) {
+  const ip = toPosix(installPath)
+  for (const pattern of patterns) {
+    if (pattern.endsWith('/') ? ip.startsWith(pattern) : ip === pattern) return pattern
+  }
+  return null
 }
 
 // Apply removed/renamed/promotedModules records. Deletion is sha-guarded:

@@ -521,6 +521,46 @@ test('refresh-seeded: overwrite when untouched, park on drift, error on unknown 
   assert.ok(unknown.out.includes(ip), unknown.out)
 })
 
+test('seedOnInitOnly: plain update withholds a new exemplar subtree; refresh-seeded pulls it on demand and records each sha', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-seedpull-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+
+  // Make the matrix exemplar cluster absent, as a pre-0.1.4 consumer would have
+  // it, and backdate the install so the 0.1.4 migration record is in scope.
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const prefix = 'apps/desktop/src/features/matrix/'
+  const members = Object.keys(manifest.files).filter((ip) => ip.startsWith(prefix))
+  assert.ok(members.length >= 2, 'template must ship a matrix cluster')
+  for (const ip of members) {
+    rmSync(join(dir, ip))
+    delete manifest.files[ip]
+  }
+  manifest.harnessVersion = '0.1.3'
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  // Plain update (real 0.1.4 record): must NOT re-plant, must note the channel.
+  const upd = run(['update', '--dir', dir])
+  assert.notEqual(upd.code, 1, upd.out)
+  for (const ip of members) assert.ok(!existsSync(join(dir, ip)), `plain update must not plant ${ip}`)
+  assert.ok(upd.out.includes('not auto-planted'), upd.out)
+  assert.ok(upd.out.includes(prefix), upd.out)
+  const afterPlain = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const ip of members) assert.ok(!afterPlain.files[ip], `withheld exemplar must not be recorded: ${ip}`)
+
+  // The advertised opt-in: refresh-seeded the whole subtree → every member lands
+  // and is recorded (sha + seeded mode).
+  const pull = run(['update', '--dir', dir, '--refresh-seeded', prefix])
+  assert.equal(pull.code, 0, pull.out)
+  const after = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const ip of members) {
+    assert.ok(existsSync(join(dir, ip)), `refresh-seeded must plant ${ip}`)
+    assert.ok(after.files[ip], `refresh-seeded must record ${ip}`)
+    assert.equal(after.files[ip].sha256, sha256(readFileSync(join(dir, ip), 'utf8')), `sha recorded for ${ip}`)
+    assert.equal(after.files[ip].mode, 'seeded', `${ip} stays seeded`)
+  }
+})
+
 test('doctor: seeded divergence from the current template is an info advisory, never an error', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-seedadv-'))
   assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
@@ -613,6 +653,7 @@ test('npm pack ships every template path (dotless storage survives packing)', ()
     'template/base/tools/harness.config.mjs',
     'template/base/tools/validate.floor.json',
     'template/stack/apps/desktop/src-tauri/tauri.conf.json',
+    'template/stack/apps/desktop/src/features/matrix/MatrixPanel.tsx',
     'template/stack/packages/schema/drizzle/0000_init.sql',
     'installer/cli.mjs',
   ]) {

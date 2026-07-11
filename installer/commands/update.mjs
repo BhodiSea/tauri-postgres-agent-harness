@@ -2,10 +2,15 @@
 // project. Owned files upgrade when unmodified; local drift is preserved with
 // the incoming version parked under .harness/pending/. Seeded files are never
 // touched after init — EXCEPT on explicit request: `update --refresh-seeded
-// <path>` pulls the current template version of one seeded file (overwrite when
-// untouched since install, park-on-drift when locally modified), so template
-// improvements to project-owned exemplars can reach existing installs
-// deliberately instead of never.
+// <path>` pulls the current template version of one seeded file OR a whole
+// subtree (overwrite when untouched since install, park-on-drift when locally
+// modified), so template improvements to project-owned exemplars can reach
+// existing installs deliberately instead of never.
+// New seeded exemplars flagged seedOnInitOnly in template/migrations.json are
+// the one class the plain sweep does NOT auto-plant when absent: an existing
+// consumer's routes/App don't reference them, so silently planting them would
+// red route-manifest + dead-code. The sweep notes them; --refresh-seeded is the
+// deliberate channel to pull them in.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderEntry, toPosix, walkTemplate } from '../lib/copy.mjs'
@@ -21,7 +26,9 @@ import {
   applyConfigCommandUpdates,
   applyConfigSteps,
   applyFileMigrations,
+  matchSeedOnInitOnly,
   readTemplateMigrations,
+  seedOnInitOnlyPatterns,
   versionsBetween,
 } from '../lib/migrations.mjs'
 import { classifyDrift } from '../lib/reconcile.mjs'
@@ -93,6 +100,13 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
     applyConfigCommandUpdates({ targetDir, files, report, entries: migrationEntries, dryRun: opts.dryRun })
   }
 
+  // Init-time-only exemplars: NEW seeded files a newer template ships as
+  // starting content. Collected across ALL versions (timeless semantics), so a
+  // consumer who skipped an intermediate release still has them withheld. The
+  // note fires once per matched cluster — dedup by the matched pattern.
+  const seededExemplars = seedOnInitOnlyPatterns(migrations)
+  const notedExemplars = new Set()
+
   for (const entry of plan) {
     const ip = entry.installPath
     if (ip === 'package.json') {
@@ -119,6 +133,27 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
     // Raw bytes, not utf8: hashing a lossy utf8 decode of a binary asset would
     // never match the manifest sha recorded over the true file content.
     const current = existsSync(dest) ? readFileSync(dest) : null
+
+    // A NEW seeded exemplar that is ABSENT here: init-time-only starting content
+    // (seedOnInitOnly). update must NOT auto-plant it — an existing consumer's
+    // routes/App don't reference it, so planting reds route-manifest + dead-code.
+    // Skip, and point once per cluster at the deliberate opt-in channel. Owned
+    // files are never matched (only seeded/config), and an already-present file
+    // falls through to the seeded-skip below untouched.
+    if (current === null && mode !== 'owned') {
+      const pattern = matchSeedOnInitOnly(ip, seededExemplars)
+      if (pattern) {
+        report.skipped.push(ip)
+        if (!notedExemplars.has(pattern)) {
+          notedExemplars.add(pattern)
+          report.notes.push(
+            `new exemplar available (not auto-planted): ${pattern} — pull with \`update --refresh-seeded ${pattern}\``,
+          )
+        }
+        continue
+      }
+    }
+
     if (current !== null && mode !== 'owned') {
       report.skipped.push(ip)
       continue
@@ -203,20 +238,11 @@ function refreshSeeded({ targetDir, manifest, entries, answers, paths, opts }) {
   const files = { ...manifest.files }
   let failed = false
 
-  for (const rawPath of paths) {
-    const ip = toPosix(rawPath).replace(/^\.\//, '')
-    const entry = entries.find((e) => e.installPath === ip)
-    if (!entry) {
-      const base = ip.split('/').at(-1)
-      const near = entries
-        .filter((e) => e.installPath.endsWith(`/${base}`) || e.installPath === base)
-        .map((e) => e.installPath)
-      report.notes.push(
-        `no template file installs to ${ip}${near.length > 0 ? ` — did you mean: ${near.join(', ')}` : ''}`,
-      )
-      failed = true
-      continue
-    }
+  // Refresh ONE resolved template entry into the install (overwrite when
+  // untouched, park on drift). Keyed on the entry's own installPath so subtree
+  // expansion below refreshes each member under its real path.
+  const refreshOne = (entry) => {
+    const ip = entry.installPath
     const dest = join(targetDir, ip)
     const content = renderEntry(entry, answers)
     const incomingSha = sha256(content)
@@ -230,17 +256,19 @@ function refreshSeeded({ targetDir, manifest, entries, answers, paths, opts }) {
     if (kind === 'update-clean' && !recorded && !opts.force) kind = 'park'
 
     if (kind === 'create') {
+      // The deliberate opt-in for a seedOnInitOnly exemplar the plain sweep
+      // withheld: an explicitly-requested absent seeded file IS planted here.
       if (!opts.dryRun) {
         writeInstallFile(dest, content)
         files[ip] = { ...(recorded ?? {}), mode, sha256: incomingSha }
       }
       report.written.push(ip)
-      continue
+      return
     }
     if (kind === 'skip-same' || kind === 'record-only') {
       report.skipped.push(ip)
       report.notes.push(`${ip} already matches the current template`)
-      continue
+      return
     }
     // Untouched since install (or --force): safe to refresh.
     if (kind === 'update-clean' || kind === 'force-overwrite') {
@@ -252,7 +280,7 @@ function refreshSeeded({ targetDir, manifest, entries, answers, paths, opts }) {
       if (kind === 'force-overwrite') {
         report.notes.push(`--force overwrote locally-modified ${ip}`)
       }
-      continue
+      return
     }
     const pending = join('.harness', 'pending', ip)
     if (!opts.dryRun) writeInstallFile(join(targetDir, pending), content)
@@ -260,6 +288,30 @@ function refreshSeeded({ targetDir, manifest, entries, answers, paths, opts }) {
     report.notes.push(
       `${ip} has local changes — kept; the current template version is parked at ${pending} (merge by hand, or re-run with --force)`,
     )
+  }
+
+  for (const rawPath of paths) {
+    const ip = toPosix(rawPath).replace(/^\.\//, '')
+    // A subtree request (trailing '/' or a bare directory) pulls every template
+    // entry under it — the channel the seedOnInitOnly note advertises, e.g.
+    // `update --refresh-seeded apps/desktop/src/features/matrix/`. An exact-file
+    // request still resolves to a single entry.
+    const prefix = ip.endsWith('/') ? ip : `${ip}/`
+    const matches = entries.filter((e) => e.installPath === ip || e.installPath.startsWith(prefix))
+    if (matches.length === 0) {
+      const base = ip.replace(/\/$/, '').split('/').at(-1)
+      const near = entries
+        .filter((e) => e.installPath.endsWith(`/${base}`) || e.installPath === base)
+        .map((e) => e.installPath)
+      report.notes.push(
+        `no template file installs to ${ip}${near.length > 0 ? ` — did you mean: ${near.join(', ')}` : ''}`,
+      )
+      failed = true
+      continue
+    }
+    for (const entry of matches.sort((a, b) => a.installPath.localeCompare(b.installPath))) {
+      refreshOne(entry)
+    }
   }
 
   if (!opts.dryRun) writeManifest(targetDir, { ...manifest, files })

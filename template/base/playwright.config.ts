@@ -23,6 +23,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:1420',
     trace: 'retain-on-failure',
+    // Determinism: freeze `motion-safe:` animations. Axe blends ANIMATED opacity
+    // into its color-contrast math, so a pulsing skeleton reads a different
+    // contrast ratio depending on when the snapshot lands — pass or fail by
+    // timing. Under reduced motion axe measures the true resting contrast.
+    reducedMotion: 'reduce',
   },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   webServer: {

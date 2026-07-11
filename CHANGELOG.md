@@ -58,6 +58,11 @@ the consumer's config, promoted modules fold in, canonical commands heal).
   ENOBUFS-crashed on large trees (64 MB buffer); pnpm's CI banner polluted the
   openapi regen diff (`--silent`); a jsdom teardown race in the desktop unit
   tests (network-stubbed test setup + RTL cleanup).
+- **Fixed**: the e2e lane was timing-flaky on animated loading states — axe
+  blends animated opacity into its color-contrast math, so a pulsing skeleton
+  read 4.42:1 or 7.8:1 depending on when the snapshot landed. The shipped
+  Playwright config now emulates `prefers-reduced-motion` (freezing
+  `motion-safe:` utilities), so axe always measures the true resting contrast.
 - **Fixed (Windows)**: on native-Windows sessions the write-guard derived the
   project-relative path without normalizing separators, so every root-anchored
   PROTECTED pattern silently failed OPEN — backslash paths now normalize to

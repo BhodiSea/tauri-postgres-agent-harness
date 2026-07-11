@@ -224,5 +224,45 @@
     "title": "llama.cpp sampling parameters: temperature/top_p per request; temperature 0 is greedy, deterministic decoding",
     "url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
     "version": "2026"
+  },
+  {
+    "id": "csswg/oklch-srgb",
+    "sha256": "577aab9f4507bc752cc17dcea25e071e38d1a1d6978b1039a1dc738fc828e045",
+    "text": "The spec's reference conversion functions map OKLCH to sRGB in stages: OKLCH to OKLab is polar-to-rectangular (a = C * cos(H), b = C * sin(H)); OKLab to LMS multiplies by a fixed OKLab-to-LMS matrix and cubes each component; LMS routes through XYZ (D65) to linear-light sRGB via two more 3x3 matrices; a final transfer function (12.92 * v below 0.0031308, else 1.055 * v^(1/2.4) - 0.055) gamma-encodes each channel. OKLCH can name colors outside the sRGB gamut, so out-of-range results must be CSS gamut-mapped — reducing chroma toward the nearest displayable color — before use.",
+    "title": "CSS Color 4 OKLCH->sRGB reference path: OKLab polar->rectangular, cube LMS, matrices to linear-sRGB, then gamut-map",
+    "url": "https://www.w3.org/TR/css-color-4/#color-conversion-code",
+    "version": "4"
+  },
+  {
+    "id": "wcag/relative-luminance",
+    "sha256": "83f8b3c1d66c8300f287c4a958f0a73ad46abc460655f46d400c28699204fdff",
+    "text": "Relative luminance is L = 0.2126 * R + 0.7152 * G + 0.0722 * B, where each 8-bit sRGB channel c/255 is first linearized: values <= 0.04045 become c/12.92, else ((c + 0.055)/1.055)^2.4 (WCAG raised this threshold from 0.03928 to 0.04045 in May 2021). Contrast ratio is (L1 + 0.05)/(L2 + 0.05) with L1 the lighter and L2 the darker luminance, spanning 1:1 to 21:1. SC 1.4.3 (AA) needs 4.5:1 for body text and 3:1 for large text; SC 1.4.11 needs 3:1 for UI components and meaningful graphics.",
+    "title": "WCAG 2.2 relative luminance and contrast ratio: 0.2126/0.7152/0.0722 over linearized sRGB; (L1+0.05)/(L2+0.05)",
+    "url": "https://www.w3.org/TR/WCAG22/#dfn-relative-luminance",
+    "version": "2.2"
+  },
+  {
+    "id": "wai-aria/apg-grid",
+    "sha256": "685db7421e290fae471dab7468d5aab6bc290385bd94955b6ffe7633a50e1d74",
+    "text": "An ARIA grid is one tab stop: exactly one cell or cell-widget is tabbable via roving tabindex, and the author moves focus with the arrow keys, Home/End to the first/last cell in a row, Ctrl+Home/Ctrl+End to the first/last cell of the grid, and Page Up/Page Down to page by rows. The role structure is role=grid over role=row over role=gridcell/columnheader/rowheader. When rows are virtualized and not all present in the DOM, aria-rowcount declares the grid's total row count and each row's aria-rowindex its 1-based position in the full set, so assistive technology reports true size and location.",
+    "title": "WAI-ARIA grid pattern: one tab stop via roving tabindex, arrow/Home/End/Page navigation, aria-rowcount/aria-rowindex for virtualized rows",
+    "url": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/",
+    "version": "2026"
+  },
+  {
+    "id": "web/prefers-color-scheme",
+    "sha256": "aa2dea7349cc79891a4eb010c7b61c635e2c48b410129701cbfeb9bc086e9f54",
+    "text": "The prefers-color-scheme media feature reports the user's OS or user-agent color-theme preference (light or dark). It is read-only and does not reflect an in-app toggle, so persisting an explicit user override — layered over the system default — is the application's own responsibility. Its complement is the CSS color-scheme property, which opts an element into the user agent's light or dark rendering of form controls, scrollbars, and system colors and influences used color values; declaring it keeps native UI in sync with the theme the app actually paints.",
+    "title": "prefers-color-scheme: system light/dark signal; the app owns override persistence; color-scheme syncs native UI",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-color-scheme",
+    "version": "2026"
+  },
+  {
+    "id": "wcag/reduced-motion",
+    "sha256": "425f8955ae3222149d45ff3264377054aec1908a0c1fbaf4f3faae0c65381a97",
+    "text": "SC 2.3.3 Animation from Interactions (Level AAA): motion animation triggered by interaction must be able to be disabled unless the animation is essential to the function or the information conveyed. The prefers-reduced-motion media query is the mechanism — when the OS reduce-motion setting is on, non-essential transitions and animations become opt-in and should be removed or replaced with instant or opacity-only changes. Separately, SC 2.2.2 Pause, Stop, Hide (Level A) covers auto-starting movement that lasts more than five seconds alongside other content: it must be pausable, stoppable, or hideable.",
+    "title": "prefers-reduced-motion / WCAG 2.3.3 and 2.2.2: honor the OS reduce-motion setting — non-essential motion becomes opt-in",
+    "url": "https://www.w3.org/TR/WCAG22/#animation-from-interactions",
+    "version": "2.2"
   }
 ]

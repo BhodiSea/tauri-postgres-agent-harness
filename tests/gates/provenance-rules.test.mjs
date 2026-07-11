@@ -2,22 +2,30 @@
 // of truth (template/base/tools/lib/provenance-rules.mjs). Both enforcement
 // layers — the per-edit PostToolUse hook and the tree-wide `provenance` gate —
 // import from here, so this file pins the shared decision-site window, the
-// comment-line skips, the wrapped-payload extractor, payloadResolves' four
-// grounding kinds, and the scope predicates (including Windows backslash
-// normalization) branch by branch. Regression armor for the v0.1.4 refactor
-// that unified the two hand-duplicated regex copies — it pins CURRENT behavior,
-// not a wishlist. The gate's end-to-end red/green lives in check-sources.test.mjs.
+// comment-line skips, the wrapped-payload extractor, payloadResolves' three
+// grounding kinds (corpus ref, existing path, ALLOWLISTED https URL — the
+// v0.1.5 citation-domains gate), findCitedDecisionSites (the group-match
+// input), and the scope predicates (including Windows backslash normalization)
+// branch by branch. Regression armor for the v0.1.4 refactor that unified the
+// two hand-duplicated regex copies — it pins CURRENT behavior, not a wishlist.
+// The gate's end-to-end red/green lives in check-sources.test.mjs.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  CITATION_DOMAINS,
+  isAllowedCitationHost,
+} from '../../template/base/tools/lib/citation-domains.mjs'
+import {
   CORPUS_REF,
   DECISION,
   DECISION_GROUPS,
   SOURCE_WINDOW_LINES,
+  extractHttpsUrlHosts,
   extractSourceComments,
+  findCitedDecisionSites,
   findUncitedDecisionSites,
   gateFileMatch,
   gateScansFile,
@@ -262,17 +270,83 @@ test('CORPUS_REF captures each id via matchAll and rejects the `<id>` placeholde
   assert.deepEqual([...'[corpus: <id>]'.matchAll(CORPUS_REF)], [])
 })
 
-// ── payloadResolves: the four grounding kinds ─────────────────────────────────
-test('payloadResolves: an https URL or a corpus ref grounds; http-only and prose do not', () => {
-  assert.equal(payloadResolves('see https://learn.microsoft.com/entra'), true)
+// ── payloadResolves: the three grounding kinds (URL now allowlist-gated) ──────
+test('payloadResolves: corpus refs and ALLOWLISTED https URLs ground; other hosts, http-only and prose do not', () => {
   assert.equal(payloadResolves('pinned [corpus: entra/jwt-verify]'), true)
+  // v0.1.5: a bare URL grounds only when its host is on the shared allowlist in
+  // tools/lib/citation-domains.mjs (before that, ANY https:// string passed).
+  assert.equal(payloadResolves('see https://hono.dev/docs/helpers/streaming'), true)
+  assert.equal(payloadResolves('see https://www.postgresql.org/docs/current/sql-set.html'), true)
+  assert.equal(payloadResolves('see https://learn.microsoft.com/entra'), false)
+  assert.equal(payloadResolves('see https://github.com/someone/some-repo'), false)
+  // A disallowed URL plus a corpus ref still grounds — the corpus is the authority.
+  assert.equal(
+    payloadResolves('https://login.microsoftonline.com/{tenant}/v2.0 [corpus: entra/jwt-verify]'),
+    true,
+  )
   // Only https:// counts as a URL — a plain http:// token is skipped by the
-  // `^https?:` guard in the path loop and grounds nothing.
-  assert.equal(payloadResolves('see http://example.com/x'), false)
+  // `^https?:` guard in the path loop and grounds nothing (even on an allowlisted host).
+  assert.equal(payloadResolves('see http://hono.dev/x'), false)
   // Presence-only prose ("trust me") is not provenance.
   assert.equal(payloadResolves('trust me'), false)
   // The `<id>` placeholder is not a resolvable corpus ref.
   assert.equal(payloadResolves('[corpus: <id>]'), false)
+})
+
+// ── citation-domains: the shared bare-URL host allowlist ──────────────────────
+test('isAllowedCitationHost: exact match, subdomain match, case/trailing-dot normalization; no suffix spoofing', () => {
+  assert.ok(CITATION_DOMAINS.includes('hono.dev'))
+  assert.equal(isAllowedCitationHost('hono.dev'), true)
+  assert.equal(isAllowedCitationHost('www.postgresql.org'), true) // subdomain of postgresql.org
+  assert.equal(isAllowedCitationHost('HONO.DEV'), true)
+  assert.equal(isAllowedCitationHost('hono.dev.'), true) // FQDN trailing dot normalized
+  // A registrable domain that merely ENDS with an allowlisted string is not a match.
+  assert.equal(isAllowedCitationHost('evilhono.dev'), false)
+  assert.equal(isAllowedCitationHost('hono.dev.attacker.io'), false)
+  assert.equal(isAllowedCitationHost('github.com'), false) // user content — corpus-pin instead
+})
+
+test('extractHttpsUrlHosts: lowercased, deduplicated hosts; glued punctuation stripped; junk yields none', () => {
+  assert.deepEqual(
+    extractHttpsUrlHosts('see https://hono.dev/a and https://HONO.dev/b, then https://www.w3.org/TR/.'),
+    ['hono.dev', 'www.w3.org'],
+  )
+  assert.deepEqual(extractHttpsUrlHosts('no urls here, only prose and http://x.dev'), [])
+})
+
+// ── findCitedDecisionSites: the group-match input (cited complement) ──────────
+test('findCitedDecisionSites returns cited sites with their decision groups and the nearest wrapped payload', () => {
+  const src = [
+    '// SOURCE: entra docs, wrapped onto', // 1
+    '// a continuation line [corpus: entra/jwt-verify]', // 2
+    'const claims = await jwtVerify(token, jwks)', // 3 — cited, token-verification
+    'const pad = 1', // 4
+    'const uncited = createRemoteJWKSet(url)', // 5 — nearest SOURCE is 4 lines up: out of window
+    '',
+  ].join('\n')
+  const sites = findCitedDecisionSites(src)
+  assert.equal(sites.length, 1)
+  assert.equal(sites[0].line, 3)
+  assert.deepEqual(sites[0].groups, ['token-verification'])
+  assert.ok(sites[0].payload.includes('[corpus: entra/jwt-verify]'))
+  // the out-of-window site is findUncitedDecisionSites' finding, never a cited site
+  assert.deepEqual(findUncitedDecisionSites(src).map((f) => f.line), [5])
+})
+
+test('findCitedDecisionSites: a line matching TWO groups reports both; uncited lines are not returned', () => {
+  const src = [
+    '-- SOURCE: policy over the GUC [corpus: postgres/rls-initplan]', // 1
+    "CREATE POLICY p ON t USING (owner = (select current_setting('app.user_id', true)::uuid));", // 2
+    'const a = 1', // 3 — padding pushes the SOURCE out of the next site's window
+    'const b = 2', // 4
+    'const bare = { maxRetries: 3 }', // 5 — uncited
+  ].join('\n')
+  const sites = findCitedDecisionSites(src)
+  assert.equal(sites.length, 1)
+  assert.equal(sites[0].line, 2)
+  assert.deepEqual(sites[0].groups, ['rls-policy', 'guc-identity'])
+  // the uncited maxRetries line belongs to findUncitedDecisionSites, not here
+  assert.deepEqual(findUncitedDecisionSites(src).map((f) => f.line), [5])
 })
 
 test('payloadResolves: a corpus ref stays truthy across repeated calls (no global-regex lastIndex leak)', () => {

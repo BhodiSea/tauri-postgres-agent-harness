@@ -8,7 +8,9 @@
     "lint": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "eslint --max-warnings 0 exits non-zero on any finding" }],
     "provenance": [
       { "kind": "selftest", "ref": "Canary 3: strip SOURCE citations from decision sites → provenance must FAIL" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs" }
+      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "wrong-group corpus cite on a decision site → provenance red naming site, group, and cited groups; tools/provenance-overrides.json is the reviewed escape; pre-0.1.5 baseVersion manifests downgrade to a ramp NOTE" },
+      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "bare-URL SOURCE on a host outside tools/lib/citation-domains.mjs → provenance red naming the host; same pre-0.1.5 ramp NOTE" }
     ],
     "tauri-policy": [{ "kind": "selftest", "ref": "Canary 1: weaken tauri.conf CSP to null → tauri-policy must FAIL" }],
     "version-sync": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],

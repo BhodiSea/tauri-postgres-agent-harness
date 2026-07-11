@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
+import { isAllowedCitationHost } from './citation-domains.mjs'
 import { toPosix } from './fs-walk.mjs'
 
 // Decision-site keyword groups for THIS stack. Each group's key must be covered by
@@ -126,39 +127,98 @@ export function findUncitedDecisionSites(src) {
 // so documentation placeholders like `[corpus: <id>]` never parse as references.
 export const CORPUS_REF = /\[corpus:\s*([A-Za-z0-9][A-Za-z0-9/._-]*)\s*\]/g
 
-// Every SOURCE comment in a file, with its full payload: the text after `SOURCE:`
-// plus any continuation comment lines below it (real citations routinely wrap; the
+// The wrapped-payload walk shared by extractSourceComments and
+// findCitedDecisionSites: the text after `SOURCE:` on line idx plus any
+// continuation comment lines below it (real citations routinely wrap; the
 // corpus tail usually lands on the last wrapped line). A new SOURCE comment
-// or a non-comment line ends the payload. Returns [{ line, payload }].
+// or a non-comment line ends the payload.
+function payloadAt(lines, idx) {
+  let payload = lines[idx].slice(lines[idx].indexOf('SOURCE:') + 'SOURCE:'.length)
+  for (let j = idx + 1; j < lines.length; j += 1) {
+    const trimmed = lines[j].trim()
+    if (!COMMENT_START.test(trimmed) || CITED.test(trimmed)) break
+    payload += `\n${trimmed}`
+  }
+  return payload
+}
+
+// Every SOURCE comment in a file, with its full payload. Returns [{ line, payload }].
 export function extractSourceComments(src) {
   const lines = src.split('\n')
   const found = []
   lines.forEach((ln, i) => {
-    const m = CITED.exec(ln)
-    if (!m) return
-    let payload = ln.slice(ln.indexOf('SOURCE:') + 'SOURCE:'.length)
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const trimmed = lines[j].trim()
-      if (!COMMENT_START.test(trimmed) || CITED.test(trimmed)) break
-      payload += `\n${trimmed}`
-    }
-    found.push({ line: i + 1, payload })
+    if (!CITED.test(ln)) return
+    found.push({ line: i + 1, payload: payloadAt(lines, i) })
   })
   return found
 }
 
+// The complement of findUncitedDecisionSites: decision lines that DO carry a
+// SOURCE in the window, with the decision-group keys the line matched and the
+// full payload of the NEAREST SOURCE comment at/above it. The gate uses this
+// for the corpus group-match (a citation must justify the decision class it
+// sits on, not merely resolve). The per-edit hook deliberately does NOT — it
+// has no corpus context per edit; see payloadResolves below for the shared
+// asymmetry note. Returns [{ line, groups, payload }] (1-based lines).
+export function findCitedDecisionSites(src) {
+  const lines = src.split('\n')
+  const sites = []
+  lines.forEach((ln, i) => {
+    const trimmed = ln.trim()
+    if (COMMENT_START.test(trimmed)) return
+    if (!DECISION.test(ln)) return
+    let srcIdx = -1
+    for (let j = i; j >= Math.max(0, i - SOURCE_WINDOW_LINES); j -= 1) {
+      if (CITED.test(lines[j])) {
+        srcIdx = j
+        break
+      }
+    }
+    if (srcIdx === -1) return // uncited — findUncitedDecisionSites owns that failure
+    const groups = DECISION_GROUPS.filter((g) => g.patterns.some((p) => p.test(ln))).map(
+      (g) => g.key,
+    )
+    sites.push({ line: i + 1, groups, payload: payloadAt(lines, srcIdx) })
+  })
+  return sites
+}
+
+// Every https:// URL host named in a payload, lowercased and deduplicated.
+// Trailing punctuation that prose glues onto a URL is stripped before parsing;
+// an unparseable URL contributes no host (and therefore grounds nothing).
+const HTTPS_URL = /https:\/\/[^\s"'`<>)\]}]+/g
+export function extractHttpsUrlHosts(payload) {
+  const hosts = new Set()
+  for (const raw of payload.match(HTTPS_URL) ?? []) {
+    try {
+      hosts.add(new URL(raw.replace(/[.,;:]+$/, '')).hostname.toLowerCase())
+    } catch {
+      // not a parseable URL — no host to allow
+    }
+  }
+  return [...hosts]
+}
+
 // A SOURCE payload resolves when it carries at least one of:
-//   (a) an https:// URL,
+//   (a) a `[corpus: <id>]` reference (the gate separately resolves the id),
 //   (b) a repo-relative path that exists on disk (any token containing '/'),
-//   (c) a `[corpus: <id>]` reference (the gate separately resolves the id).
+//   (c) an https:// URL whose host is on the shared citation-domains allowlist
+//       (tools/lib/citation-domains.mjs) — an arbitrary URL is a claim, not an
+//       authority, so non-allowlisted hosts ground nothing (v0.1.5; before that
+//       ANY https:// string passed).
 // Presence-only prose ("trust me") is not provenance.
+// ASYMMETRY NOTE: only the tree-wide gate calls this. The PostToolUse hook
+// stays presence-only (findUncitedDecisionSites) by design: resolvability
+// checks are version-RAMPED via rampNote in the gate, and a hook can only
+// block or pass — enforcing a ramped rule per edit would hard-block pre-ramp
+// installs the gate deliberately keeps NOTE-only. Same reason the hook never
+// gains the corpus group-match: no corpus load per edit, no ramp per edit.
 export function payloadResolves(payload, cwd = process.cwd()) {
-  if (/https:\/\//.test(payload)) return true
   if (new RegExp(CORPUS_REF.source).test(payload)) return true
   for (const raw of payload.split(/\s+/)) {
     const token = raw.replace(/^[('"`[{<]+/, '').replace(/[)'"`\]}>,.;:]+$/, '')
     if (!token.includes('/') || token.startsWith('/') || /^https?:/i.test(token)) continue
     if (existsSync(resolve(cwd, token))) return true
   }
-  return false
+  return extractHttpsUrlHosts(payload).some((h) => isAllowedCitationHost(h))
 }

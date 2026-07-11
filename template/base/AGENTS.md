@@ -149,6 +149,9 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   `// SOURCE: <authority> [corpus: <id>]` (`-- SOURCE:` in SQL) on/above the
   line. Corpus ids resolve against `tools/mcp/corpus/index.json` (use the
   `corpus_search` MCP tool mid-turn; extend the corpus in the PR that cites it).
+  Cite an entry whose `groups` cover the decision's class (cross-group escapes =
+  human-reviewed `tools/provenance-overrides.json`); a bare URL counts only on a
+  `tools/lib/citation-domains.mjs` allowlisted host — otherwise pin it in the corpus.
 - Emit one ADR per slice via `/adr <slice>` (records in `docs/adr/`); then run
   `/verify-citations` until it returns `CITATIONS: CLEAN`.
 

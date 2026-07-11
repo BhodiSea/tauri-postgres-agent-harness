@@ -134,12 +134,14 @@ test('RED: a SOURCE payload with no URL, no existing path, no corpus ref (presen
   assert.ok(r.out.includes('trust me'), r.out)
 })
 
-test('GREEN: payloads ground via https URL, existing repo-relative path, or corpus id (multi-line comments too)', () => {
+test('GREEN: payloads ground via allowlisted https URL, existing repo-relative path, or corpus id (multi-line comments too)', () => {
   const r = runGate(fixture({
     files: {
       'docs/decisions.md': '# decisions\n',
       'apps/server/src/auth.ts': [
-        '// SOURCE: https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens',
+        // developer.mozilla.org is on the tools/lib/citation-domains.mjs allowlist
+        // (v0.1.5: a bare URL grounds only on an allowlisted host).
+        '// SOURCE: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Authorization',
         'const claims = await jwtVerify(token, jwks)',
         '// SOURCE: rationale recorded in docs/decisions.md',
         'const tolerance = { clockTolerance: 300 }',
@@ -151,6 +153,133 @@ test('GREEN: payloads ground via https URL, existing repo-relative path, or corp
     },
   }))
   assert.equal(r.code, 0, r.out)
+})
+
+// ── v0.1.5: bare-URL host allowlist (tools/lib/citation-domains.mjs) ──────────
+test('RED: a bare-URL SOURCE on a non-allowlisted host fails naming the host and both remedies', () => {
+  const r = runGate(fixture({
+    files: {
+      'apps/server/src/auth.ts':
+        '// SOURCE: https://some-blog.example.dev/jwt-in-five-minutes\nconst claims = await jwtVerify(token, jwks)\n',
+    },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('apps/server/src/auth.ts:1'), r.out)
+  assert.ok(r.out.includes('some-blog.example.dev'), r.out)
+  assert.ok(r.out.includes('citation-domains.mjs'), r.out)
+  assert.ok(r.out.includes('tools/mcp/corpus/index.json'), r.out)
+})
+
+test('GREEN: an allowlisted host grounds a bare-URL citation', () => {
+  const r = runGate(fixture({
+    files: {
+      'apps/server/src/limits.ts':
+        '// SOURCE: https://hono.dev/docs/helpers/streaming\nconst opts = { timeoutMs: 5000 }\n',
+    },
+  }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: a SUBDOMAIN of an allowlisted domain grounds (www.postgresql.org under postgresql.org)', () => {
+  const r = runGate(fixture({
+    files: {
+      'packages/schema/drizzle/0001_guc.sql':
+        "-- SOURCE: https://www.postgresql.org/docs/current/sql-set.html\nSET LOCAL app.user_id = '';\n",
+    },
+  }))
+  assert.equal(r.code, 0, r.out)
+})
+
+// ── v0.1.5: corpus decision-group match ───────────────────────────────────────
+test('RED: a decision site citing a corpus entry of the WRONG group fails naming site, group, and cited groups', () => {
+  // llamacpp/sampling is pinned with groups: ["llm-sampling"] — it resolves, but
+  // it cannot JUSTIFY a token-verification decision.
+  const r = runGate(fixture({
+    files: {
+      'apps/server/src/auth.ts':
+        '// SOURCE: pinned but off-topic [corpus: llamacpp/sampling]\nconst claims = await jwtVerify(token, jwks)\n',
+    },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('apps/server/src/auth.ts:2'), r.out)
+  assert.ok(r.out.includes("decision group 'token-verification'"), r.out)
+  assert.ok(r.out.includes('llamacpp/sampling (groups: llm-sampling)'), r.out)
+  assert.ok(r.out.includes('tools/provenance-overrides.json'), r.out)
+})
+
+test('GREEN: a reviewed { file, group, id, reason } override accepts a specific cross-group cite', () => {
+  const r = runGate(fixture({
+    files: {
+      'apps/server/src/auth.ts':
+        '// SOURCE: pinned but off-topic [corpus: llamacpp/sampling]\nconst claims = await jwtVerify(token, jwks)\n',
+      'tools/provenance-overrides.json': JSON.stringify({
+        comment: 'fixture escape hatch',
+        entries: [{
+          file: 'apps/server/src/auth.ts',
+          group: 'token-verification',
+          id: 'llamacpp/sampling',
+          reason: 'fixture: cross-group cite reviewed by a human',
+        }],
+      }),
+    },
+  }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: citing a groups-LESS corpus entry keeps presence semantics (per-entry self-disable)', () => {
+  // tauri/csp declares no groups array — consumer-added entries are never forced
+  // into the taxonomy, so the site stays presence-checked.
+  const r = runGate(fixture({
+    files: {
+      'apps/server/src/auth.ts':
+        '// SOURCE: pinned, taxonomy-free [corpus: tauri/csp]\nconst claims = await jwtVerify(token, jwks)\n',
+    },
+  }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('RAMP: a pre-0.1.5 baseVersion manifest downgrades BOTH semantic checks to NOTEs and passes', () => {
+  const r = runGate(fixture({
+    files: {
+      '.harness/manifest.json': JSON.stringify({ harnessVersion: '0.1.4', baseVersion: '0.1.4' }),
+      'apps/server/src/auth.ts': [
+        '// SOURCE: pinned but off-topic [corpus: llamacpp/sampling]',
+        'const claims = await jwtVerify(token, jwks)',
+        '// SOURCE: https://some-blog.example.dev/jwt-in-five-minutes',
+        'const tolerance = { clockTolerance: 300 }',
+        '',
+      ].join('\n'),
+    },
+  }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes('NOTE'), r.out)
+  assert.ok(r.out.includes('(ramp)'), r.out)
+  assert.ok(r.out.includes("decision group 'token-verification'"), r.out)
+  assert.ok(r.out.includes('some-blog.example.dev'), r.out)
+  assert.ok(r.out.includes('withheld by the pre-0.1.5 ramp'), r.out)
+})
+
+test('RED: a malformed overrides file fails CLOSED even when no finding needs it', () => {
+  // Well-formed JSON, broken schema: entries[0] is missing group/id/reason.
+  const r = runGate(fixture({
+    files: {
+      'apps/clean.ts': 'export const nothing = 1\n',
+      'tools/provenance-overrides.json': JSON.stringify({
+        comment: 'broken fixture',
+        entries: [{ file: 'apps/clean.ts' }],
+      }),
+    },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('malformed overrides fail closed'), r.out)
+})
+
+test('RED: an overrides file that is not JSON at all fails closed with the tamper message', () => {
+  const r = runGate(fixture({
+    files: { 'tools/provenance-overrides.json': 'not json {' },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('not valid JSON'), r.out)
 })
 
 // ── corpus integrity: tamper-evident data ─────────────────────────────────────

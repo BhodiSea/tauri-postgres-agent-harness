@@ -194,10 +194,17 @@ const RULE_CANARIES = {
     pathDeny('tools/build-check.mjs'),
     pathDeny('tools/check-mutation-ratchet.mjs'),
   ],
+  // Listed before tools-lib in WRITE_PROTECTED so the citation allowlist carries
+  // its own named deny; the SELF_EDIT escape stays human-only, like every rule.
+  'citation-domains': [
+    pathDeny('tools/lib/citation-domains.mjs'),
+    pathAllow('tools/lib/citation-domains.mjs', SELF_EDIT),
+  ],
   'tools-lib': [pathDeny('tools/lib/gate.mjs')],
   'tools-mcp': [pathDeny('tools/mcp/corpus-search-server.mjs')],
   'lock-json': [pathDeny('tools/identity.lock.json'), pathDeny('tools/prompts.lock.json')],
   'rls-exempt': [pathDeny('tools/rls-exempt.json')],
+  'provenance-overrides': [pathDeny('tools/provenance-overrides.json')],
   'license-exceptions': [pathDeny('tools/license-exceptions.json')],
   'bundle-budget': [pathDeny('tools/bundle-budget.json')],
   'perf-budget': [pathDeny('tools/perf-budget.json')],

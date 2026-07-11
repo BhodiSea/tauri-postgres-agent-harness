@@ -152,6 +152,14 @@
     "version": "1.0"
   },
   {
+    "id": "microsoft/api-guidelines",
+    "sha256": "0bb0dad4565d23e1518bc2def252d1099bad62fef80938de5c423236eacdab1f",
+    "text": "The Microsoft Azure REST API Guidelines require error responses to be a single JSON object with a top-level error property carrying a stable machine-readable code and a human-readable message (plus optional details). Clients branch on the code, never the message text, so codes are a documented stable contract while messages may change; every non-2xx body uses the one envelope shape.",
+    "title": "Microsoft Azure REST API Guidelines: the { error: { code, message } } error envelope",
+    "url": "https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md",
+    "version": "vNext"
+  },
+  {
     "groups": ["tuning-constants"],
     "id": "hono/sse-abort",
     "sha256": "9756948f10e02db0b11538b6d819c598465ceb0ef774b509ec48c5b9e2b433dd",
@@ -248,6 +256,14 @@
     "title": "WAI-ARIA grid pattern: one tab stop via roving tabindex, arrow/Home/End/Page navigation, aria-rowcount/aria-rowindex for virtualized rows",
     "url": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/",
     "version": "2026"
+  },
+  {
+    "id": "web/mulberry32",
+    "sha256": "50c71829086ddcf71ec497a925c141bc269eb7ff5cf75b1f5805b53e66e95b0c",
+    "text": "mulberry32 is a compact seeded 32-bit PRNG (single 32-bit state word, a few integer ops per draw) with good statistical quality for non-cryptographic use. The same seed always reproduces the same sequence, making it a standard choice for deterministic fixtures and reproducible synthetic data where Math.random, which cannot be seeded, would break run-to-run comparability.",
+    "title": "mulberry32: minimal seeded 32-bit PRNG for deterministic, reproducible sequences",
+    "url": "https://github.com/bryc/code/blob/master/jshash/PRNGs.md#mulberry32",
+    "version": "2017"
   },
   {
     "id": "web/prefers-color-scheme",

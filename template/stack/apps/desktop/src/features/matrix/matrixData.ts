@@ -54,7 +54,7 @@ export function notesToMatrixRows(notes: readonly Note[]): readonly MatrixRow[] 
 
 // SOURCE: mulberry32 — a small, fast, seeded PRNG; deterministic runs are the
 // point (Math.random is banned in this feature for reproducibility, and the perf
-// subject must render identical rows every time).
+// subject must render identical rows every time). [corpus: web/mulberry32]
 // https://github.com/bryc/code/blob/master/jshash/PRNGs.md#mulberry32
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0

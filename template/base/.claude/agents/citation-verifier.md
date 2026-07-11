@@ -36,13 +36,17 @@ Pass 2 — EXISTENCE-RESOLVE: resolve every cited source by its kind.
   `docs/adr/<id>.md`): do NOT WebFetch it. `Read` the file and confirm the cited
   `§`/anchor heading exists. Mark UNRESOLVABLE only if neither the corpus nor the
   file on disk resolves.
-- **External URL**: WebFetch it. Allowed domains (mirrors the project permission
-  allowlist): `code.claude.com`, `tauri.app`, `react.dev`, `hono.dev`,
-  `orm.drizzle.team`, `www.postgresql.org`, `developer.mozilla.org`. Mark
-  UNRESOLVABLE if the URL 404s, the anchor is missing, or the page does not load. A
-  cited domain NOT on this list (e.g. `github.com`, `learn.microsoft.com`, `w3.org`)
-  is still RESOLVED-VIA-CORPUS — not UNRESOLVABLE — if `corpus_search` returns a
-  pinned entry for it; otherwise UNRESOLVABLE.
+- **External URL**: WebFetch it. The allowed domains are EXACTLY the exported
+  `CITATION_DOMAINS` list in `tools/lib/citation-domains.mjs` — `Read` that file
+  first; it is the single source of truth shared with the `provenance` gate, and
+  there is deliberately no second copy here (a host matches when it equals an
+  entry or is a subdomain of it). Mark UNRESOLVABLE if the URL 404s, the anchor
+  is missing, or the page does not load; if WebFetch is not permitted for an
+  allowlisted domain, fall back to `corpus_search` before marking. A cited domain
+  NOT on that list (e.g. `github.com`, `learn.microsoft.com`) is still
+  RESOLVED-VIA-CORPUS — not UNRESOLVABLE — if `corpus_search` returns a pinned
+  entry for it; otherwise UNRESOLVABLE (and the `provenance` gate will fail the
+  bare URL too: pin it in the corpus in the same PR).
 
 Pass 3 — SUPPORT-CHECK: read the resolved source (corpus `text` for pinned entries)
 and confirm it actually backs the SPECIFIC claim, not merely the general topic. Mark

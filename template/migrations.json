@@ -45,5 +45,8 @@
       "apps/desktop/src/components/EmptyState.tsx",
       "apps/desktop/src/components/EmptyState.test.tsx"
     ]
+  },
+  "0.1.5": {
+    "seedOnInitOnly": ["tools/provenance-overrides.json"]
   }
 }

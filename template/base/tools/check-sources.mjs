@@ -5,24 +5,40 @@
 // during an edit. Both layers import the heuristic from tools/lib/provenance-rules.mjs —
 // one source of truth, drift is structurally impossible.
 //
-// Beyond the hook's fast presence check, this gate enforces RESOLVABILITY:
-//   1. every SOURCE payload must ground somewhere real — an https:// URL, a
-//      repo-relative path that exists, or a corpus reference;
+// Beyond the hook's fast presence check, this gate enforces RESOLVABILITY and
+// (v0.1.5, version-ramped) JUSTIFICATION:
+//   1. every SOURCE payload must ground somewhere real — a corpus reference, a
+//      repo-relative path that exists, or an https:// URL whose host is on the
+//      shared allowlist in tools/lib/citation-domains.mjs (an arbitrary URL is
+//      a claim, not an authority);
 //   2. every corpus reference anywhere in the tracked tree must resolve to an
 //      entry in tools/mcp/corpus/index.json;
 //   3. the corpus itself is tamper-evident data — each entry carries a sha256
 //      over its text, non-empty title/url/version, and the entries' `groups`
-//      tags must cover every decision group the heuristic can flag.
+//      tags must cover every decision group the heuristic can flag;
+//   4. group-match: a decision site citing a corpus entry that declares
+//      `groups` must cite one covering the site's OWN decision group — a
+//      resolvable citation that grounds a different decision class is not
+//      justification. Entries without `groups` stay presence-checked
+//      (consumer-added entries are never forced into the taxonomy); reviewed
+//      cross-group escapes live in tools/provenance-overrides.json.
+// Checks 1's host-allowlist and 4 went live in 0.1.5 and are rampNote-gated:
+// NOTE-only on pre-0.1.5 baseVersion installs, hard on fresh installs and the
+// template tree. The per-edit hook enforces NEITHER (see provenance-rules.mjs:
+// no corpus load per edit, no ramp per edit — a hook can only block or pass).
 // SOURCE: docs/harness/README.md (the gate is the enforcement; provenance) [corpus: harness/doctrine]
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import process from 'node:process'
-import { fail, MAX_BUFFER, ok } from './lib/gate.mjs'
+import { isAllowedCitationHost } from './lib/citation-domains.mjs'
+import { fail, MAX_BUFFER, ok, rampNote } from './lib/gate.mjs'
 import {
   CORPUS_REF,
   DECISION_GROUPS,
+  extractHttpsUrlHosts,
   extractSourceComments,
+  findCitedDecisionSites,
   findUncitedDecisionSites,
   gateFileMatch,
   gateScansFile,
@@ -31,6 +47,11 @@ import {
 
 // cwd-relative like every other gate (fixtures and scaffolds carry their own corpus).
 const CORPUS_PATH = 'tools/mcp/corpus/index.json'
+// Reviewed cross-group citation escapes. ABSENT is fine and means "no escapes"
+// (the file is seedOnInitOnly — pre-0.1.5 installs never receive it and the
+// ramped checks are NOTE-only there anyway); MALFORMED fails closed — the file
+// is write-guard-protected, so unparseable content is tampering, not config.
+const OVERRIDES_PATH = 'tools/provenance-overrides.json'
 // Never regex binary blobs in the tree-wide corpus-reference sweep.
 const BINARY_FILE =
   /\.(png|jpe?g|gif|webp|ico|icns|bmp|woff2?|ttf|otf|eot|pdf|zip|gz|tar|exe|dll|so|dylib|gguf|node)$/i
@@ -60,7 +81,69 @@ function read(file) {
 }
 
 const uncited = [] // decision sites with no SOURCE in the window (hook parity)
-const problems = [] // resolvability + corpus-integrity failures
+const problems = [] // resolvability + corpus-integrity failures (never ramped)
+const ramped = [] // v0.1.5 semantic findings: group-match + URL-host allowlist
+const citedSites = [] // cited decision sites, held for the corpus group-match below
+
+// ── 0. reviewed cross-group overrides: schema-validated, fail closed ──────────
+// Shape: { comment: string, entries: [{ file, group, id, reason }] } — every
+// field a non-empty string, group a known decision-group key, no extra keys
+// (a typo'd key would silently grant nothing while a reviewer believes it did).
+const overrides = []
+if (existsSync(OVERRIDES_PATH)) {
+  let raw = null
+  try {
+    raw = JSON.parse(readFileSync(OVERRIDES_PATH, 'utf8'))
+  } catch (e) {
+    fail(
+      'provenance',
+      `${OVERRIDES_PATH} is not valid JSON (${e.message}) — it is write-guard-protected, so a corrupt overrides file is tampering; restore it from git history`,
+    )
+  }
+  const groupKeys = new Set(DECISION_GROUPS.map((g) => g.key))
+  if (
+    raw === null ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    typeof raw.comment !== 'string' ||
+    !Array.isArray(raw.entries)
+  ) {
+    problems.push(
+      `${OVERRIDES_PATH}: expected { comment: string, entries: array } — malformed overrides fail closed`,
+    )
+  } else {
+    raw.entries.forEach((entry, i) => {
+      const errs = []
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        problems.push(
+          `${OVERRIDES_PATH}: entries[${String(i)}] is not an object — malformed overrides fail closed`,
+        )
+        return
+      }
+      for (const field of ['file', 'group', 'id', 'reason']) {
+        if (typeof entry[field] !== 'string' || entry[field].trim() === '') {
+          errs.push(`missing/empty ${field}`)
+        }
+      }
+      for (const key of Object.keys(entry)) {
+        if (!['file', 'group', 'id', 'reason'].includes(key))
+          errs.push(`unknown key ${JSON.stringify(key)}`)
+      }
+      if (typeof entry.group === 'string' && entry.group !== '' && !groupKeys.has(entry.group)) {
+        errs.push(
+          `unknown decision group ${JSON.stringify(entry.group)} (known: ${[...groupKeys].join(', ')})`,
+        )
+      }
+      if (errs.length) {
+        problems.push(
+          `${OVERRIDES_PATH}: entries[${String(i)}]: ${errs.join('; ')} — malformed overrides fail closed`,
+        )
+        return
+      }
+      overrides.push(entry)
+    })
+  }
+}
 
 // ── 1. decision sites need a SOURCE, and every SOURCE must resolve ────────────
 for (const file of tracked.filter(gateFileMatch).filter(gateScansFile)) {
@@ -69,10 +152,23 @@ for (const file of tracked.filter(gateFileMatch).filter(gateScansFile)) {
   for (const f of findUncitedDecisionSites(src)) {
     uncited.push(`${file}:${f.line}  ${f.excerpt}`)
   }
+  for (const site of findCitedDecisionSites(src)) {
+    citedSites.push({ file, ...site })
+  }
   for (const s of extractSourceComments(src)) {
-    if (!payloadResolves(s.payload)) {
+    if (payloadResolves(s.payload)) continue
+    // Distinguish the v0.1.5 host-allowlist miss (ramped) from a payload that
+    // grounds nowhere at all (a resolvability failure since v0.1.1 — never ramped).
+    const badHosts = extractHttpsUrlHosts(s.payload).filter((h) => !isAllowedCitationHost(h))
+    if (badHosts.length) {
+      ramped.push(
+        `${file}:${s.line}  SOURCE cites URL host(s) not on the citation allowlist: ${badHosts.join(', ')} — ` +
+          `pin the authority in ${CORPUS_PATH} and cite [corpus: <id>] (extend the corpus in the same PR), ` +
+          'or add the domain to tools/lib/citation-domains.mjs via a reviewed human edit',
+      )
+    } else {
       problems.push(
-        `${file}:${s.line}  SOURCE payload resolves to nothing — need an https:// URL, ` +
+        `${file}:${s.line}  SOURCE payload resolves to nothing — need an allowlisted https:// URL, ` +
           `an existing repo-relative path, or a corpus reference (got: ${JSON.stringify(s.payload.trim().slice(0, 80))})`,
       )
     }
@@ -150,6 +246,43 @@ if (corpus !== null) {
   }
 }
 
+// ── 2b. group-match: cited corpus entries must justify the decision class ─────
+// For each cited decision site, the UNION of the cited entries' `groups` must
+// cover every group the site's line matched. Entries that declare no `groups`
+// are wildcards (per-entry self-disable: consumer-added corpus entries are
+// never forced into the taxonomy — citing one keeps v0.1.4 presence semantics
+// for the whole site). Unknown cited ids are already failed by sweep 3 below,
+// so they are simply skipped here. Reviewed { file, group, id } overrides
+// accept a specific cross-group pairing.
+if (corpus !== null) {
+  const entryGroups = new Map()
+  for (const entry of corpus) {
+    if (typeof entry?.id === 'string' && entry.id !== '') {
+      entryGroups.set(entry.id, Array.isArray(entry.groups) ? entry.groups : null)
+    }
+  }
+  for (const site of citedSites) {
+    const refs = [...site.payload.matchAll(CORPUS_REF)].map((m) => m[1])
+    const known = refs.filter((id) => entryGroups.has(id))
+    if (known.length === 0) continue // URL/path citation, or unresolvable ids (sweep 3 reds those)
+    if (known.some((id) => entryGroups.get(id) === null)) continue // wildcard: a groups-less entry is cited
+    const covered = new Set(known.flatMap((id) => entryGroups.get(id)))
+    for (const g of site.groups) {
+      if (covered.has(g)) continue
+      if (overrides.some((o) => o.file === site.file && o.group === g && refs.includes(o.id))) {
+        continue
+      }
+      const cited = known.map((id) => `${id} (groups: ${entryGroups.get(id).join(', ') || 'none'})`)
+      ramped.push(
+        `${site.file}:${site.line}  decision group '${g}' is not justified by the cited corpus ` +
+          `entr${known.length === 1 ? 'y' : 'ies'} ${cited.join('; ')} — cite an entry whose groups ` +
+          `include '${g}' (extend ${CORPUS_PATH} in the same PR if the authority is missing), or add ` +
+          `a reviewed { file, group, id, reason } entry to ${OVERRIDES_PATH}`,
+      )
+    }
+  }
+}
+
 // ── 3. every corpus reference in the tracked tree must resolve ────────────────
 if (corpus !== null) {
   for (const file of tracked.filter((f) => !BINARY_FILE.test(f))) {
@@ -167,6 +300,26 @@ if (corpus !== null) {
   }
 }
 
+// ── ramp: the v0.1.5 semantic checks (group-match + host allowlist) ───────────
+// rampNote is called LAZILY — only when there ARE would-be findings — so green
+// trees emit no ramp noise. Pre-0.1.5 baseVersion installs get each finding as
+// an actionable NOTE and still pass; fresh installs and the template tree fail.
+let rampSummary = 'group-match + URL-host allowlist clean'
+if (ramped.length) {
+  if (
+    rampNote(
+      'provenance',
+      '0.1.5',
+      'semantic citation checks (corpus decision-group match + bare-URL host allowlist)',
+    )
+  ) {
+    for (const f of ramped) console.log(`provenance: NOTE — (ramp) ${f}`)
+    rampSummary = `${String(ramped.length)} semantic finding(s) withheld by the pre-0.1.5 ramp`
+  } else {
+    problems.push(...ramped)
+  }
+}
+
 if (uncited.length) {
   process.stderr.write(
     `Provenance gate (check:sources): ${String(uncited.length)} decision site(s) lack an inline ` +
@@ -177,7 +330,7 @@ if (uncited.length) {
 }
 if (problems.length) {
   process.stderr.write(
-    `Provenance gate (check:sources): ${String(problems.length)} citation-resolvability / corpus-integrity failure(s):\n` +
+    `Provenance gate (check:sources): ${String(problems.length)} citation-resolvability / corpus-integrity / citation-justification failure(s):\n` +
       `${problems.join('\n')}\n`,
   )
 }
@@ -190,6 +343,6 @@ if (uncited.length || problems.length) {
 
 process.stdout.write('check:sources — all decision sites carry SOURCE citations (0 flagged)\n')
 process.stdout.write(
-  `check:sources — corpus verified: ${String(corpus.length)} entr(ies) hash-clean, all corpus refs resolve, ${String(coveredGroups.size)}/${String(knownGroupKeys.size)} decision groups covered\n`,
+  `check:sources — corpus verified: ${String(corpus.length)} entr(ies) hash-clean, all corpus refs resolve, ${String(coveredGroups.size)}/${String(knownGroupKeys.size)} decision groups covered; ${rampSummary}\n`,
 )
-ok('provenance', 'resolvable citations over a tamper-evident corpus')
+ok('provenance', 'resolvable, group-matched citations over a tamper-evident corpus')

@@ -2,7 +2,7 @@
 // app.onError / app.notFound / the OpenAPIHono defaultHook so every non-2xx
 // JSON body — validation, auth, 404, skew, body-limit, uncaught — is the same
 // @app/schema ApiError envelope. Handlers never hand-roll error JSON.
-// SOURCE: envelope shape per Microsoft REST API Guidelines
+// SOURCE: envelope shape per Microsoft REST API Guidelines [corpus: microsoft/api-guidelines]
 // https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md
 import type { ApiErrorBody, ApiErrorCode } from '@app/schema'
 import type { Hook } from '@hono/zod-openapi'

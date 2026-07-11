@@ -164,10 +164,15 @@ export const WRITE_PROTECTED = [
   // shell/tool edit here would be the way to weaken CI without touching the config.
   { id: 'validate-floor', re: /^tools\/validate\.floor\.json$/ },
   { id: 'gate-scripts', re: /^tools\/(check-[^/]+|run-rust-gates|build-check)\.mjs$/ },
+  // The bare-URL citation allowlist the provenance gate resolves against — widening it
+  // weakens the gate, so adding a domain is a human decision. Listed BEFORE tools-lib
+  // (which also covers the path) so the deny carries its own named, canaried rule id.
+  { id: 'citation-domains', re: /^tools\/lib\/citation-domains\.mjs$/ },
   { id: 'tools-lib', re: /^tools\/lib\// }, // shared gate helpers — same trust level as the gates
   { id: 'tools-mcp', re: /^tools\/mcp\// }, // corpus + MCP servers the provenance gate resolves against
   { id: 'lock-json', re: /^tools\/(identity|prompts)\.lock\.json$/ },
   { id: 'rls-exempt', re: /^tools\/rls-exempt\.json$/ }, // exempting a table from RLS is a human decision
+  { id: 'provenance-overrides', re: /^tools\/provenance-overrides\.json$/ }, // cross-group citation escapes are a human decision
   { id: 'license-exceptions', re: /^tools\/license-exceptions\.json$/ }, // license exceptions are a human decision
   { id: 'bundle-budget', re: /^tools\/bundle-budget\.json$/ },
   { id: 'perf-budget', re: /^tools\/perf-budget\.json$/ },

@@ -54,7 +54,7 @@ export class LiveInferenceProvider implements InferenceProvider {
       body: JSON.stringify({
         model: this.#model,
         // SOURCE: greedy decoding for eval determinism — sampling noise would make
-        // run-to-run scores incomparable [corpus: harness/doctrine]
+        // run-to-run scores incomparable [corpus: llamacpp/sampling]
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [

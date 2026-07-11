@@ -69,7 +69,14 @@ Tree-wide scan for decision-site keywords (RLS SQL, `set_config`/`SET LOCAL`,
 constants) lacking `// SOURCE:` (`-- SOURCE:` in SQL) within a 3-line window. Identical
 heuristic to the PostToolUse hook, so in-session and CI can never disagree. Pass by
 citing an authority (add `[corpus: <id>]` when pinned in `tools/mcp/corpus/index.json`).
-**Anti-vacuity:** add `const timeoutMs = 5000` with no citation → FAIL with file:line.
+Two semantic checks ride on top (v0.1.5, rampNote-gated — NOTE-only on pre-0.1.5
+baseVersions): a cited corpus entry that declares `groups` must cover the site's own
+decision group (reviewed cross-group escapes live in `tools/provenance-overrides.json`;
+groups-less entries stay presence-checked), and a bare-URL citation grounds only when
+its host is on the `tools/lib/citation-domains.mjs` allowlist.
+**Anti-vacuity:** add `const timeoutMs = 5000` with no citation → FAIL with file:line;
+cite `[corpus: llamacpp/sampling]` on a `jwtVerify` line → FAIL naming the group
+mismatch; cite a bare URL on a non-allowlisted host → FAIL naming the host.
 
 ### 7. tauri-policy — `node tools/check-tauri-policy.mjs`
 

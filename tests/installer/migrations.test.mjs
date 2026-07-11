@@ -296,10 +296,12 @@ test('matchSeedOnInitOnly: prefix subtree vs exact file, Windows backslash input
   assert.equal(matchSeedOnInitOnly('unrelated/file.ts', patterns), null)
 })
 
-test('the shipped 0.1.4 seedOnInitOnly record targets real template files only (no typo drift)', () => {
+test('the shipped seedOnInitOnly records target real template files only (no typo drift)', () => {
   const patterns = seedOnInitOnlyPatterns(readTemplateMigrations())
   assert.ok(patterns.length > 0, 'the shipped record must list exemplar paths')
-  const installPaths = walkTemplate('stack').map((e) => e.installPath)
+  // Seeded exemplars live in BOTH trees: 0.1.4's are stack app files, 0.1.5's
+  // tools/provenance-overrides.json is base (like every seeded tools/*.json).
+  const installPaths = [...walkTemplate('base'), ...walkTemplate('stack')].map((e) => e.installPath)
   for (const pattern of patterns) {
     const hit = installPaths.some((ip) => (pattern.endsWith('/') ? ip.startsWith(pattern) : ip === pattern))
     assert.ok(hit, `seedOnInitOnly pattern '${pattern}' resolves to no template file — stale/typo'd record`)

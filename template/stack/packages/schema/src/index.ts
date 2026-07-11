@@ -87,21 +87,21 @@ export const notes = pgTable(
   (table) => [
     // Four per-operation policies (never FOR ALL): each op stays independently
     // auditable and a future widening of one op cannot silently widen the rest.
-    // SOURCE: harness doctrine — per-op owner-scoped policies for app_api [corpus: harness/doctrine]
+    // SOURCE: per-command policies, USING filters reads [corpus: postgres/rls-force]; per-op doctrine [corpus: harness/doctrine]
     pgPolicy('notes_select_own', {
       as: 'permissive',
       for: 'select',
       to: appApi,
       using: ownerIsCurrentUser(table.ownerId),
     }),
-    // SOURCE: per-op owner policy — insert guards via WITH CHECK [corpus: harness/doctrine]
+    // SOURCE: per-op owner policy — insert guards via WITH CHECK [corpus: postgres/rls-force]
     pgPolicy('notes_insert_own', {
       as: 'permissive',
       for: 'insert',
       to: appApi,
       withCheck: ownerIsCurrentUser(table.ownerId),
     }),
-    // SOURCE: per-op owner policy — update guards read AND write rows [corpus: harness/doctrine]
+    // SOURCE: per-op owner policy — update guards read AND write rows [corpus: postgres/rls-force]
     pgPolicy('notes_update_own', {
       as: 'permissive',
       for: 'update',
@@ -109,7 +109,7 @@ export const notes = pgTable(
       using: ownerIsCurrentUser(table.ownerId),
       withCheck: ownerIsCurrentUser(table.ownerId),
     }),
-    // SOURCE: per-op owner policy — delete scoped by USING [corpus: harness/doctrine]
+    // SOURCE: per-op owner policy — delete scoped by USING [corpus: postgres/rls-force]
     pgPolicy('notes_delete_own', {
       as: 'permissive',
       for: 'delete',

@@ -9,6 +9,12 @@
 // from tools/lib/provenance-rules.mjs — the SAME module tools/check-sources.mjs runs
 // tree-wide, so per-edit and CI can never disagree. This hook stays presence-only and
 // fast; resolvability rigor (corpus ids, URL/path existence) lives in the gate.
+// DELIBERATE ASYMMETRY (v0.1.5): the gate's semantic checks — corpus decision-group
+// match and the bare-URL host allowlist (tools/lib/citation-domains.mjs) — do NOT run
+// here. Both are version-RAMPED via rampNote (NOTE-only on pre-0.1.5 baseVersions),
+// and a hook can only block (exit 2) or pass — it has no NOTE channel, so enforcing
+// them per edit would hard-block installs the gate deliberately keeps green. The
+// group-match additionally needs the corpus loaded, which a per-edit hook never does.
 // SOURCE: docs/harness/README.md (posttool-source-check; provenance)
 import { readFileSync } from 'node:fs'
 import process from 'node:process'

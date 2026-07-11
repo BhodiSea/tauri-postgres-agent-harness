@@ -120,11 +120,25 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 - **Coverage floors are enforced**: the Stop hook runs
   `vitest run --coverage` against the thresholds in `vitest.config.ts` — a
   feature landing without tests reds the turn.
-- **Styling is tokens-only.** The `@theme` in `apps/desktop/src/styles.css` +
-  `tools/styleguide.manifest.json` are the ENTIRE design vocabulary: the default
-  Tailwind palette/scales are erased (an erased utility compiles to nothing), and
-  raw hex, raw px, and inline `style={}` are gate-red. Extend the system by
-  editing BOTH files in one reviewed diff.
+- **Styling is tokens-only, in BOTH themes.** The `@theme` in
+  `apps/desktop/src/styles.css` (dark = base) + the `:root[data-theme='light']`
+  override + `tools/styleguide.manifest.json` are the ENTIRE design vocabulary:
+  the default Tailwind palette/scales are erased, and raw hex, raw px, inline
+  `style={}`, and Tailwind arbitrary-value escapes (`w-[13px]`) are gate-red.
+  The styleguide gate COMPUTES WCAG contrast from the OKLCH token values for
+  every declared pair in both themes — extend tokens + manifest in one reviewed
+  diff and keep the pairs green. Light/dark parity is axe-swept per route in e2e.
+- **Interactive controls render through `src/components` primitives**
+  (Button/Input/Skeleton/Toast/EmptyState) — hand-repeated control class
+  strings are a review reject; new control styling goes into the primitive.
+- **Motion is opt-in**: animations only behind `motion-safe:`, with the global
+  `prefers-reduced-motion` backstop in styles.css — e2e asserts the held
+  loading skeleton runs ZERO animations under reduced motion.
+- **Data-dense screens follow `features/matrix`**: virtualized window
+  (`useVirtualWindow`), APG roving-tabindex grid (`useRovingGrid`,
+  aria-rowcount over the windowed DOM), keyset pagination (`useKeysetQuery`).
+  The perf-budget gate measures the REAL matrix subject
+  (`features/matrix/perfSubject.ts`), not a synthetic fixture.
 - Charts in `features/{matrix,graph}` are hand-rolled SVG (chart libs banned
   there by lint); a11y is jsx-a11y strict, WCAG 2.2 AA.
 

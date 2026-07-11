@@ -41,6 +41,18 @@ if (tag?.startsWith('v') && tag.slice(1) !== pkgVersion) {
   problems.push(`git tag ${tag} != package.json ${pkgVersion}`)
 }
 
+// Citation + changelog ride the same lockstep: a release whose CITATION.cff or
+// CHANGELOG section lags the version ships silently-stale metadata (release.yml
+// re-checks the CHANGELOG at tag time, but skew should red the PR that causes it).
+const citation = readFileSync(join(root, 'CITATION.cff'), 'utf8')
+if (!citation.includes(`version: ${pkgVersion}`)) {
+  problems.push(`CITATION.cff carries no "version: ${pkgVersion}"`)
+}
+const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
+if (!new RegExp(`^## \\[${pkgVersion.replaceAll('.', '\\.')}\\]`, 'm').test(changelog)) {
+  problems.push(`CHANGELOG.md has no "## [${pkgVersion}]" section`)
+}
+
 if (problems.length > 0) {
   console.error('release lockstep FAILED:')
   for (const p of problems) console.error(`  ${p}`)

@@ -43,7 +43,9 @@ Prompts are advisory; these are not.
 
 `pnpm validate` runs `tools/validate.mjs`, driven by a single config
 (`tools/harness.config.mjs`) shared by the Stop hook and CI so the three can never
-drift (22 steps, cheap → expensive):
+drift (22 steps, cheap → expensive). CI's `--min-floor` runs the frozen snapshot
+`tools/validate.floor.json` (write-guard-protected, fail-closed if missing, asserted
+equal to the config on every PR) — a locally-weakened config cannot weaken CI:
 
 format (biome) → **gate-integrity** (manifest sha over the gate scripts/hooks — tampering
 is turn-fatal) → rust-fmt → types (`tsc -b`, max strictness) → lint (typescript-eslint
@@ -62,14 +64,17 @@ tsconfig-references sync) → dead-code (`knip --strict`, zero ignores) → arch
 `db/context` DAL-only, no circulars) → build (vite build + **bundle-purity grep** + gzip
 byte budgets) → rust-check (`cargo check --locked` + tauri-specta bindings drift) →
 **styleguide** (tokens-only design system: erased default palette, no raw hex/px/inline
-styles, accent budget) → perf-budget (median-of-N render budget, re-measure-once) →
-**route-manifest** (every screen registered with loading/empty/error states; features-dir
-closure) → **e2e** (the whole Playwright lane — axe per state, keyboard walk with computed
-focus-visibility, focus traps — as an agent-time gate) → docs-sync (AGENTS.md gate list ==
-the chain; advertised commands exist). The expensive gates are content-hash **stamped**:
-unchanged inputs make a warm validate skip build/contracts/licenses/rust-check in
-milliseconds — measured on the fresh scaffold: cold ≈ 67 s (real cargo check + real
-chromium e2e), warm ≈ 7 s for all 22 steps (CI always re-runs everything).
+styles/arbitrary-value escapes, accent budget, light+dark theme closure with **WCAG
+contrast computed from the OKLCH token values** — both themes, no prose contrast tables) →
+perf-budget (median-of-N render budget over the **real virtualized matrix component**,
+re-measure-once, vacuous-render fail) → **route-manifest** (every screen registered with
+loading/empty/error states; path validity + uniqueness; features-dir closure) → **e2e**
+(the whole Playwright lane — axe per state, keyboard walk with computed focus-visibility,
+focus traps — as an agent-time gate) → docs-sync (AGENTS.md gate list == the chain;
+advertised commands exist). The expensive gates are content-hash **stamped**: unchanged
+inputs make a warm validate skip build/contracts/licenses/rust-check/**e2e**/version-sync
+in milliseconds (a vacuous run never stamps; CI always re-runs everything), and the Stop
+hook's `--report-all` runs the read-only gates through a small concurrency pool.
 
 Rust/database gates **skip loudly** without the toolchain locally and **fail closed in
 CI** (`HARNESS_REQUIRE_TOOLCHAINS=1`) — a skip is never mistakable for a pass.
@@ -80,13 +85,17 @@ pass vacuously), the cross-user isolation matrix, insert-smuggle → SQLSTATE 42
 a pooled-connection GUC-leak detector, and a pg_catalog gate (FORCE RLS flags, per-op
 policies, pgvector ≥ patched version, app role has no BYPASSRLS) — then the unit suite.
 
-Opt-in modules (12): `ci-windows-release` (sign → verify → NSIS silent-install smoke →
+Opt-in modules (10): `ci-windows-release` (sign → verify → NSIS silent-install smoke →
 Defender scan → size budget), `ci-windows-e2e` (tauri-driver + TLS-inspection/EDR/long-path
 resilience), `ci-macos`, `ci-provenance` (SLSA + SBOM npm+cargo), `mutation` (Stryker +
-cargo-mutants), `gate-perf-budget` (10k-cell matrix render), `gate-a11y-deep`,
-`gate-styleguide` (OKLCH tokens), `crash-reporting`, `ops-backup` (pgBackRest + HITL
-state-machine tests), `eval-live` (GPU runner + GBNF pre-validation), `observability`
-(OTel). Enable with `npx … enable <module>`. Catalog:
+cargo-mutants), `gate-a11y-deep` (NVDA checklist + deep axe lane), `crash-reporting`
+(redaction policy + tests; the Sentry transports ship as documented hand-apply patches),
+`ops-backup` (pgBackRest + HITL state-machine test seams), `eval-live` (GPU runner + GBNF
+pre-validation; live scoring is a marked project seam), `observability` (OTel span-name
+manifest + tests; the NodeSDK wiring ships as a documented hand-apply patch). Each module
+README carries an "Honest limits" section — what ships wired vs. as a seam. The former
+`gate-perf-budget`/`gate-styleguide` modules were promoted into the default chain in
+v0.1.3 and retired. Enable with `npx … enable <module>`. Catalog:
 [docs/harness/gates-catalog.md](template/base/docs/harness/gates-catalog.md).
 
 ## Security invariants (lint + hook enforced)

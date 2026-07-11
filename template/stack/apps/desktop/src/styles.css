@@ -13,17 +13,19 @@
  * SOURCE: Tailwind v4 theme namespace erasure (`--namespace-*: initial`)
  * https://tailwindcss.com/docs/theme#overriding-the-default-theme
  *
- * Color: near-monochrome dark canvas (hue 240, chroma <= 0.008) with ONE
- * cyan-teal accent (hue 200). OKLCH keeps lightness steps perceptually uniform.
- * WCAG 2.2 AA contrast (SC 1.4.3 text >= 4.5:1, SC 1.4.11 non-text >= 3:1),
- * computed from these exact OKLCH values:
- *   ink       on canvas  15.8:1   on surface  14.4:1
- *   ink-muted on canvas   7.8:1   on surface   7.1:1
- *   accent    on canvas  10.9:1   on surface   9.9:1
- * All text tokens clear AA (and AAA) on both backgrounds; accent doubles as a
- * non-text indicator color at >= 3:1. `edge` is decorative only (1.5:1) and
- * must never carry meaning on its own.
+ * TWO THEMES, one token vocabulary. The @theme block below is the DARK base — the
+ * default paint AND the launch frame (index.html + tauri.conf.json
+ * windows[].backgroundColor stay dark in both themes, a deliberate anti-flash
+ * frame). `light` is a FULL six-token override under :root[data-theme='light'] in
+ * @layer base; the theme runtime (src/theme/theme.ts) stamps data-theme before the
+ * first paint. Near-monochrome (hue 240, chroma <= 0.012) with ONE cyan-teal accent
+ * (hue 200); OKLCH keeps lightness steps perceptually uniform. Contrast is no longer
+ * prose: the styleguide gate COMPUTES the WCAG ratio for the base and each theme
+ * from the manifest's declared pairs (OKLCH -> linear sRGB -> relative luminance),
+ * so the numbers can never drift from the token values.
  * SOURCE: WCAG 2.2 SC 1.4.3 / 1.4.11 contrast minimums [corpus: wcag/contrast-aa]
+ * SOURCE: OKLCH -> sRGB reference path for computed contrast [corpus: csswg/oklch-srgb]
+ * SOURCE: WCAG relative luminance + contrast ratio [corpus: wcag/relative-luminance]
  */
 @theme {
   --color-*: initial;
@@ -94,9 +96,23 @@
 
 @layer base {
   :root {
-    /* Native controls, scrollbars, and form widgets render dark — a light
-       scrollbar on the dark canvas reads as a bug, not a theme. */
+    /* Native controls, scrollbars, and form widgets render dark by default — a
+       light scrollbar on the dark canvas reads as a bug, not a theme. */
     color-scheme: dark;
+  }
+  /* Light theme: a FULL six-token override (every @theme --color-* is redeclared),
+     oklch literals only. color-scheme flips native UI to light in lockstep. These
+     starting values are gate-tuned for real AA contrast in the styleguide stage.
+     SOURCE: color-scheme keeps native UI in sync with the painted theme; the app
+     owns the override persistence [corpus: web/prefers-color-scheme] */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --color-canvas: oklch(0.97 0.004 240);
+    --color-surface: oklch(0.93 0.005 240);
+    --color-edge: oklch(0.82 0.008 240);
+    --color-ink: oklch(0.25 0.01 240);
+    --color-ink-muted: oklch(0.47 0.012 240);
+    --color-accent: oklch(0.52 0.12 200);
   }
   body {
     background-color: var(--color-canvas);
@@ -109,5 +125,21 @@
   :focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+  }
+  /* Honor the OS reduce-motion setting: collapse animations and transitions to
+     effectively instant. The motion-safe: utilities already gate our OWN
+     animations; this is the belt-and-braces global backstop for default or
+     third-party motion the utilities do not reach.
+     SOURCE: prefers-reduced-motion / WCAG 2.3.3 — non-essential motion becomes
+     opt-in [corpus: wcag/reduced-motion] */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

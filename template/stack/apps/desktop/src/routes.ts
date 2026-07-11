@@ -42,4 +42,15 @@ export const ROUTES = [
       error: 'home-error',
     },
   },
+  {
+    id: 'matrix',
+    label: 'Matrix',
+    path: '/matrix',
+    features: ['matrix'],
+    states: {
+      loading: 'matrix-loading',
+      empty: 'matrix-empty',
+      error: 'matrix-error',
+    },
+  },
 ] as const satisfies readonly RouteEntry[]

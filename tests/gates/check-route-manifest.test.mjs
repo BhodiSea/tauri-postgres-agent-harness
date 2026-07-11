@@ -22,8 +22,8 @@ const SHIPPED_ALLOWLIST = readFileSync(
   'utf8',
 )
 
-// The scaffold's feature directories: notes is route-referenced, the rest allowlisted.
-const SCAFFOLD_FEATURES = ['connection', 'notes', 'palette', 'shortcuts']
+// The scaffold's feature directories: notes + matrix are route-referenced, the rest allowlisted.
+const SCAFFOLD_FEATURES = ['connection', 'matrix', 'notes', 'palette', 'shortcuts']
 
 function fixture({ routes = SHIPPED_ROUTES, allowlist = SHIPPED_ALLOWLIST, features = SCAFFOLD_FEATURES } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-routegate-'))

@@ -15,6 +15,10 @@
     {
       "file": "apps/desktop/src/styles.css",
       "reason": "the token source of truth: raw px appears only in token values and the focus outline"
+    },
+    {
+      "file": "apps/desktop/src/features/matrix/MatrixGrid.tsx",
+      "reason": "virtualized grid: the row window is positioned with an inline style transform/height (offset + total scroll height are runtime pixel values that no token utility can express); all colors/spacing remain tokens"
     }
   ]
 }

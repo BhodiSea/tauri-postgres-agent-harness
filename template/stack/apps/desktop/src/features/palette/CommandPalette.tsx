@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { AppDialog } from '../../components/AppDialog'
+import { Input } from '../../components/Input'
 import { cn } from '../../lib/utils'
 
 export interface Command {
@@ -45,8 +46,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
 
   return (
     <AppDialog title="Command palette" open={open} onClose={handleClose}>
-      <input
-        type="text"
+      <Input
         role="combobox"
         aria-expanded={filtered.length > 0}
         aria-controls="command-palette-options"
@@ -70,7 +70,6 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
             runCommand(active)
           }
         }}
-        className="w-full rounded border border-edge bg-canvas px-3 py-2 text-sm text-ink placeholder:text-ink-muted"
       />
       <div
         id="command-palette-options"

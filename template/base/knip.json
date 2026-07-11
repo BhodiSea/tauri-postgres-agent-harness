@@ -20,6 +20,7 @@
         "src/main.tsx!",
         "vite.config.ts",
         "src/test-setup.ts",
+        "src/features/matrix/perfSubject.ts!",
         "src/**/*.test.{ts,tsx}",
         "tests/unit/**/*.test.{ts,tsx}"
       ],

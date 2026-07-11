@@ -28,6 +28,15 @@ export async function installMockIpc(page: Page, options: MockIpcOptions = {}): 
   const appVersion = options.appVersion ?? '0.1.0-e2e'
   await page.addInitScript(
     ({ version }) => {
+      // Pin the theme so the theme-agnostic specs (a11y/states/degraded) are
+      // deterministic: chromium defaults prefers-color-scheme to light, which
+      // would otherwise flip the `system` default and change computed contrast.
+      // The dedicated theme spec drives light/dark explicitly.
+      try {
+        localStorage.setItem('theme', 'dark')
+      } catch {
+        // Storage unavailable in some contexts — the app falls back to system.
+      }
       let nextCallbackId = 0
       const internals: TauriInternalsMock = {
         // Commands the scaffold shell uses; everything else (plugin:event|listen

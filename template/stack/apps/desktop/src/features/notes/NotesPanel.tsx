@@ -1,12 +1,17 @@
 import { type Note, NotesPage } from '@app/schema'
+import { Button } from '../../components/Button'
+import { EmptyState } from '../../components/EmptyState'
+import { Skeleton } from '../../components/Skeleton'
 import { ROUTES } from '../../routes'
 import { type ListFetcher, type ListQueryState, useListQuery } from './useListQuery'
 
 // The home screen's data panel — the reference implementation of the three
-// canonical data states every route declares in src/routes.ts: the loading,
-// empty, and error surfaces each render the manifest's data-testid, and the
-// error surface carries a working retry affordance. e2e/states.spec.ts drives
-// all three via API stubs; App.test.tsx covers them under jsdom.
+// canonical data states every route declares in src/routes.ts, now expressed
+// through the shared primitives: Skeleton (loading), EmptyState (empty), and a
+// retry Button (error). The loading/empty/error surfaces each render the
+// manifest's data-testid, and the error surface carries a working retry
+// affordance. e2e/states.spec.ts drives all three via API stubs; App.test.tsx
+// covers them under jsdom.
 // SOURCE: harness doctrine — degraded/empty/loading states are a first-class
 // UI concern, never a blank panel [corpus: harness/doctrine]
 
@@ -15,15 +20,15 @@ import { type ListFetcher, type ListQueryState, useListQuery } from './useListQu
 const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
 
 // Zod parse at the fetch boundary — the desktop trusts contracts, not wire
-// bytes. Keyset pagination: the scaffold panel renders the FIRST page; wire
-// `nextCursor` into a paged list when the product needs one.
+// bytes. Keyset pagination: the scaffold panel renders the FIRST page; the matrix
+// screen (features/matrix/useKeysetQuery) shows the paged variant.
 const fetchNotes: ListFetcher<Note> = async (signal) => {
   const response = await fetch(`${API_ORIGIN}/api/notes`, { signal })
   if (!response.ok) throw new Error(`notes responded ${String(response.status)}`)
   return NotesPage.parse(await response.json()).items
 }
 
-// The scaffold's only screen; its manifest entry carries the state test ids.
+// The scaffold's home screen; its manifest entry carries the state test ids.
 const [HOME] = ROUTES
 
 function NotesBody({
@@ -34,20 +39,17 @@ function NotesBody({
   readonly onRetry: () => void
 }) {
   if (state.status === 'loading') {
-    return (
-      <p
-        data-testid={HOME.states.loading}
-        className="mt-3 text-sm text-ink-muted motion-safe:animate-pulse"
-      >
-        Loading notes…
-      </p>
-    )
+    return <Skeleton data-testid={HOME.states.loading} lines={3} className="mt-3" />
   }
   if (state.status === 'empty') {
     return (
-      <p data-testid={HOME.states.empty} className="mt-3 text-sm text-ink-muted">
-        No notes yet — the first note you create will appear here.
-      </p>
+      <EmptyState
+        data-testid={HOME.states.empty}
+        className="mt-3"
+        title="No notes yet"
+        description="The first note you create will appear here."
+        cta={{ label: 'Reload', onClick: onRetry }}
+      />
     )
   }
   if (state.status === 'error') {
@@ -59,13 +61,9 @@ function NotesBody({
       >
         <p className="text-sm">Could not load notes.</p>
         <p className="mt-1 font-mono text-xs text-ink-muted">{state.message}</p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 rounded border border-edge px-2 py-1 text-xs font-medium hover:text-accent"
-        >
+        <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
           Retry
-        </button>
+        </Button>
       </div>
     )
   }
@@ -92,13 +90,9 @@ export function NotesPanel() {
         <h2 id="notes-heading" className="text-base font-medium">
           Notes
         </h2>
-        <button
-          type="button"
-          onClick={reload}
-          className="rounded border border-edge px-2 py-1 text-xs text-ink-muted hover:text-ink"
-        >
+        <Button variant="outline" size="sm" onClick={reload}>
           Reload
-        </button>
+        </Button>
       </div>
       <NotesBody state={state} onRetry={reload} />
     </section>

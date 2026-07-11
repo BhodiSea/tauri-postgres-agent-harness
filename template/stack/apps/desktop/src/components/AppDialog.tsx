@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react'
+import { Button } from './Button'
 
 interface AppDialogProps {
   readonly title: string
@@ -37,13 +38,9 @@ export function AppDialog({ title, open, onClose, children }: AppDialogProps) {
     >
       <div className="flex items-center justify-between border-b border-edge px-4 py-3">
         <h2 className="text-sm font-semibold">{title}</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded border border-edge px-2 py-0.5 text-xs text-ink-muted hover:text-ink"
-        >
+        <Button variant="outline" size="sm" onClick={onClose}>
           Esc
-        </button>
+        </Button>
       </div>
       <div className="p-4">{children}</div>
     </dialog>

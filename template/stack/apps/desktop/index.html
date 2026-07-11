@@ -1,12 +1,15 @@
 <!doctype html>
-<!-- Inline background = --color-canvas (oklch 0.16 0.006 240): the page paints
-     dark BEFORE the stylesheet loads, killing the white launch flash. Keep in
-     lockstep with styles.css and windows[].backgroundColor in tauri.conf.json. -->
+<!-- Inline background = the DARK --color-canvas (oklch 0.16 0.006 240): the page
+     paints dark BEFORE the stylesheet or the theme runtime loads, killing the
+     white launch flash. The launch frame stays dark in BOTH themes (a deliberate
+     anti-flash decision); a light-theme user gets the correct tokens the instant
+     styles.css + src/theme/theme.ts apply. Keep in lockstep with styles.css and
+     windows[].backgroundColor in tauri.conf.json. -->
 <html lang="en" style="background-color: #0b0e10">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>{{PROJECT_NAME}}</title>
   </head>
   <body>

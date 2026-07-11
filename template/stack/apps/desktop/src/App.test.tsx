@@ -169,3 +169,69 @@ describe('ErrorBoundary', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDefined()
   })
 })
+
+describe('theme toggle', () => {
+  it('cycles the theme, relabels for the next state, and toasts the switch', async () => {
+    render(<App />)
+    const toggle = screen.getByTestId('theme-toggle')
+    const before = toggle.getAttribute('aria-label')
+    expect(before).toMatch(/Switch to (light|dark|system) theme/)
+    fireEvent.click(toggle)
+    // The switch is confirmed via the polite toast live region.
+    expect(await screen.findByText(/^Theme: (light|dark|system)$/)).toBeDefined()
+    // The label now names the NEW next state (the cycle advanced).
+    expect(screen.getByTestId('theme-toggle').getAttribute('aria-label')).not.toBe(before)
+  })
+})
+
+describe('primary navigation (hand-rolled router + lazy matrix route)', () => {
+  function jsonResponse(body: unknown): Response {
+    return { ok: true, status: 200, json: () => Promise.resolve(body) } as unknown as Response
+  }
+  function note(id: string) {
+    return {
+      id: `00000000-0000-4000-8000-${id.padStart(12, '0')}`,
+      ownerId: '00000000-0000-4000-8000-0000000000aa',
+      title: `note ${id}`,
+      body: 'a b c',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      embedding: null,
+      sourceConfidence: 0.5,
+      sourceModel: null,
+    }
+  }
+  // Route every /api/notes request (with or without cursor/limit query) to one
+  // page — covers both the home NotesPanel and the matrix keyset query.
+  function stubNotesPages(items: readonly unknown[], nextCursor: string | null): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = input instanceof Request ? input.url : input.toString()
+        return url.includes('/api/notes')
+          ? Promise.resolve(jsonResponse({ items, nextCursor }))
+          : new Promise<Response>(() => undefined)
+      }),
+    )
+  }
+
+  afterEach(() => {
+    vi.stubGlobal('fetch', () => new Promise<never>(() => undefined))
+    window.history.pushState(null, '', '/')
+  })
+
+  it('navigating to Matrix lazy-loads the screen and reaches its empty state', async () => {
+    stubNotesPages([], null)
+    render(<App />)
+    fireEvent.click(screen.getByRole('link', { name: 'Matrix' }))
+    expect(await screen.findByTestId('matrix-empty')).toBeDefined()
+  })
+
+  it('matrix ready state renders the grid, the distribution summary, and Load more', async () => {
+    stubNotesPages([note('1'), note('2'), note('3')], 'c2')
+    render(<App />)
+    fireEvent.click(screen.getByRole('link', { name: 'Matrix' }))
+    expect(await screen.findByRole('grid')).toBeDefined()
+    expect(screen.getByRole('img', { name: /Distribution/ })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeDefined()
+  })
+})

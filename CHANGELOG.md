@@ -3,6 +3,13 @@
 All notable changes to the harness are documented here. Consuming projects
 pick up fixes with `npx --yes github:BhodiSea/tauri-postgres-agent-harness update`.
 
+## [0.1.4] — 2026-07-11
+
+In progress — the four pillars deepened: the reference UI becomes a real subject
+(matrix feature, primitives, light/dark parity with computed contrast), the
+machinery is deduplicated and unit-tested, and warm validate gets stamped e2e +
+a report-all concurrency pool. Full notes land with the release commit.
+
 ## [0.1.3] — 2026-07-10
 
 The four-pillar milestone: the default chain grows 16 → **22 gates**, every gate

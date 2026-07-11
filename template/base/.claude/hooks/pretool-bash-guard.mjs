@@ -6,7 +6,7 @@
 // SOURCE: docs/harness/README.md (pretool-bash-guard)
 import { denyTool, pass, readHookInput } from './lib/hookio.mjs'
 
-export const HARNESS_HOOK_VERSION = '0.1.3'
+export const HARNESS_HOOK_VERSION = '0.1.4'
 
 const input = await readHookInput()
 const cmd = String(input?.tool_input?.command ?? '')

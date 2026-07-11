@@ -62,6 +62,65 @@ export function failures(gate, list, hint) {
   process.exit(1)
 }
 
+// ---- version-ramped checks ------------------------------------------------------
+// A NEW check added to an EXISTING gate must not red a consumer whose seeded
+// content predates it — projects grow into gates; gates never ambush an update.
+// rampNote(gate, minVersion, detail) is the one shared ramp: it reads
+// .harness/manifest.json and compares the install's baseVersion (the release
+// vintage of its seeded content; pre-0.1.5 manifests fall back to
+// harnessVersion) against the version the check went live in.
+//   returns true  -> the caller must stay NOTE-only this run (a NOTE line naming
+//                    the check, the ramp, and the graduation runbook is printed);
+//   returns false -> the check is live: no manifest (template dev tree, gate
+//                    fixtures, fresh pre-manifest runs) or baseVersion >= min.
+// Corrupt manifest JSON FAILS CLOSED via fail(): .harness/ is write-guard-
+// protected, so an unparseable manifest is tampering, not a ramp.
+// SOURCE: docs/runbooks/harness-upgrade.md (version-ramp doctrine: NOTE on
+// pre-ramp installs, hard-fail on fresh installs) [corpus: harness/doctrine]
+
+// Numeric dotted compare (the harness releases plain x.y.z tags); non-numeric
+// fields compare as plain strings so a mangled version cannot compare as newest.
+function cmpDotted(a, b) {
+  const pa = String(a).split('.')
+  const pb = String(b).split('.')
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const na = Number.parseInt(pa[i] ?? '0', 10)
+    const nb = Number.parseInt(pb[i] ?? '0', 10)
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      if ((pa[i] ?? '') !== (pb[i] ?? '')) return (pa[i] ?? '') < (pb[i] ?? '') ? -1 : 1
+      continue
+    }
+    if (na !== nb) return na < nb ? -1 : 1
+  }
+  return 0
+}
+
+export function rampNote(gate, minVersion, detail) {
+  const manifestPath = join('.harness', 'manifest.json')
+  if (!existsSync(manifestPath)) return false // no install record -> the check is live
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  } catch (e) {
+    fail(
+      gate,
+      `${manifestPath} is not valid JSON (${e.message}) — it is write-guard-protected, so a corrupt manifest is tampering; restore it from git history`,
+    )
+  }
+  const base = manifest.baseVersion ?? manifest.harnessVersion
+  if (typeof base !== 'string' || !/^\d+\.\d+\.\d+/.test(base)) {
+    fail(
+      gate,
+      `${manifestPath} carries no usable baseVersion/harnessVersion — restore it from git history (the ramp cannot fail open)`,
+    )
+  }
+  if (cmpDotted(base, minVersion) >= 0) return false
+  console.log(
+    `${gate}: NOTE — ${detail} (ramp: live from baseVersion ${minVersion}; this install's baseVersion is ${base}). Sweep the findings, then graduate deliberately by bumping baseVersion in .harness/manifest.json — a human edit; see docs/runbooks/harness-upgrade.md`,
+  )
+  return true
+}
+
 // ---- subprocess capture contract ----------------------------------------------
 // One ceiling for every captured gate subprocess: node's 1 MB default
 // ENOBUFS-crashes on real monorepo output instead of failing with a named

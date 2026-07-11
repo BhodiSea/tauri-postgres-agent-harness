@@ -20,7 +20,7 @@ function runInFixture(script, { env = {}, cwd } = {}) {
   const dir = cwd ?? mkdtempSync(join(tmpdir(), 'tpah-gatelib-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })
   const file = join(dir, 'tools', 'check-fake.mjs')
-  writeFileSync(file, `import { fail, failures, ok, skipOrFail, stampGate } from '${GATE_LIB}'\n${script}`)
+  writeFileSync(file, `import { fail, failures, ok, rampNote, skipOrFail, stampGate } from '${GATE_LIB}'\n${script}`)
   const res = spawnSync('node', [file], { cwd: dir, encoding: 'utf8', env: { ...process.env, CI: '', HARNESS_REQUIRE_TOOLCHAINS: '', ...env } })
   return { dir, code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}` }
 }
@@ -85,6 +85,85 @@ test('stampGate: green run stamps; unchanged inputs skip; mutation re-runs; CI i
 
   const inCi = runInFixture(STAMP_SCRIPT, { cwd: dir, env: { CI: 'true' } })
   assert.ok(inCi.out.includes('ran the real check'), `CI must never trust a stamp: ${inCi.out}`)
+})
+
+// ── rampNote (v0.1.5): the shared version ramp — NOTE-only on installs whose
+// baseVersion predates a check, live everywhere else, fail-closed on tampering. ──
+
+// In-process: rampNote reads .harness/manifest.json from process.cwd() and
+// RETURNS (no exit) on every non-tampered path, so the live/ramped matrix is
+// directly assertable (and counted by the template-lib coverage floor).
+async function rampInDir(manifest, { min = '0.1.5' } = {}) {
+  const { rampNote } = await import(GATE_LIB)
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-ramp-'))
+  if (manifest !== null) {
+    mkdirSync(join(dir, '.harness'), { recursive: true })
+    writeFileSync(join(dir, '.harness', 'manifest.json'), manifest)
+  }
+  const prev = process.cwd()
+  const logged = []
+  const origLog = console.log
+  process.chdir(dir)
+  console.log = (...a) => logged.push(a.map(String).join(' '))
+  try {
+    return { ramped: rampNote('fake', min, 'new-check details'), out: logged.join('\n') }
+  } finally {
+    console.log = origLog
+    process.chdir(prev)
+  }
+}
+
+test('rampNote: no manifest (template dev tree / gate fixtures) → live, no NOTE', async () => {
+  const r = await rampInDir(null)
+  assert.equal(r.ramped, false)
+  assert.equal(r.out, '')
+})
+
+test('rampNote: baseVersion below the ramp → NOTE naming check, ramp, and runbook; returns true', async () => {
+  const r = await rampInDir(JSON.stringify({ harnessVersion: '0.1.5', baseVersion: '0.1.4' }))
+  assert.equal(r.ramped, true)
+  assert.ok(r.out.includes('fake: NOTE — new-check details'), r.out)
+  assert.ok(r.out.includes('live from baseVersion 0.1.5'), r.out)
+  assert.ok(r.out.includes("this install's baseVersion is 0.1.4"), r.out)
+  assert.ok(r.out.includes('docs/runbooks/harness-upgrade.md'), r.out)
+})
+
+test('rampNote: baseVersion at/above the ramp → live; compare is numeric, not lexical', async () => {
+  const atMin = await rampInDir(JSON.stringify({ harnessVersion: '0.1.5', baseVersion: '0.1.5' }))
+  assert.equal(atMin.ramped, false)
+  assert.equal(atMin.out, '')
+  const above = await rampInDir(JSON.stringify({ harnessVersion: '0.2.0', baseVersion: '0.2.0' }))
+  assert.equal(above.ramped, false)
+  // 0.1.10 > 0.1.5 numerically (a lexical compare would call it ramped)
+  const tenth = await rampInDir(JSON.stringify({ baseVersion: '0.1.10', harnessVersion: '0.1.10' }))
+  assert.equal(tenth.ramped, false)
+})
+
+test('rampNote: pre-0.1.5 manifest (no baseVersion) falls back to harnessVersion', async () => {
+  const old = await rampInDir(JSON.stringify({ harnessVersion: '0.1.4', files: {} }))
+  assert.equal(old.ramped, true)
+  assert.ok(old.out.includes("baseVersion is 0.1.4"), old.out)
+  const current = await rampInDir(JSON.stringify({ harnessVersion: '0.1.5', files: {} }))
+  assert.equal(current.ramped, false)
+})
+
+test('rampNote: corrupt or version-less manifest FAILS CLOSED with the FIX line (tampering, not a ramp)', () => {
+  const script = `if (!rampNote('fake', '0.1.5', 'x')) ok('fake', 'live')`
+
+  const corrupt = mkdtempSync(join(tmpdir(), 'tpah-rampbad-'))
+  mkdirSync(join(corrupt, '.harness'), { recursive: true })
+  writeFileSync(join(corrupt, '.harness', 'manifest.json'), '{ not json')
+  const r1 = runInFixture(script, { cwd: corrupt })
+  assert.equal(r1.code, 1, r1.out)
+  assert.ok(r1.out.includes('not valid JSON'), r1.out)
+  assert.ok(r1.out.includes('FIX[fake]:'), r1.out)
+
+  const versionless = mkdtempSync(join(tmpdir(), 'tpah-rampbad-'))
+  mkdirSync(join(versionless, '.harness'), { recursive: true })
+  writeFileSync(join(versionless, '.harness', 'manifest.json'), '{"files":{}}')
+  const r2 = runInFixture(script, { cwd: versionless })
+  assert.equal(r2.code, 1, r2.out)
+  assert.ok(r2.out.includes('no usable baseVersion'), r2.out)
 })
 
 test('every declared stamp input class invalidates the digest (no stale-pass class)', async () => {

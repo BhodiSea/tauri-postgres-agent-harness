@@ -619,13 +619,13 @@ jobs:
   # local step list matches the CI floor (a promoted gate that reaches CI but
   # not the consumer's Stop hook is a silent lockstep break).
   update-skew:
-    # Both previous-release legs run on ubuntu only: Windows adds no
+    # The previous-release legs run on ubuntu only: Windows adds no
     # path-separator coverage the installer-unit matrix lacks, and a second OS
-    # here would double an already-expensive checkout+worktree lane.
+    # here would multiply an already-expensive checkout+worktree lane.
     strategy:
       fail-fast: false
       matrix:
-        previous: [v0.1.1, v0.1.3]
+        previous: [v0.1.1, v0.1.3, v0.1.4]
     runs-on: ubuntu-latest
     env:
       PREVIOUS_RELEASE_TAG: ${{ matrix.previous }}
@@ -683,6 +683,79 @@ jobs:
         if: matrix.previous == 'v0.1.3'
         working-directory: ${{ runner.temp }}/skew
         run: node tools/check-route-manifest.mjs
+      # v0.1.4 leg ONLY, and further than the older legs: the FULL "update never
+      # reds a clean consumer" invariant. A clean previous-release install,
+      # upgraded by the CURRENT installer, must still run an entirely green
+      # `node tools/validate.mjs` after `pnpm install`. Toolchain footprint
+      # stays this job's (node + pnpm, no cargo/docker/chromium): with CI=false
+      # the rust/e2e gates SKIP LOUDLY exactly as they would on a consumer's
+      # machine, and the FAIL-grep below proves a skip can never mask a red.
+      - name: Git baseline + corepack (v0.1.4 leg; diff-based gates and lefthook prepare need a repo)
+        if: matrix.previous == 'v0.1.4'
+        working-directory: ${{ runner.temp }}/skew
+        run: |
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'skew baseline'
+          corepack enable
+          corepack prepare --activate
+      - name: pnpm install in the upgraded consumer (v0.1.4 leg)
+        if: matrix.previous == 'v0.1.4'
+        working-directory: ${{ runner.temp }}/skew
+        run: pnpm install --no-frozen-lockfile
+      - name: Full validate stays green after upgrade (update never reds a clean 0.1.4 consumer)
+        if: matrix.previous == 'v0.1.4'
+        working-directory: ${{ runner.temp }}/skew
+        env:
+          # CI=false mirrors the local consumer experience this invariant
+          # protects: toolchain-dependent gates skip loudly instead of failing
+          # closed (this job deliberately installs none of those toolchains).
+          CI: 'false'
+          HARNESS_REQUIRE_TOOLCHAINS: ''
+        run: |
+          # Deterministic toolchain surface: runner images flip-flop on shipping
+          # cargo, and a half-present one (no webkit sysdeps) would red the leg
+          # for reasons unrelated to `update` — while the rust gates only verify
+          # SEEDED sources update never touches, so their verdict cannot change
+          # across an upgrade. Mask cargo so those gates take their documented
+          # loud-skip path on every image; the exit code + FAIL-grep still hold
+          # every other gate to a real green.
+          mkdir -p "$RUNNER_TEMP/no-cargo"
+          printf '#!/bin/sh\nexit 127\n' > "$RUNNER_TEMP/no-cargo/cargo"
+          chmod +x "$RUNNER_TEMP/no-cargo/cargo"
+          export PATH="$RUNNER_TEMP/no-cargo:$PATH"
+          set -o pipefail
+          node tools/validate.mjs 2>&1 | tee validate-skew.log
+          # Belt and braces: no line may carry the gate-FAIL format, so a loud
+          # SKIP (or a buggy exit-code path) can never mask a real red.
+          if grep -E '^[a-z0-9-]+: FAIL' validate-skew.log; then
+            echo '::error::a gate reported FAIL inside the upgraded 0.1.4 consumer validate'
+            exit 1
+          fi
+          echo 'update-never-reds-a-clean-consumer invariant: OK'
+
+  # seedOnInitOnly completeness: a template file newly ADDED since the previous
+  # release that installs as seeded/config content MUST be registered in
+  # template/migrations.json (or be a reviewed deliberate plant) — otherwise the
+  # next `update` auto-plants it into existing installs and reds route-manifest
+  # + dead-code there. Machine-enforces what the update-skew legs can only
+  # spot-check for paths that already shipped.
+  seeded-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # The gate diffs against the previous release tag and fails loudly
+          # when no tag is reachable — a shallow clone would trip that on purpose.
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - run: node scripts/check-seeded-migrations.mjs
 
   placeholder-residue:
     runs-on: ubuntu-latest

@@ -33,16 +33,34 @@ export function templateRoot() {
 // placeholder rendering makes no sense inside them. They are copied as Buffers.
 const BINARY_EXT = /\.(png|ico|icns|gif|jpe?g|webp|avif|bmp|woff2?|ttf|otf|eot|pdf|zip|bin)$/i
 
+// THE template→install rename rule, as one pure function over a TREE-RELATIVE
+// storage path ('gitignore', 'github/workflows/ci.yml', 'tools/x.mjs.tmpl'):
+// the FIRST segment maps through the top-level dotless RENAMES (dir or file —
+// nested names never rename), and the last segment drops a `.tmpl` suffix.
+// walkTemplate routes every installPath through here, and the harness repo's
+// seeded-migrations selftest gate maps `git diff` paths through the same
+// function — so the two can never disagree about where a stored file lands.
+export function storageToInstall(treeRelPath) {
+  const parts = toPosix(treeRelPath).split('/')
+  if (RENAMES.has(parts[0])) parts[0] = RENAMES.get(parts[0])
+  parts[parts.length - 1] = parts[parts.length - 1].replace(/\.tmpl$/, '')
+  return parts.join('/')
+}
+
 // Walk one template tree ('base' | 'stack' | 'modules/<name>') and return
 // [{ storagePath, installPath, sourcePath }] WITHOUT content — pass an entry
 // to renderEntry to materialize it.
 export function walkTemplate(tree) {
   const root = join(templateRoot(), tree)
   const out = []
-  walk(root, '')
+  walk(root, '', '')
   return out
 
-  function walk(dir, relInstall) {
+  // relStorage tracks the as-stored names (feeds storageToInstall); relInstall
+  // tracks the renamed names, purely to keep storagePath byte-identical to its
+  // historical shape (renamed dir segments, raw leaf name — consumers key off
+  // the `stack/` prefix and the `.tmpl` suffix).
+  function walk(dir, relStorage, relInstall) {
     let entries
     try {
       entries = readdirSync(dir)
@@ -55,12 +73,12 @@ export function walkTemplate(tree) {
       // Top-level dotless names map back to their dot-path installs.
       const name = relInstall === '' && RENAMES.has(entry) ? RENAMES.get(entry) : entry
       if (st.isDirectory()) {
-        walk(abs, join(relInstall, name))
+        walk(abs, join(relStorage, entry), join(relInstall, name))
         continue
       }
       out.push({
         storagePath: toPosix(join(tree, relInstall, entry)),
-        installPath: toPosix(join(relInstall, name.replace(/\.tmpl$/, ''))),
+        installPath: storageToInstall(toPosix(join(relStorage, entry))),
         sourcePath: abs,
       })
     }

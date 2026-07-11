@@ -127,6 +127,10 @@ test('bootstrap init renders the monorepo layout with manifest modes', () => {
   // class). This assertion is load-bearing on the windows-latest CI leg.
   const backslashed = Object.keys(manifest.files).filter((k) => k.includes('\\'))
   assert.deepEqual(backslashed, [], 'manifest keys must use POSIX separators on every OS')
+
+  // Fresh installs start already graduated: baseVersion (the seeded-content
+  // vintage the version-ramped gates compare against) equals harnessVersion.
+  assert.equal(manifest.baseVersion, manifest.harnessVersion, 'init must stamp baseVersion == harnessVersion')
 })
 
 test('dry-run writes nothing', () => {
@@ -559,6 +563,42 @@ test('seedOnInitOnly: plain update withholds a new exemplar subtree; refresh-see
     assert.equal(after.files[ip].sha256, sha256(readFileSync(join(dir, ip), 'utf8')), `sha recorded for ${ip}`)
     assert.equal(after.files[ip].mode, 'seeded', `${ip} stays seeded`)
   }
+})
+
+test('update: baseVersion carries the seeded-content vintage — pre-0.1.5 manifests inherit harnessVersion, stamped values persist', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-basev-'))
+  assert.equal(run(['init', '--dir', dir, '--yes', '--tier', 'core', ...SETS]).code, 0)
+  const manifestPath = join(dir, '.harness/manifest.json')
+  const installerVersion = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
+  ).version
+
+  // Simulate a pre-0.1.5 consumer: no baseVersion field, harnessVersion 0.1.4.
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  delete manifest.baseVersion
+  manifest.harnessVersion = '0.1.4'
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+  // update: harnessVersion advances to the running installer; baseVersion is
+  // stamped to the PRE-update harnessVersion — the release whose seeded
+  // content the tree still carries (update withholds new exemplars).
+  const upd = run(['update', '--dir', dir])
+  assert.notEqual(upd.code, 1, upd.out)
+  const after = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  assert.equal(after.harnessVersion, installerVersion)
+  assert.equal(after.baseVersion, '0.1.4', 'a pre-0.1.5 consumer inherits its old harnessVersion as baseVersion')
+
+  // A second update must NOT drag baseVersion forward — graduation is a human
+  // edit, never an installer side effect.
+  const again = run(['update', '--dir', dir])
+  assert.notEqual(again.code, 1, again.out)
+  assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).baseVersion, '0.1.4')
+
+  // refresh-seeded writes the manifest through the same spread — the stamped
+  // baseVersion must survive that path too.
+  const refresh = run(['update', '--dir', dir, '--refresh-seeded', 'apps/desktop/src/App.tsx'])
+  assert.notEqual(refresh.code, 1, refresh.out)
+  assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).baseVersion, '0.1.4')
 })
 
 test('doctor: seeded divergence from the current template is an info advisory, never an error', () => {

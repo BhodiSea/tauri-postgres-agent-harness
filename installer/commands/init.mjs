@@ -221,6 +221,10 @@ export async function init(opts) {
   if (!opts.dryRun) {
     writeManifest(targetDir, {
       harnessVersion: installerVersion(),
+      // A fresh install's seeded content IS the current release — version-ramped
+      // gates (rampNote) therefore run live from day one; only updated installs
+      // carry an older baseVersion until a human graduates it.
+      baseVersion: installerVersion(),
       installedAt: opts.now ?? new Date().toISOString(),
       mode: det.mode,
       tier: opts.tier ?? 'standard',

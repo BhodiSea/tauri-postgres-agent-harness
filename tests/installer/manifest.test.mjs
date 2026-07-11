@@ -219,6 +219,26 @@ test('writeManifest: does not mutate the caller manifest and drops unknown top-l
   assert.ok(!('junkKey' in parsed), 'only the known schema keys are written')
 })
 
+test('writeManifest: baseVersion persists right after harnessVersion when present, is omitted when absent', () => {
+  // Absent (pre-0.1.5 manifests round-tripping through enable/update spreads):
+  // the key must NOT appear — rampNote's harnessVersion fallback depends on
+  // being able to tell "never stamped" apart from a stamped value.
+  const dirOld = mkdtempSync(join(tmpdir(), 'tpah-man-'))
+  writeManifest(dirOld, sampleManifest())
+  assert.ok(!('baseVersion' in readManifest(dirOld)), 'absent baseVersion must not be serialized')
+
+  // Present: pinned position (second key) and value round-trips.
+  const dirNew = mkdtempSync(join(tmpdir(), 'tpah-man-'))
+  writeManifest(dirNew, { ...sampleManifest(), baseVersion: '0.1.4' })
+  const raw = JSON.parse(readFileSync(manifestPath(dirNew), 'utf8'))
+  assert.equal(raw.baseVersion, '0.1.4')
+  assert.deepEqual(
+    Object.keys(raw),
+    ['harnessVersion', 'baseVersion', 'installedAt', 'mode', 'tier', 'modules', 'answers', 'files'],
+    'baseVersion sits right after harnessVersion in the pinned key order',
+  )
+})
+
 test('installerVersion reports the package.json version', () => {
   assert.equal(installerVersion(), JSON.parse(readFileSync(PKG, 'utf8')).version)
 })

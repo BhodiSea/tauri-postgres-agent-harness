@@ -309,9 +309,16 @@ The agent-facing documentation cannot lie about the gate: CLAUDE.md stays a pure
 `@AGENTS.md` include; the AGENTS.md "The N gates, in order: ..." sentence must match
 `VALIDATE_STEPS` exactly (names, order, count — the release-time doc sweep becomes
 mechanical); every `pnpm <script>` command AGENTS.md advertises must exist in the root
-package.json scripts.
+package.json scripts; and every `VALIDATE_STEPS` name has its own numbered section
+(`### <n>. <name> — `) in THIS catalog — the anti-vacuity record is part of the gate,
+so an undocumented step cannot ship. The catalog check is version-ramped: on an
+install whose `baseVersion` predates 0.1.5 it reports NOTE-only (a consumer's custom
+step must not go red on the update that shipped the check — graduate via
+`docs/runbooks/harness-upgrade.md`); fresh installs run it live.
 **Anti-vacuity:** add a gate to VALIDATE_STEPS without touching AGENTS.md → FAIL
-printing documented-vs-actual chains; advertise `pnpm ghost` → FAIL naming it.
+printing documented-vs-actual chains; advertise `pnpm ghost` → FAIL naming it;
+rename or delete a numbered catalog section (e.g. this one) → FAIL naming the
+undocumented gate.
 
 ### the validate runner — serial by default, pooled under `--report-all`
 

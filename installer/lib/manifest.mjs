@@ -44,6 +44,14 @@ export function writeManifest(targetDir, manifest) {
   mkdirSync(dirname(path), { recursive: true })
   const ordered = {
     harnessVersion: manifest.harnessVersion,
+    // baseVersion: the release vintage whose SEEDED starting content this tree
+    // actually carries. init stamps it equal to harnessVersion; update preserves
+    // it while harnessVersion advances — version-ramped gates (rampNote in
+    // tools/lib/gate.mjs) compare against THIS field, and bumping it is a
+    // deliberate human graduation (docs/runbooks/harness-upgrade.md), never an
+    // installer side effect. Absent on pre-0.1.5 manifests (JSON.stringify
+    // drops the undefined), where harnessVersion is the honest fallback.
+    baseVersion: manifest.baseVersion,
     installedAt: manifest.installedAt,
     mode: manifest.mode,
     tier: manifest.tier,

@@ -216,6 +216,13 @@ export async function update(opts, { migrations = readTemplateMigrations() } = {
       files,
       modules: [...modules],
       harnessVersion: installerVersion(),
+      // baseVersion records the release vintage of the SEEDED content this tree
+      // still carries — update refreshes owned files but withholds new seeded
+      // exemplars, so the vintage does NOT advance here. A pre-0.1.5 manifest
+      // has no baseVersion: its seeded content dates from the version that
+      // installed it, which is exactly its recorded harnessVersion. Graduating
+      // to a newer baseVersion is a human edit (docs/runbooks/harness-upgrade.md).
+      baseVersion: manifest.baseVersion ?? manifest.harnessVersion,
     })
   }
   return printReport(report, { json: opts.report === 'json' })

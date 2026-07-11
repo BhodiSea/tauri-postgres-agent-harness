@@ -6,12 +6,18 @@
 //      the docs and an agent reading the config act on the same chain.
 //   3. Every `pnpm <script>` command AGENTS.md tells agents to run exists in
 //      the root package.json scripts.
+//   4. Every VALIDATE_STEPS name has its own section in
+//      docs/harness/gates-catalog.md — the catalog is the anti-vacuity record
+//      (how to make each gate fail), so an undocumented gate is an untrusted
+//      gate. Version-ramped: NOTE-only on pre-0.1.5 baseVersions (a consumer's
+//      custom step must not red the update that shipped the check), live on
+//      fresh installs and the template tree.
 // This makes the release-time "update the docs" sweep MECHANICAL: change the
 // chain and this gate names exactly the lines to fix.
 // SOURCE: docs/harness/README.md (docs-sync gate) [corpus: harness/doctrine]
 import { existsSync, readFileSync } from 'node:fs'
 import { VALIDATE_STEPS } from './harness.config.mjs'
-import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
+import { fail, failures, ok, rampNote, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'docs-sync'
 const errs = []
@@ -77,8 +83,43 @@ for (const cmd of advertised) {
   }
 }
 
+// 4. Gates-catalog lockstep. Heading grammar, pinned to the catalog's actual
+//    format: chain steps are the NUMBERED sections `### <n>. <name> — \`<cmd>\``.
+//    The number is what distinguishes them from the catalog's other `###`
+//    sections (Stop-hook suites, the validate-runner note, opt-in modules), so
+//    those can never satisfy — or false-positive — this check.
+const CATALOG = 'docs/harness/gates-catalog.md'
+const catalogErrs = []
+if (!existsSync(CATALOG)) {
+  catalogErrs.push(`${CATALOG} missing — the harness ships it (owned; \`update\` restores it)`)
+} else {
+  const catalog = readFileSync(CATALOG, 'utf8')
+  const sections = new Set([...catalog.matchAll(/^### \d+\. ([a-z0-9-]+) — /gm)].map((m) => m[1]))
+  for (const name of stepNames) {
+    if (!sections.has(name)) {
+      catalogErrs.push(
+        `gate '${name}' has no section in ${CATALOG} — add a numbered heading (### <n>. ${name} — \`<command>\`) with its anti-vacuity proof`,
+      )
+    }
+  }
+}
+let catalogSummary = 'gates-catalog documents every step'
+if (catalogErrs.length > 0) {
+  // rampNote prints the graduation NOTE and returns true when this install's
+  // baseVersion predates the check; the findings then surface as NOTEs so the
+  // sweep is actionable without a red. Fresh installs / template tree: hard fail.
+  if (
+    rampNote(GATE, '0.1.5', 'gates-catalog lockstep (every chain step needs a catalog section)')
+  ) {
+    for (const e of catalogErrs) console.log(`${GATE}: NOTE — (ramp) ${e}`)
+    catalogSummary = `gates-catalog lockstep NOTE-only (${String(catalogErrs.length)} finding(s) withheld by the pre-0.1.5 ramp)`
+  } else {
+    errs.push(...catalogErrs)
+  }
+}
+
 failures(GATE, errs)
 ok(
   GATE,
-  `AGENTS.md gate list in lockstep with the ${String(stepNames.length)}-step chain; CLAUDE.md pure; ${String(advertised.size)} advertised commands all exist`,
+  `AGENTS.md gate list in lockstep with the ${String(stepNames.length)}-step chain; CLAUDE.md pure; ${String(advertised.size)} advertised commands all exist; ${catalogSummary}`,
 )

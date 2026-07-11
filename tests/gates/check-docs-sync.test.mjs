@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url'
 
 const TOOLS = fileURLToPath(new URL('../../template/base/tools', import.meta.url))
 const AGENTS_TEMPLATE = fileURLToPath(new URL('../../template/base/AGENTS.md', import.meta.url))
+const CATALOG_TEMPLATE = fileURLToPath(
+  new URL('../../template/base/docs/harness/gates-catalog.md', import.meta.url),
+)
 
 // The REAL shipped scripts (placeholders neutralized) — the GREEN case must
 // prove the shipped AGENTS.md against the shipped package surface.
@@ -20,7 +23,11 @@ const SHIPPED_SCRIPTS = JSON.parse(
     .replace(/\{\{[A-Z0-9_]+\}\}/g, 'x'),
 ).scripts
 
-function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS }) {
+// The shipped catalog is the canonical fixture for the catalog-lockstep check,
+// exactly like the shipped AGENTS.md is for the gate-list check. `catalog: null`
+// simulates a deleted catalog; `manifest` (an object) plants .harness/manifest.json
+// for the version-ramp cases.
+function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS, catalog = shippedCatalog, manifest }) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-docs-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })
   cpSync(join(TOOLS, 'lib'), join(dir, 'tools/lib'), { recursive: true })
@@ -29,8 +36,18 @@ function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS })
   writeFileSync(join(dir, 'AGENTS.md'), agents)
   writeFileSync(join(dir, 'CLAUDE.md'), claude)
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts }))
+  if (catalog !== null) {
+    mkdirSync(join(dir, 'docs/harness'), { recursive: true })
+    writeFileSync(join(dir, 'docs/harness/gates-catalog.md'), catalog)
+  }
+  if (manifest !== undefined) {
+    mkdirSync(join(dir, '.harness'), { recursive: true })
+    writeFileSync(join(dir, '.harness/manifest.json'), JSON.stringify(manifest))
+  }
   return dir
 }
+
+const shippedCatalog = readFileSync(CATALOG_TEMPLATE, 'utf8')
 
 function runGate(dir) {
   const res = spawnSync('node', ['tools/check-docs-sync.mjs'], { cwd: dir, encoding: 'utf8', env: { ...process.env, CI: 'true' } })
@@ -71,4 +88,59 @@ test('RED: impure CLAUDE.md and an advertised script that does not exist', () =>
   )
   assert.equal(ghost.code, 1, ghost.out)
   assert.ok(ghost.out.includes('`pnpm validate`'), ghost.out)
+})
+
+// ── catalog lockstep (v0.1.5): every VALIDATE_STEPS name needs its numbered
+// `### <n>. <name> — ` section in docs/harness/gates-catalog.md. ──
+
+test('RED: renaming a numbered catalog section reds the catalog-lockstep sub-check', () => {
+  const renamed = shippedCatalog.replace(
+    /^### (\d+)\. perf-budget — /m,
+    '### $1. perf-fudget — ',
+  )
+  assert.notEqual(renamed, shippedCatalog, 'fixture must actually rename a section')
+  const r = runGate(fixture({ agents: shippedAgents, catalog: renamed }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("gate 'perf-budget' has no section"), r.out)
+  assert.ok(r.out.includes('FIX[docs-sync]:'), r.out)
+})
+
+test('RED: a deleted catalog file fails naming the owned doc; module/runner sections never satisfy the check', () => {
+  const gone = runGate(fixture({ agents: shippedAgents, catalog: null }))
+  assert.equal(gone.code, 1, gone.out)
+  assert.ok(gone.out.includes('docs/harness/gates-catalog.md missing'), gone.out)
+
+  // Strip every NUMBERED heading but keep the un-numbered sections (Stop-hook
+  // suites, the validate-runner note, opt-in modules): all 22 steps must red —
+  // proof the pinned grammar cannot be satisfied by a non-step section.
+  const unnumbered = shippedCatalog.replace(/^### \d+\. [a-z0-9-]+ — .*$/gm, '')
+  const r = runGate(fixture({ agents: shippedAgents, catalog: unnumbered }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("gate 'format' has no section"), r.out)
+  assert.ok(r.out.includes("gate 'docs-sync' has no section"), r.out)
+})
+
+test('RAMP: a pre-0.1.5 baseVersion downgrades a catalog miss to NOTE + pass; 0.1.5 manifests stay live', () => {
+  const renamed = shippedCatalog.replace(/^### (\d+)\. perf-budget — /m, '### $1. perf-fudget — ')
+
+  // An updated 0.1.4 consumer (no baseVersion field yet — harnessVersion is the
+  // fallback): the miss surfaces as NOTEs, the gate stays green.
+  const ramped = runGate(
+    fixture({ agents: shippedAgents, catalog: renamed, manifest: { harnessVersion: '0.1.4', files: {} } }),
+  )
+  assert.equal(ramped.code, 0, ramped.out)
+  assert.ok(ramped.out.includes('NOTE'), ramped.out)
+  assert.ok(ramped.out.includes('baseVersion'), ramped.out)
+  assert.ok(ramped.out.includes("gate 'perf-budget' has no section"), ramped.out)
+
+  // A graduated (or fresh) install is live: same injection, real red.
+  const live = runGate(
+    fixture({
+      agents: shippedAgents,
+      catalog: renamed,
+      manifest: { harnessVersion: '0.1.5', baseVersion: '0.1.5', files: {} },
+    }),
+  )
+  assert.equal(live.code, 1, live.out)
+  assert.ok(live.out.includes("gate 'perf-budget' has no section"), live.out)
 })

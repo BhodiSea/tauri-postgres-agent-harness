@@ -16,12 +16,13 @@
 // The real template/base tree is also exercised read-only on every OS.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import {
   planTree,
   renderEntry,
+  storageToInstall,
   templateRoot,
   toPosix,
   walkTemplate,
@@ -171,6 +172,49 @@ test('planTree over the REAL base tree renders every entry with no leftover unkn
     )
   }
 })
+
+test('storageToInstall: the one rename rule — top-level RENAMES, .tmpl strip, nested names untouched', () => {
+  assert.equal(storageToInstall('gitignore'), '.gitignore')
+  assert.equal(storageToInstall('github/workflows/ci.yml'), '.github/workflows/ci.yml')
+  assert.equal(storageToInstall('package.json.tmpl'), 'package.json')
+  assert.equal(storageToInstall('tools/x.mjs.tmpl'), 'tools/x.mjs')
+  // Rename applies to the FIRST segment only — nested dotless names stay put.
+  assert.equal(storageToInstall('sub/gitignore'), 'sub/gitignore')
+  assert.equal(storageToInstall('sub/github/x.yml'), 'sub/github/x.yml')
+  // Windows-authored input normalizes at the boundary.
+  assert.equal(storageToInstall('github\\CODEOWNERS'), '.github/CODEOWNERS')
+})
+
+test('storageToInstall agrees with walkTemplate on EVERY real template file (no second rename implementation)', () => {
+  // The seeded-migrations selftest gate maps `git diff` storage paths through
+  // storageToInstall; this closure over the real trees proves that mapping can
+  // never disagree with the walker that `init`/`update` actually install with.
+  const root = templateRoot()
+  const trees = ['base', 'stack']
+  for (const entry of readdirSyncSafe(join(root, 'modules'))) trees.push(`modules/${entry}`)
+  let checked = 0
+  for (const tree of trees) {
+    for (const e of walkTemplate(tree)) {
+      const treeRel = toPosix(relative(join(root, tree), e.sourcePath))
+      assert.equal(
+        storageToInstall(treeRel),
+        e.installPath,
+        `${tree}/${treeRel}: mapper and walker disagree`,
+      )
+      checked += 1
+    }
+  }
+  assert.ok(checked > 200, `expected the full template surface, checked only ${checked}`)
+})
+
+// readdirSync that treats a missing dir as empty — module trees are optional.
+function readdirSyncSafe(dir) {
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
+}
 
 test('walkTemplate returns [] for a missing tree, and planTree agrees', () => {
   assert.deepEqual(walkTemplate('base/does-not-exist-xyz'), [])

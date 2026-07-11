@@ -51,6 +51,7 @@ jobs:
       - run: node scripts/check-release-lockstep.mjs
       - run: node scripts/check-plugin-manifest.mjs
       - run: node scripts/check-canary-coverage.mjs
+      - run: node scripts/generate-floor.mjs --check
       # Coverage floor over the installer itself (measured ~92/73/94 at 0.1.3;
       # floors sit ~7 points under). Hooks are exercised as CHILD processes by
       # tests/hooks (out-of-process — not measurable here); their behavioral

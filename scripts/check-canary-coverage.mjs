@@ -2,16 +2,19 @@
 // Canary-coverage lockstep: every step in the shipped VALIDATE_STEPS ∪
 // STOP_HOOK_STEPS must have at least one mechanical red-proof registered in
 // tests/canary/injections.json, every proof reference must actually exist, and
-// the hook-guard rule counts must match the registry (adding a rule without a
-// deny test breaks the count). A NEW gate cannot merge without a canary; a
-// DELETED gate cannot leave a stale registry entry.
-//   usage: node scripts/check-canary-coverage.mjs [registry-path]
+// every guard rule id exported by the hooks' pure-data rule tables
+// (.claude/hooks/lib/guard-rules.mjs) must have a behavioral canary in
+// tests/hooks/hook-contract.test.mjs (per-rule falsifiability closure — an
+// unreferenced rule id reds the PR). A NEW gate/rule cannot merge without a
+// canary; a DELETED gate cannot leave a stale registry entry.
+//   usage: node scripts/check-canary-coverage.mjs [registry-path] [hook-contract-path]
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const REGISTRY = resolve(process.argv[2] ?? join(ROOT, 'tests/canary/injections.json'))
+const HOOK_CONTRACT = resolve(process.argv[3] ?? join(ROOT, 'tests/hooks/hook-contract.test.mjs'))
 const errs = []
 
 const registry = JSON.parse(readFileSync(REGISTRY, 'utf8'))
@@ -53,38 +56,59 @@ for (const [name, proofs] of Object.entries(registry.steps ?? {})) {
   }
 }
 
-// 3. Hook-rule lockstep: rule counts + grep-able deny examples.
-const hookContract = readFileSync(join(ROOT, 'tests/hooks/hook-contract.test.mjs'), 'utf8')
-const HOOKS = join(ROOT, 'template/base/.claude/hooks')
-const counters = {
-  'pretool-bash-guard.mjs': (src, expected) => {
-    const actual = (src.match(/Blocked/g) ?? []).length
-    if (actual !== expected.blockedMessages) {
-      errs.push(`pretool-bash-guard.mjs has ${actual} 'Blocked' rule messages, registry pins ${expected.blockedMessages} — a new rule needs a deny test in tests/hooks/hook-contract.test.mjs AND a registry bump`)
-    }
-  },
-  'pretool-write-guard.mjs': (src, expected) => {
-    const denySites = (src.match(/denyTool\(/g) ?? []).length
-    const protectedPaths = (src.match(/^ {2}\//gm) ?? []).length
-    if (denySites !== expected.denySites) {
-      errs.push(`pretool-write-guard.mjs has ${denySites} denyTool sites, registry pins ${expected.denySites} — add a deny test and bump the registry`)
-    }
-    if (protectedPaths !== expected.protectedPaths) {
-      errs.push(`pretool-write-guard.mjs has ${protectedPaths} PROTECTED path patterns, registry pins ${expected.protectedPaths} — add the protected-path test and bump the registry`)
-    }
-  },
-}
-for (const [hook, expected] of Object.entries(registry.hookRules ?? {})) {
-  const counter = counters[hook]
-  if (!counter) {
-    errs.push(`registry hookRules covers unknown hook ${hook}`)
+// 3. Hook-rule closure: every guard rule id has a behavioral canary. The rule
+//    tables are pure data (no side effects) — import them directly and assert
+//    each id appears as a quoted string literal in the hook-contract test (where
+//    the RULE_CANARIES table keys them). Ids are kebab-case, so they can only
+//    appear as quoted object keys — a substring collision is not possible.
+const hookContract = readFileSync(HOOK_CONTRACT, 'utf8')
+const guardRules = await import(
+  pathToFileURL(join(ROOT, 'template/base/.claude/hooks/lib/guard-rules.mjs')).href
+)
+const ruleTables = ['BASH_RULES', 'WRITE_PROTECTED', 'WRITE_GLOBAL_CHECKS']
+const ruleIds = []
+for (const table of ruleTables) {
+  if (!Array.isArray(guardRules[table]) || guardRules[table].length === 0) {
+    errs.push(`guard-rules.mjs is missing/empty export ${table} — the hooks fail closed without it`)
     continue
   }
-  counter(readFileSync(join(HOOKS, hook), 'utf8'), expected)
+  for (const rule of guardRules[table]) {
+    if (typeof rule?.id !== 'string' || !rule.id) {
+      errs.push(`guard-rules.mjs ${table} has a rule without a string id`)
+      continue
+    }
+    ruleIds.push(rule.id)
+  }
+}
+for (const id of ruleIds) {
+  if (!hookContract.includes(`'${id}'`) && !hookContract.includes(`"${id}"`)) {
+    errs.push(`guard rule id '${id}' has no behavioral canary in tests/hooks/hook-contract.test.mjs — every rule must have a deny/allow case (add a RULE_CANARIES entry)`)
+  }
+}
+
+// The registry still names one grep-able deny example per guard surface (a
+// human-readable spot check that the closure is wired to the real hooks).
+for (const [hook, expected] of Object.entries(registry.hookRules ?? {})) {
   for (const example of expected.denyExamples ?? []) {
     if (!hookContract.includes(example)) {
       errs.push(`${hook}: deny example ${JSON.stringify(example)} not found in tests/hooks/hook-contract.test.mjs`)
     }
+  }
+}
+
+// 3b. Path-scoped checks living INSIDE the hooks (tauri weakenings, append-only
+// migrations, DAL wrapper, …) are not in the data tables, so the per-id closure
+// above cannot see them. Pin their denyTool( call-site count instead — adding an
+// inline deny site forces a conscious registry bump plus a deny test, the speed
+// bump the old denySites count provided.
+for (const [hook, expected] of Object.entries(registry.hookRules ?? {})) {
+  if (typeof expected.denyToolCallSites !== 'number') continue
+  const src = readFileSync(join(ROOT, 'template/base/.claude/hooks', hook), 'utf8')
+  const count = (src.match(/denyTool\(/g) ?? []).length
+  if (count !== expected.denyToolCallSites) {
+    errs.push(
+      `${hook}: ${count} denyTool( call sites but the registry pins ${expected.denyToolCallSites} — update tests/canary/injections.json hookRules AND add a deny test for the new site`,
+    )
   }
 }
 
@@ -94,5 +118,5 @@ if (errs.length > 0) {
   process.exit(1)
 }
 console.log(
-  `CANARY COVERAGE: CLEAN (${stepNames.size} steps all provably red; hook rule counts in lockstep)`,
+  `CANARY COVERAGE: CLEAN (${stepNames.size} steps all provably red; ${ruleIds.length} guard rule ids all canaried)`,
 )

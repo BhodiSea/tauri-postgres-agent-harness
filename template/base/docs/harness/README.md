@@ -41,14 +41,18 @@ it and can therefore never disagree:
    package.json script name, because script indirection would let an agent redefine
    `validate` to `true` in package.json (an auto-accepted, unguarded edit) and pass a
    hollow gate. **The Stop gate defines done** locally.
-3. **CI** → re-runs `node tools/validate.mjs --min-floor`, which merges in a hardcoded
-   copy of all 22 canonical steps. **The CI floor** means editing the config can ADD
-   steps but can never weaken the non-negotiable ones on a PR.
+3. **CI** → re-runs `node tools/validate.mjs --min-floor`, which reads the FROZEN snapshot
+   `tools/validate.floor.json` — a verbatim copy of all 22 canonical steps that the runner
+   trusts OVER the local config, and **FAILS CLOSED** (missing/corrupt snapshot → exit 1)
+   rather than degrade to a possibly-weakened config. **The CI floor** means editing the
+   config can ADD steps but can never weaken the non-negotiable ones on a PR.
 
 The gate config is harness-protected and mirrored in CI: `harness.config.mjs`,
-`validate.mjs`, every gate script, and the runners the Stop hook invokes are all
-write-guard-protected (see tamper evidence), and the selftest suite asserts
-FLOOR ↔ VALIDATE_STEPS lockstep.
+`validate.mjs`, `validate.floor.json` (the frozen CI floor — write-guard-protected so a
+tool/shell edit cannot quietly weaken CI), every gate script, and the runners the Stop hook
+invokes are all write-guard-protected (see tamper evidence), and the selftest suite asserts
+the snapshot equals VALIDATE_STEPS (`scripts/generate-floor.mjs --check`, regenerate with
+`--write`).
 
 ## The hook map (deterministic enforcement)
 
@@ -180,8 +184,10 @@ The layers, in order of engagement:
    `npx tauri-postgres-agent-harness doctor` (read-only, CI-friendly exit codes)
    re-hashes the tree so silent in-place edits are evident as drift.
 4. **The CI floor** — CI does not trust the config: `node tools/validate.mjs
-   --min-floor` enforces the hardcoded step list. Local bypasses change nothing about
-   what merges; **CI is the backstop enforcement, hooks are the fast path.**
+   --min-floor` enforces the frozen snapshot `tools/validate.floor.json` (fail-closed on a
+   missing/corrupt file, so a deleted floor cannot silently shrink the chain). Local
+   bypasses change nothing about what merges; **CI is the backstop enforcement, hooks are
+   the fast path.**
 5. **CODEOWNERS** — harness-owned paths and auth/data surfaces require sign-off from
    {{SECURITY_OWNERS}}, so even an evident tamper needs a human accomplice to land.
 

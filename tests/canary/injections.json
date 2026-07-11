@@ -1,5 +1,5 @@
 {
-  "comment": "Falsifiability registry: every step in VALIDATE_STEPS ∪ STOP_HOOK_STEPS must carry at least one mechanical proof that it CAN go red. Proof kinds: 'fixture' (a repo test file that spawns the real gate and asserts exit 1 — ref must exist), 'selftest' (a literal step-name string that must appear in .github/workflows/selftest.yml), 'runner' (the step wraps a vendor tool whose non-zero exit is the red; OUR wiring's failure propagation is proven by the validate-runner tests — ref must exist). scripts/check-canary-coverage.mjs enforces bidirectional closure: an unregistered step OR a stale registry entry reds the PR that caused it. hookRules pins the guard-rule counts and one grep-able deny example per surface — adding a hook rule without a deny test breaks this lockstep.",
+  "comment": "Falsifiability registry: every step in VALIDATE_STEPS ∪ STOP_HOOK_STEPS must carry at least one mechanical proof that it CAN go red. Proof kinds: 'fixture' (a repo test file that spawns the real gate and asserts exit 1 — ref must exist), 'selftest' (a literal step-name string that must appear in .github/workflows/selftest.yml), 'runner' (the step wraps a vendor tool whose non-zero exit is the red; OUR wiring's failure propagation is proven by the validate-runner tests — ref must exist). scripts/check-canary-coverage.mjs enforces bidirectional closure: an unregistered step OR a stale registry entry reds the PR that caused it. Guard-rule falsifiability is now a PER-RULE closure, not a count: check-canary-coverage.mjs imports the pure-data rule tables from .claude/hooks/lib/guard-rules.mjs (BASH_RULES, WRITE_PROTECTED, WRITE_GLOBAL_CHECKS) and asserts every rule id has a behavioral deny/allow case (a RULE_CANARIES entry) in tests/hooks/hook-contract.test.mjs — a rule added without a canary reds the PR. hookRules below keeps only a human-readable grep-able deny example per surface.",
   "steps": {
     "format": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "biome ci exits non-zero on any diff" }],
     "gate-integrity": [{ "kind": "fixture", "ref": "tests/gates/check-gate-integrity.test.mjs" }],
@@ -44,12 +44,11 @@
   },
   "hookRules": {
     "pretool-bash-guard.mjs": {
-      "blockedMessages": 18,
+      "denyToolCallSites": 1,
       "denyExamples": ["rm -rf node_modules", "git push --force origin main", "psql \"$MIGRATOR_DATABASE_URL\" -c \"select 1\""]
     },
     "pretool-write-guard.mjs": {
-      "denySites": 10,
-      "protectedPaths": 34,
+      "denyToolCallSites": 10,
       "denyExamples": ["tools/harness.config.mjs", "dangerouslySetInnerHTML", "tools/route-allowlist.json"]
     }
   }

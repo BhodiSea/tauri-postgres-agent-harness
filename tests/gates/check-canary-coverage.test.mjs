@@ -10,9 +10,13 @@ import { fileURLToPath } from 'node:url'
 
 const CHECKER = fileURLToPath(new URL('../../scripts/check-canary-coverage.mjs', import.meta.url))
 const REGISTRY = fileURLToPath(new URL('../canary/injections.json', import.meta.url))
+const HOOK_CONTRACT = fileURLToPath(new URL('../hooks/hook-contract.test.mjs', import.meta.url))
 
-function run(registryPath) {
-  const res = spawnSync('node', [CHECKER, ...(registryPath ? [registryPath] : [])], { encoding: 'utf8' })
+function run(registryPath, hookContractPath) {
+  const args = []
+  if (registryPath) args.push(registryPath)
+  if (hookContractPath) args.push(hookContractPath)
+  const res = spawnSync('node', [CHECKER, ...args], { encoding: 'utf8' })
   return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}` }
 }
 
@@ -22,7 +26,7 @@ test('GREEN: the shipped registry covers every step and every proof resolves', (
   assert.ok(r.out.includes('provably red'), r.out)
 })
 
-test('RED: removing a step proof, adding a stale entry, or drifting a hook count all fail', () => {
+test('RED: a missing step proof or a stale registry entry fails', () => {
   const registry = JSON.parse(readFileSync(REGISTRY, 'utf8'))
   const dir = mkdtempSync(join(tmpdir(), 'tpah-cancov-'))
 
@@ -39,11 +43,27 @@ test('RED: removing a step proof, adding a stale entry, or drifting a hook count
   const s = run(join(dir, 'stale.json'))
   assert.equal(s.code, 1, s.out)
   assert.ok(s.out.includes('stale entry'), s.out)
+})
 
-  const drift = structuredClone(registry)
-  drift.hookRules['pretool-bash-guard.mjs'].blockedMessages += 1
-  writeFileSync(join(dir, 'drift.json'), JSON.stringify(drift))
-  const d = run(join(dir, 'drift.json'))
-  assert.equal(d.code, 1, d.out)
-  assert.ok(d.out.includes('registry pins'), d.out)
+test('RED: a guard rule id with no behavioral canary fails, naming the rule', () => {
+  // Point the checker at a hook-contract copy whose RULE_CANARIES entry for a real
+  // rule id has been stripped — the per-rule closure must red and name that id.
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-cancov-closure-'))
+  const contract = readFileSync(HOOK_CONTRACT, 'utf8').replaceAll("'rm-rf'", "'rm-XX'")
+  const fixture = join(dir, 'hook-contract.test.mjs')
+  writeFileSync(fixture, contract)
+  const r = run(REGISTRY, fixture)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("guard rule id 'rm-rf'"), r.out)
+})
+
+test('RED: a registry denyExample absent from the hook-contract fails', () => {
+  const registry = JSON.parse(readFileSync(REGISTRY, 'utf8'))
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-cancov-dex-'))
+  const bogus = structuredClone(registry)
+  bogus.hookRules['pretool-bash-guard.mjs'].denyExamples.push('this command has no deny test')
+  writeFileSync(join(dir, 'bogus.json'), JSON.stringify(bogus))
+  const r = run(join(dir, 'bogus.json'))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('not found in tests/hooks/hook-contract.test.mjs'), r.out)
 })

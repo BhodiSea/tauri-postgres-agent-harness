@@ -576,22 +576,22 @@ test('enable of a retired (promoted) module fails with the promotion story, not 
   }
 })
 
-test('CI floor is in lockstep with VALIDATE_STEPS (a weakened config cannot weaken CI)', async () => {
-  const validateSrc = readFileSync(join(TEMPLATE, 'base/tools/validate.mjs'), 'utf8')
-  const floorBlock = validateSrc.match(/const FLOOR = \[([\s\S]*?)\n\]/)
-  assert.ok(floorBlock, 'FLOOR array not found in tools/validate.mjs')
-  const floor = [...floorBlock[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)].map((m) => [m[1], m[2]])
-  assert.ok(floor.length > 0, 'FLOOR parsed empty')
-
+test('the template ships validate.floor.json in lockstep with VALIDATE_STEPS', async () => {
+  // The CI floor is now the frozen snapshot tools/validate.floor.json (its
+  // fail-closed + append semantics are pinned in tests/gates/floor-lockstep.test.mjs);
+  // the installer's concern is that the template actually ships it and it matches.
+  const floorPath = join(TEMPLATE, 'base/tools/validate.floor.json')
+  assert.ok(existsSync(floorPath), 'template must ship tools/validate.floor.json (the CI floor)')
+  const snapshot = JSON.parse(readFileSync(floorPath, 'utf8'))
   // file:// URL, not the raw path — Windows absolute paths (D:\…) are not
   // importable by the ESM loader.
   const { VALIDATE_STEPS } = await import(
     pathToFileURL(join(TEMPLATE, 'base/tools/harness.config.mjs')).href
   )
   assert.deepEqual(
+    snapshot.steps,
     VALIDATE_STEPS,
-    floor,
-    'tools/validate.mjs FLOOR and tools/harness.config.mjs VALIDATE_STEPS must be identical (names and commands, in order)',
+    'tools/validate.floor.json and tools/harness.config.mjs VALIDATE_STEPS must be identical (regenerate with `node scripts/generate-floor.mjs --write`)',
   )
 })
 
@@ -611,6 +611,7 @@ test('npm pack ships every template path (dotless storage survives packing)', ()
     'template/base/gitignore',
     'template/base/package.json.tmpl',
     'template/base/tools/harness.config.mjs',
+    'template/base/tools/validate.floor.json',
     'template/stack/apps/desktop/src-tauri/tauri.conf.json',
     'template/stack/packages/schema/drizzle/0000_init.sql',
     'installer/cli.mjs',

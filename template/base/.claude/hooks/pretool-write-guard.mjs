@@ -4,11 +4,41 @@
 // Mirrors the ESLint/depcruise rules (defense-in-depth) and provides tamper evidence
 // (layer 2) for the gate surface itself. Exempts the harness's own tooling (.claude/**)
 // and test bodies, which legitimately reference banned patterns.
+//
+// The protected-path list (WRITE_PROTECTED) and everywhere-content-checks
+// (WRITE_GLOBAL_CHECKS) live in ./lib/guard-rules.mjs (pure data, importable by tests);
+// this hook keeps the I/O, path-normalization, and path-scoped decision plumbing. Every
+// rule id there has a behavioral canary in tests/hooks/hook-contract.test.mjs.
 // SOURCE: docs/harness/README.md (pretool-write-guard)
 import { existsSync } from 'node:fs'
 import { denyTool, pass, readHookInput } from './lib/hookio.mjs'
 
 export const HARNESS_HOOK_VERSION = '0.1.4'
+
+// Dynamic import AFTER hookio installed its fail-closed handlers: a missing, broken, or
+// mis-shaped rules module must BLOCK (exit 2) — a guard that cannot load its rules approves
+// nothing.
+let rules
+try {
+  rules = await import('./lib/guard-rules.mjs')
+} catch (err) {
+  process.stderr.write(
+    `HOOK CRASHED (guard-rules import) — failing closed, action blocked: ${err?.stack ?? err}\n`,
+  )
+  process.exit(2)
+}
+const { WRITE_PROTECTED, WRITE_GLOBAL_CHECKS } = rules
+if (
+  !Array.isArray(WRITE_PROTECTED) ||
+  WRITE_PROTECTED.length === 0 ||
+  !Array.isArray(WRITE_GLOBAL_CHECKS) ||
+  WRITE_GLOBAL_CHECKS.length === 0
+) {
+  process.stderr.write(
+    'HOOK CRASHED (guard-rules shape) — failing closed, action blocked: WRITE_PROTECTED / WRITE_GLOBAL_CHECKS missing or empty\n',
+  )
+  process.exit(2)
+}
 
 const input = await readHookInput()
 const ti = input?.tool_input ?? {}
@@ -28,50 +58,14 @@ const rel =
     : posixPath.replace(/^\.?\/+/, '')
 
 // Tamper evidence (layer 2): the gate must not be able to rewrite itself. Edits to the
-// harness config, the gate runner + every gate script, the RLS runner, the lockfiles the
-// gates verify against, the lint/architecture config surface, git hooks, and CI workflows
-// require an explicit human-in-the-loop escape hatch. Layer 1 is the settings.json deny
-// list (hooks + settings + .harness). NOTE: tauri.conf.json / capabilities / Cargo.toml
-// are deliberately NOT blanket-protected — adding a permission or crate is routine
+// harness config, the gate runner + the frozen CI floor + every gate script, the RLS
+// runner, the lockfiles the gates verify against, the lint/architecture config surface, git
+// hooks, and CI workflows require an explicit human-in-the-loop escape hatch. Layer 1 is the
+// settings.json deny list. NOTE: tauri.conf.json / capabilities / Cargo.toml are
+// deliberately NOT blanket-protected — adding a permission or crate is routine
 // vertical-slice work; specific weakenings are content-checked below instead.
 // SOURCE: docs/harness/README.md (tamper evidence)
-const PROTECTED = [
-  /^tools\/harness\.config\.mjs$/,
-  /^tools\/validate\.mjs$/,
-  /^tools\/(check-[^/]+|run-rust-gates|build-check)\.mjs$/,
-  /^tools\/lib\//, // shared gate helpers — same trust level as the gates themselves
-  /^tools\/mcp\//, // corpus + MCP servers the provenance gate resolves against
-  /^tools\/(identity|prompts)\.lock\.json$/,
-  /^tools\/rls-exempt\.json$/, // exempting a table from RLS is a human decision
-  /^tools\/license-exceptions\.json$/, // license exceptions are a human decision
-  /^tools\/bundle-budget\.json$/,
-  /^tools\/perf-budget\.json$/,
-  /^tools\/styleguide\.manifest\.json$/,
-  /^tools\/mutation-baseline\.json$/, // accepting a surviving mutant is a human decision
-  /^tools\/route-allowlist\.json$/, // exempting a features dir from ROUTES is a human decision
-  /^tests\/rls\/run-rls\.mjs$/, // the RLS runner the Stop hook invokes directly (test bodies stay editable)
-  /^tests\/migrations\/migration-apply\.mjs$/,
-  /^lefthook\.yml$/,
-  /^\.github\/workflows\//,
-  // The lint/architecture config surface — weakening any of these weakens the gate.
-  /^eslint\.config\.mjs$/,
-  /^biome\.jsonc$/,
-  /^knip\.json$/,
-  /^\.dependency-cruiser\.cjs$/,
-  /^vitest\.config\.ts$/, // the single test-project surface the Stop hook runs
-  /^playwright\.config\.ts$/,
-  /^tsconfig(\.base)?\.json$/,
-  /^pnpm-workspace\.yaml$/,
-  /^deny\.toml$/, // cargo-deny policy (licenses + advisories + bans)
-  /^rust-toolchain\.toml$/,
-  /^\.gitleaks\.toml$/,
-  // Permission + MCP surface: never let the agent widen its own grants or add MCP servers.
-  /^\.claude\/settings\.json$/,
-  /^\.claude\/settings\.local\.json$/,
-  /^\.mcp\.json$/,
-  /^\.harness\//,
-]
-if (process.env.HARNESS_ALLOW_SELF_EDIT !== '1' && PROTECTED.some((re) => re.test(rel))) {
+if (process.env.HARNESS_ALLOW_SELF_EDIT !== '1' && WRITE_PROTECTED.some(({ re }) => re.test(rel))) {
   denyTool(
     'PreToolUse',
     'harness-protected file: set HARNESS_ALLOW_SELF_EDIT=1 (human-in-the-loop) to modify the gate itself. SOURCE: docs/harness/README.md (tamper evidence)',
@@ -145,34 +139,9 @@ if (/\.(sql|ts|tsx|mjs)$/.test(rel) && /WITH\s+RECURSIVE/i.test(text) && !/CYCLE
 // mention the banned patterns by name.
 if (!/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(path)) pass()
 
-// Everywhere-checks: banned in any source file.
-const GLOBAL_CHECKS = [
-  [
-    /\bdangerouslySetInnerHTML\b/,
-    'dangerouslySetInnerHTML is banned (XSS); render sanitized text through approved components.',
-  ],
-  [
-    /VITE_[A-Z0-9_]*(KEY|SECRET|TOKEN|PASSWORD|PRIVATE)/,
-    'VITE_-prefixed vars are compiled into the client bundle — never put secret-shaped names there.',
-  ],
-  [
-    // Lazy [\s\S]*? instead of [^,]+ so a comma INSIDE the value expression
-    // (set_config('app.user_id', concat(a, b), false)) cannot hide the
-    // session-wide third argument; /i catches SQL-style FALSE.
-    /set_config\(\s*['"]app\.[a-z_.]+['"]\s*,[\s\S]*?,\s*false\s*\)/i,
-    'set_config(..., false) sets the GUC session-wide and LEAKS across pooled connections — the third argument must be true (transaction-local). SOURCE: docs/harness/README.md (GUC discipline)',
-  ],
-  [
-    /\bSET\s+SESSION\s+app\.|\bSET\s+app\./i,
-    'RLS identity GUCs must be SET LOCAL inside a transaction, never session-wide (pooling leak).',
-  ],
-  [
-    /defineWorkspace|vitest\.workspace/,
-    'vitest workspace files are banned — projects are defined in the root vitest.config.ts (single gate surface).',
-  ],
-]
-for (const [re, msg] of GLOBAL_CHECKS) {
-  if (re.test(text)) denyTool('PreToolUse', msg)
+// Everywhere-checks: banned in any source file (WRITE_GLOBAL_CHECKS is pure data).
+for (const { re, message } of WRITE_GLOBAL_CHECKS) {
+  if (re.test(text)) denyTool('PreToolUse', message)
 }
 
 // Desktop-bundle purity: the client never touches server/database modules, and

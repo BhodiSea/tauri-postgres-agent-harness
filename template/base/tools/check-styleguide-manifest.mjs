@@ -25,6 +25,13 @@
 //      props, no references to erased default-palette utilities, and no Tailwind
 //      arbitrary VALUES (text-[..], [prop:val], -(--var)) anywhere in the desktop
 //      source (manifest.allow lists file-level exemptions, each with a reason).
+//   6b. primitive boundary — (conditional on `controlPrimitives`; keyless
+//      pre-0.1.5 manifests self-disable with an adoption NOTE) a JSX open-tag
+//      for a declared control tag (<button|input|select|textarea) carrying a
+//      literal className in a .tsx outside the declared primitives home is red:
+//      a hand-styled control forks the design system — the styling belongs IN
+//      the src/components primitive. manifest.controlAllow lists reviewed file
+//      exemptions; malformed or STALE entries fail, never fail open.
 //   7. accent budget — the near-monochrome + single-accent design survives on a
 //      usage BUDGET: accent-utility occurrences stay <= the documented budget.
 // SOURCE: docs/harness/gates-catalog.md (styleguide gate) [corpus: harness/doctrine]
@@ -263,6 +270,83 @@ for (const entry of manifest.allow ?? []) {
   allowFiles.add(entry.file)
 }
 
+// ---- 6b setup: primitive boundary — controls render through the primitives ----
+// Content-conditional on `controlPrimitives`, NOT rampNote'd: this manifest is
+// SEEDED, so `update` never rewrites it and the key arrives only by a deliberate
+// human pull — exactly the `themes` pattern above. A keyless (pre-0.1.5)
+// manifest self-disables with the adoption NOTE; a malformed key fails closed.
+let control = null
+if (manifest.controlPrimitives !== undefined) {
+  const cp = manifest.controlPrimitives
+  const okShape =
+    cp !== null &&
+    typeof cp === 'object' &&
+    Array.isArray(cp.tags) &&
+    cp.tags.length > 0 &&
+    cp.tags.every((t) => typeof t === 'string' && /^[a-z][a-z0-9]*$/.test(t)) &&
+    typeof cp.home === 'string' &&
+    cp.home.trim() !== ''
+  if (!okShape) {
+    fail(
+      GATE,
+      `${MANIFEST} controlPrimitives must be { "tags": non-empty array of lowercase tag names, "home": non-empty string } — got ${JSON.stringify(cp)}; the primitive-boundary scan cannot silently disarm`,
+    )
+  }
+  control = { tags: cp.tags, home: cp.home.replace(/\/+$/, '') }
+} else {
+  console.log(
+    `${GATE}: NOTE — ${MANIFEST} has no "controlPrimitives" key, so the primitive-boundary scan is OFF (a raw <button|input|select|textarea …className=…> outside the primitives home would not red). Current manifests declare controlPrimitives: { "tags": ["button","input","select","textarea"], "home": "apps/desktop/src/components" }. ${MANIFEST} is seeded — update never rewrites it; adopt deliberately with \`update --refresh-seeded ${MANIFEST}\` (see docs/runbooks/harness-upgrade.md, content-conditional checks)`,
+  )
+}
+
+// controlAllow — the primitive-boundary escape hatch (same shape as `allow`,
+// but a SEPARATE list: a px/hex allow entry never also waives raw controls).
+// Parse fails LOUD like every manifest field, and entries must stay LIVE — a
+// stale exemption is red below, so the list can only shrink to reality.
+const controlAllowFiles = new Set()
+if (manifest.controlAllow !== undefined && !Array.isArray(manifest.controlAllow)) {
+  fail(
+    GATE,
+    `${MANIFEST} "controlAllow" must be an ARRAY of {"file": string, "reason": non-empty string} entries — got ${JSON.stringify(manifest.controlAllow)}`,
+  )
+}
+for (const entry of manifest.controlAllow ?? []) {
+  const okShape =
+    entry !== null &&
+    typeof entry === 'object' &&
+    typeof entry.file === 'string' &&
+    typeof entry.reason === 'string' &&
+    entry.reason.trim().length > 0
+  if (!okShape) {
+    fail(
+      GATE,
+      `${MANIFEST}: every controlAllow entry must be {"file": string, "reason": non-empty string} — got ${JSON.stringify(entry)}`,
+    )
+  }
+  controlAllowFiles.add(entry.file)
+}
+
+// The open-tag scan window runs from `<tag` to the next `<` — the attributes
+// plus any leading text child — so multi-line tags are covered without an AST,
+// and `className` must be whitespace-preceded inside that window (it is always
+// preceded by whitespace in a real open tag; this keeps `data-className=` out).
+// Honest limits, consistent with the raw-hex/px scans above (which also match
+// inside comments): a className smuggled via spread props ({...props}) is NOT
+// detected, and a commented-out tag — or a literal `className=` in a text
+// child/JSX comment before the next `<` — over-matches. Over-matching reds
+// with controlAllow as the reviewed escape; it can never fail open. A `<`
+// inside an attribute expression (a comparison) ends the window early and
+// under-detects that one tag, never a whole file.
+const CONTROL_RE =
+  control === null
+    ? null
+    : new RegExp(`<(${control.tags.join('|')})(?=[\\s/>])[^<]*?\\sclassName\\s*=`, 'g')
+const CONTROL_PRIMITIVE = new Map([
+  ['button', 'the Button primitive'],
+  ['input', 'the Input primitive'],
+])
+const controlAllowLive = new Set()
+
 // Tailwind's default palette names: after erasure these utilities compile to
 // NOTHING, so a reference is a silent no-op — worse than off-brand.
 const PALETTE = new RegExp(
@@ -333,12 +417,49 @@ for (const file of files) {
     )
   }
 
+  // ---- 6b: primitive boundary — .tsx only (JSX open tags), home dir exempt ----
+  if (CONTROL_RE !== null && /\.tsx$/.test(rel) && !rel.startsWith(`${control.home}/`)) {
+    const hits = [...text.matchAll(CONTROL_RE)]
+    if (hits.length > 0) {
+      if (controlAllowFiles.has(rel)) {
+        controlAllowLive.add(rel)
+      } else {
+        for (const m of hits) {
+          const tag = m[1]
+          const via =
+            CONTROL_PRIMITIVE.get(tag) ??
+            `a dedicated ${tag[0].toUpperCase()}${tag.slice(1)} primitive (the Button/Input pattern)`
+          errs.push(
+            `${rel}: raw <${tag} …> carries a literal className outside ${control.home} — a hand-styled control forks the design system. FIX: render it through ${via} in ${control.home} (new control styling goes INTO the primitive), or add a reviewed controlAllow entry {"file": "${rel}", "reason": …} to ${MANIFEST}`,
+          )
+        }
+      }
+    }
+  }
+
   // ---- 7: accent usage budget (declarations in styles.css don't count) --------
   if (!rel.endsWith('styles.css')) {
     const count = (text.match(accentPattern) ?? []).length
     if (count > 0) {
       accentUses += count
       usesByFile.push(`${rel}: ${count}`)
+    }
+  }
+}
+
+// controlAllow entries must map to LIVE violations: an entry whose file is gone
+// or no longer trips the scan is stale — red, so the exemption list can only
+// shrink to reality (the route-allowlist / perf-budget exempt[] precedent).
+if (control !== null) {
+  for (const file of [...controlAllowFiles].sort()) {
+    if (!existsSync(file)) {
+      errs.push(
+        `${MANIFEST} controlAllow exempts "${file}" but the file does not exist — stale entry; remove it`,
+      )
+    } else if (!controlAllowLive.has(file)) {
+      errs.push(
+        `${MANIFEST} controlAllow exempts "${file}" but no raw <${control.tags.join('|')} …className=…> matches there anymore (or it is not a scanned .tsx under ${SRC_DIR} outside ${control.home}) — stale entry; remove it`,
+      )
     }
   }
 }
@@ -353,7 +474,11 @@ failures(GATE, errs)
 const contrastNote = Array.isArray(manifest.contrast)
   ? `; ${manifest.contrast.length} contrast pair(s) computed-green across ${1 + themeBlocks.size} theme(s)`
   : ''
+const controlNote =
+  control === null
+    ? ''
+    : `; primitive boundary held (<${control.tags.join('|')}> + className only under ${control.home})`
 ok(
   GATE,
-  `${declared.size} oklch tokens + ${Object.keys(manifest.families ?? {}).length} families in lockstep; erasure intact; no raw hex/px/inline-style/arbitrary-value; accent ${accentUses}/${manifest.accentUsageBudget}${contrastNote}`,
+  `${declared.size} oklch tokens + ${Object.keys(manifest.families ?? {}).length} families in lockstep; erasure intact; no raw hex/px/inline-style/arbitrary-value; accent ${accentUses}/${manifest.accentUsageBudget}${contrastNote}${controlNote}`,
 )

@@ -32,6 +32,7 @@
     "styleguide": [
       { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
       { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "primitive boundary: a hand-rolled <button className=…> outside the controlPrimitives home → red with the FIX line naming the Button/Input primitive; controlAllow (file + reason) is the reviewed escape and malformed/stale entries fail closed; a manifest without controlPrimitives self-disables with the update --refresh-seeded adoption NOTE" },
       { "kind": "selftest", "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL" }
     ],
     "perf-budget": [

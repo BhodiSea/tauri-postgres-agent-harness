@@ -221,6 +221,18 @@ module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` a
   — which precisely excludes prose bracket-colon forms, above all the mandatory
   `[corpus: <id>]` provenance citations in source comments. Extend the vocabulary in
   BOTH files, or add a reviewed `manifest.allow` file exemption.
+- **Primitive boundary** (conditional on `manifest.controlPrimitives`). In `.tsx`
+  files outside the declared primitives home (`apps/desktop/src/components`), a JSX
+  open-tag for a declared control tag (`<button|input|select|textarea`) carrying a
+  literal `className` is a hand-styled control — gate-red with a FIX line naming the
+  primitive (Button/Input) to render through instead; new control styling goes INTO
+  the primitive. The scan is textual like the hex/px scans (tag-open to the next `<`,
+  so multi-line tags are covered; a spread-props className is undetected;
+  over-matching — e.g. a commented-out tag — reds rather than fails open).
+  `controlAllow: [{ file, reason }]` is the reviewed escape, separate from the px/hex
+  `allow` list; malformed or STALE entries (file gone, or no live match) FAIL. The
+  manifest is seeded, so a pre-0.1.5 manifest without the key self-disables with a
+  NOTE naming `update --refresh-seeded tools/styleguide.manifest.json`.
 - **Accent budget.** Accent-utility usage stays within the documented budget.
 
 **Anti-vacuity:** delete an erasure marker → FAIL naming the namespace; add
@@ -228,7 +240,9 @@ module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` a
 arbitrary value → FAIL; darken a light token below its floor → FAIL printing the
 computed ratio (e.g. `accent on surface = 4.24:1 (min 4.5:1)`); push a token
 out of the sRGB gamut → FAIL 'unverifiable'; drop a light-theme token override → FAIL
-('the base value paints through').
+('the base value paints through'); hand-roll a `<button className=…>` in a screen →
+FAIL with the primitive-naming FIX line; strip `controlPrimitives` from the manifest
+→ NOTE + pass (the pre-0.1.5 shape).
 
 ### 19. perf-budget — `node tools/check-perf-budget.mjs`
 

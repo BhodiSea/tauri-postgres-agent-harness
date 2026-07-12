@@ -8,7 +8,11 @@
 // additions: theme closure, COMPUTED contrast (oklch->linear sRGB->WCAG luminance
 // via tools/lib/oklch.mjs, exercised in-process here too), the arbitrary-value
 // scan, and the backward-compat proof that a themes/contrast-less manifest still
-// passes.
+// passes — AND the v0.1.5 primitive-boundary rule: raw <button|input|select|
+// textarea …className=…> outside the controlPrimitives home is red with a FIX
+// line naming the primitive; controlAllow (file + reason) is the reviewed escape
+// (malformed or stale entries fail closed); a manifest WITHOUT the key
+// self-disables with the `update --refresh-seeded` adoption NOTE.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -334,4 +338,120 @@ test('GREEN: a v0.1.3 manifest WITHOUT themes/contrast still passes (self-disabl
   const r = runGate(fixture({ manifest }))
   assert.equal(r.code, 0, r.out)
   assert.ok(!r.out.includes('contrast pair'), r.out) // the contrast note is absent
+})
+
+// ---- v0.1.5: primitive boundary (conditional on manifest.controlPrimitives) -----
+// The scan is .tsx-only, exempts the declared home dir, reads multi-line open
+// tags, and controlAllow is its own escape (separate from the px/hex allow).
+
+const RAW_BUTTON =
+  'export const Bad = () => <button className="rounded-md bg-surface text-ink">Save</button>\n'
+
+test('RED: a raw <button className=…> outside the components home reds with the FIX line', () => {
+  const rel = 'apps/desktop/src/screens/BadScreen.tsx'
+  const r = runGate(fixture({ sources: { [rel]: RAW_BUTTON } }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes(rel), r.out)
+  assert.ok(r.out.includes('raw <button'), r.out)
+  assert.ok(r.out.includes('FIX: render it through the Button primitive'), r.out)
+  assert.ok(r.out.includes('controlAllow'), r.out)
+})
+
+test('RED: a MULTI-LINE raw <input> whose className sits on a later line is detected', () => {
+  const rel = 'apps/desktop/src/features/form/Field.tsx'
+  const content =
+    'export const F = () => (\n  <input\n    type="text"\n    aria-label="query"\n    className="rounded-md bg-surface"\n  />\n)\n'
+  const r = runGate(fixture({ sources: { [rel]: content } }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('raw <input'), r.out)
+  assert.ok(r.out.includes('the Input primitive'), r.out)
+})
+
+test("GREEN: the declared home dir is the primitives' home — raw controls live there by design", () => {
+  const rel = 'apps/desktop/src/components/Custom.tsx'
+  const r = runGate(fixture({ sources: { [rel]: RAW_BUTTON } }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: a className-less bare <button> is not a primitive-boundary violation', () => {
+  const rel = 'apps/desktop/src/screens/Plain.tsx'
+  const content =
+    'export const P = () => <button type="button" onClick={() => undefined}>Go</button>\n'
+  const r = runGate(fixture({ sources: { [rel]: content } }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: .ts files are ignored by the primitive-boundary scan (JSX lives in .tsx)', () => {
+  const rel = 'apps/desktop/src/lib/snippet.ts'
+  const content = 'export const s = \'<button className="rounded-md">x</button>\'\n'
+  const r = runGate(fixture({ sources: { [rel]: content } }))
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: a controlAllow entry (file + reason) exempts a LIVE violation, and no NOTE prints', () => {
+  const rel = 'apps/desktop/src/features/grid/Cell.tsx'
+  const manifest = withManifest((m) =>
+    m.controlAllow.push({
+      file: rel,
+      reason: 'virtualized gridcell buttons: roving-tabindex cells are per-row hot-path controls',
+    }),
+  )
+  const r = runGate(fixture({ manifest, sources: { [rel]: RAW_BUTTON } }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(!r.out.includes('NOTE'), r.out) // armed manifests run silent, no adoption NOTE
+})
+
+test('RED: stale controlAllow entries red — file missing, and file present without a match', () => {
+  // (a) the exempted file does not exist.
+  const gone = withManifest((m) =>
+    m.controlAllow.push({ file: 'apps/desktop/src/features/x/Gone.tsx', reason: 'stale test' }),
+  )
+  const a = runGate(fixture({ manifest: gone }))
+  assert.equal(a.code, 1, a.out)
+  assert.ok(a.out.includes('apps/desktop/src/features/x/Gone.tsx'), a.out)
+  assert.ok(a.out.includes('does not exist — stale entry'), a.out)
+
+  // (b) the exempted file exists but no longer trips the scan.
+  const rel = 'apps/desktop/src/features/x/Clean.tsx'
+  const clean = withManifest((m) => m.controlAllow.push({ file: rel, reason: 'stale test' }))
+  const b = runGate(
+    fixture({
+      manifest: clean,
+      sources: { [rel]: 'export const C = () => <div className="bg-surface" />\n' },
+    }),
+  )
+  assert.equal(b.code, 1, b.out)
+  assert.ok(b.out.includes('matches there anymore'), b.out)
+  assert.ok(b.out.includes('stale entry'), b.out)
+})
+
+test('RED: a malformed controlAllow entry fails LOUD (the escape hatch cannot fail open)', () => {
+  const manifest = withManifest((m) => {
+    m.controlAllow.push({ file: 'apps/desktop/src/features/x/y.tsx' }) // no reason
+  })
+  const r = runGate(fixture({ manifest }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('controlAllow entry'), r.out)
+})
+
+test('RED: a malformed controlPrimitives key fails LOUD (the scan never silently disarms)', () => {
+  const manifest = withManifest((m) => {
+    m.controlPrimitives = { tags: [], home: 'apps/desktop/src/components' }
+  })
+  const r = runGate(fixture({ manifest }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('controlPrimitives'), r.out)
+})
+
+test('NOTE: a keyless (pre-0.1.5) manifest self-disables the scan, naming key + refresh command', () => {
+  const rel = 'apps/desktop/src/screens/BadScreen.tsx'
+  const manifest = withManifest((m) => {
+    delete m.controlPrimitives
+    delete m.controlAllow
+  })
+  const r = runGate(fixture({ manifest, sources: { [rel]: RAW_BUTTON } }))
+  assert.equal(r.code, 0, r.out) // the violation is withheld — the scan is off
+  assert.ok(r.out.includes('styleguide: NOTE'), r.out)
+  assert.ok(r.out.includes('"controlPrimitives"'), r.out)
+  assert.ok(r.out.includes('update --refresh-seeded tools/styleguide.manifest.json'), r.out)
 })

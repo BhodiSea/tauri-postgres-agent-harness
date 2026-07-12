@@ -1,5 +1,5 @@
 {
-  "comment": "Design-system contract enforced by tools/check-styleguide-manifest.mjs against apps/desktop/src/styles.css. tokens/families mirror the @theme declarations bidirectionally; erasedNamespaces must keep their `--<ns>-*: initial` markers; accentUsageBudget caps accent-utility occurrences across the desktop source; allow entries (file + reason) exempt a file from the raw px/hex/inline-style source scan. themes.<name>.selector names a :root override block in styles.css whose --color-* set must EQUAL tokens exactly (oklch-only, no alpha/var) — a missing override token is a dark value silently painted on the light canvas. contrast pairs are COMPUTED (oklch -> linear sRGB -> WCAG luminance) for the base @theme AND every theme block, each asserted >= min. This file is write-guard-protected: extending the design system is a reviewed human diff of styles.css AND this manifest together.",
+  "comment": "Design-system contract enforced by tools/check-styleguide-manifest.mjs against apps/desktop/src/styles.css. tokens/families mirror the @theme declarations bidirectionally; erasedNamespaces must keep their `--<ns>-*: initial` markers; accentUsageBudget caps accent-utility occurrences across the desktop source; allow entries (file + reason) exempt a file from the raw px/hex/inline-style source scan. themes.<name>.selector names a :root override block in styles.css whose --color-* set must EQUAL tokens exactly (oklch-only, no alpha/var) — a missing override token is a dark value silently painted on the light canvas. contrast pairs are COMPUTED (oklch -> linear sRGB -> WCAG luminance) for the base @theme AND every theme block, each asserted >= min. controlPrimitives arms the primitive-boundary scan: a raw JSX open-tag for one of `tags` carrying a literal className in a .tsx outside `home` is red — interactive controls render through the src/components primitives (Button/Input), and new control styling goes INTO the primitive; controlAllow entries (file + reason) are the reviewed escape, and stale entries (file gone, or no live match) are red. This file is write-guard-protected: extending the design system is a reviewed human diff of styles.css AND this manifest together.",
   "tokens": ["canvas", "surface", "edge", "ink", "ink-muted", "accent"],
   "themes": {
     "light": { "selector": ":root[data-theme='light']" }
@@ -22,6 +22,11 @@
     "shadow": ["sm", "md"],
     "ease": ["out", "in-out"]
   },
+  "controlPrimitives": {
+    "tags": ["button", "input", "select", "textarea"],
+    "home": "apps/desktop/src/components"
+  },
+  "controlAllow": [],
   "allow": [
     {
       "file": "apps/desktop/src/styles.css",

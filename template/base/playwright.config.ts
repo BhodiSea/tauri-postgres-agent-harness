@@ -9,9 +9,19 @@ import { defineConfig } from '@playwright/test'
 // Config files at the repo root belong to no tsconfig project; ESLint checks
 // them via the projectService default project (same as vitest.config.ts), so
 // node globals are declared locally instead of pulling in @types/node.
-declare const process: { env: { CI?: string } } | undefined
+declare const process: { env: { CI?: string; HARNESS_PERF_LANE?: string } } | undefined
 
 const inCI = process?.env.CI !== undefined
+
+// The CI-only interaction-latency lane (e2e/interaction-latency.spec.ts): the
+// 'perf' project EXISTS only under HARNESS_PERF_LANE=1, and the default
+// chromium project testIgnores its spec — so the agent-time e2e gate
+// (tools/check-e2e.mjs, which additionally strips the env var) and the CI
+// e2e-fast job run exactly the same non-perf suite as before this lane existed.
+// Wall-clock browser timing is the flakiest surface in the repo; it must never
+// enter the deterministic validate chain or the warm ≈5s Stop-hook path.
+const perfLane = process?.env.HARNESS_PERF_LANE === '1'
+const PERF_SPEC = /interaction-latency\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -29,7 +39,27 @@ export default defineConfig({
     // timing. Under reduced motion axe measures the true resting contrast.
     reducedMotion: 'reduce',
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: PERF_SPEC },
+    ...(perfLane
+      ? [
+          {
+            name: 'perf',
+            testMatch: PERF_SPEC,
+            // Wall-clock samples never share a CPU: the three perf tests run
+            // serially in one worker (the CI job adds --workers 1 as belt and
+            // braces). reducedMotion:'reduce' is INHERITED deliberately: it
+            // freezes decorative motion-safe animations (less rAF/paint noise,
+            // fewer flakes) while the scripted work this lane times — keydown
+            // handlers, mount, data processing — is unaffected by the media
+            // query; animation cost is bounded separately by the motion-opt-in
+            // doctrine (e2e/motion.spec.ts).
+            fullyParallel: false,
+            use: { browserName: 'chromium' },
+          },
+        ]
+      : []),
+  ],
   webServer: {
     // Same fixed dev port contract as tauri.conf.json devUrl (1420, strict).
     command: 'pnpm --filter desktop exec vite dev --port 1420 --strictPort',

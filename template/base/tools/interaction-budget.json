@@ -1,0 +1,7 @@
+{
+  "comment": "Wall-clock UX budgets for the CI-only interaction-latency lane (e2e/interaction-latency.spec.ts, a Playwright project that exists only under HARNESS_PERF_LANE=1 — never in the validate chain or the Stop hook). Budgets are DELIBERATELY generous: shared CI runners are noisy, so this lane catches step-function regressions (a 300ms main-thread stall on keydown), not 10% drifts — the in-chain perf-budget gate stays the tight relative canary. Human-tuned data (write-guard-protected, seeded — update never rewrites it): re-baseline only in a reviewed commit, from a local `HARNESS_PERF_LANE=1 pnpm exec playwright test --project perf` median with ~6-8x headroom. See docs/harness/gates-catalog.md (CI-only lanes).",
+  "ttiMs": 5000,
+  "arrowLatencyMs": { "median": 100 },
+  "longTasks": { "max": 6, "thresholdMs": 50 },
+  "runs": 7
+}

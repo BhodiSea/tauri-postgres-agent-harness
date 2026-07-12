@@ -161,9 +161,11 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   aria-rowcount over the windowed DOM), keyset pagination (`useKeysetQuery`).
   The perf-budget gate measures REAL subjects, not a synthetic fixture, and
   enforces closure: every `features/*` dir importing those hooks ships a
-  `perfSubject.ts` declared in `tools/perf-budget.json` `subjects[]`
-  (`features/matrix/perfSubject.ts` is the worked pattern; reviewed
-  `exempt: [{ dir, reason }]` entries are the only escape).
+  `perfSubject.ts` declared in `tools/perf-budget.json` `subjects[]` (matrix is
+  the worked pattern; `exempt: [{ dir, reason }]` is the reviewed escape).
+  Absolute wall-clock UX budgets (TTI, arrow-key latency, long tasks) run in
+  the CI-only perf lane (`HARNESS_PERF_LANE=1`, budgets in
+  `tools/interaction-budget.json`) — deliberately NEVER in the validate chain.
 - Charts in `features/{matrix,graph}` are hand-rolled SVG (chart libs banned
   there by lint); a11y is jsx-a11y strict, WCAG 2.2 AA.
 

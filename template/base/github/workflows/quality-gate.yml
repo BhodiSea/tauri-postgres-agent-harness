@@ -294,6 +294,64 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
+  # Interaction-latency lane — wall-clock UX budgets (TTI, arrow-key latency,
+  # main-thread long tasks) in real chromium against `vite dev`. Deliberately
+  # OUTSIDE tools/validate.mjs and the Stop hook: wall-clock browser timing on
+  # shared runners is the flakiest measurement in the repo, and the agent-time
+  # chain's determinism + warm ≈5s promise are inviolable — so the lane lives
+  # here as a BLOCKING job instead (HARNESS_PERF_LANE=1 is what makes the perf
+  # project exist at all; see playwright.config.ts). Budgets are generous
+  # median-of-N numbers in tools/interaction-budget.json (seeded): they catch
+  # step-function regressions (a 300ms stall on keydown), not 10% drifts, and
+  # the harness selftest proves the lane can fail (busy-loop canary). A
+  # pre-0.1.5 install has no budget file yet — loud skip, never a false red.
+  # ---------------------------------------------------------------------------
+  perf-lane:
+    name: perf lane (interaction latency, wall-clock)
+    runs-on: ubuntu-latest
+    env:
+      HARNESS_PERF_LANE: '1'
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser (chromium)
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Interaction-latency budgets (perf project only, single worker)
+        run: |
+          if [ ! -f tools/interaction-budget.json ]; then
+            echo "::warning::tools/interaction-budget.json absent — interaction-latency lane SKIPPED (pre-0.1.5 install). Adopt it deliberately: npx tauri-postgres-agent-harness update --refresh-seeded tools/interaction-budget.json (the spec + perf project already arrived with update; see docs/harness/gates-catalog.md, CI-only lanes)."
+            exit 0
+          fi
+          pnpm exec playwright test --project perf --workers 1
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-lane-traces
+          path: test-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
   # Windows debug build — the artifact this repo actually ships. Expensive, so:
   # per-PR only when apps/desktop/** (or the lockfile/workspace) changed, plus the
   # nightly schedule and manual dispatch as the unconditional net.

@@ -326,6 +326,9 @@ gate-perf-budget module). THREE budget shapes, chosen by the JSON content:
 **Calibration doctrine.** Each shipped budget is ~10× the locally-measured
 fresh-scaffold median, rounded up to a clean number, so real features fit while a 10×
 regression cannot — pin from the slower CI lane's median if a clean lane exists.
+This gate is deliberately a RELATIVE canary with no browser; the ABSOLUTE UX numbers
+(TTI, input latency, long tasks) live in the CI-only interaction-latency lane below
+("CI-only lanes") — outside the chain, so its wall-clock noise can never flake a turn.
 **Anti-vacuity:** the CLI's `expect`-marker assert makes an empty render exit 1;
 slow the cell render 10× → FAIL twice-measured; declare a subject that does not
 exist → FAIL naming it; add a features dir importing `useVirtualWindow` with no
@@ -501,6 +504,54 @@ function and no test → FAIL naming the file as absent from the coverage map;
 `tests/gates/check-diff-coverage.test.mjs` additionally pins the below-floor
 red, the at-floor green, and the fail-closed missing-artifact path.
 
+## CI-only lanes (outside the chain and the Stop hook)
+
+### interaction-latency (perf lane) — `HARNESS_PERF_LANE=1 pnpm exec playwright test --project perf`
+
+Wall-clock UX budgets in real chromium against `vite dev`
+(`e2e/interaction-latency.spec.ts`), asserted against `tools/interaction-budget.json`
+(seeded + write-guard-protected — human-tuned data, like `perf-budget.json`). Three
+measurements, all timed **in page** (`performance.now()` + `requestAnimationFrame`
+bracketing — driver round-trips would add tens of ms of IPC noise per sample):
+
+- **TTI** — navigation → the notes list is in the DOM, recorded by an init-script
+  MutationObserver whose stamp shares the navigation's time origin; median of `runs`
+  navigations ≤ `ttiMs`.
+- **Arrow-key latency** — on the roving matrix grid: dispatch `keydown(ArrowDown)` on
+  the focused cell, poll one rAF at a time until `data-row` advances; the sample is
+  keydown → the first frame showing the moved cell. Median of `runs` ≤
+  `arrowLatencyMs.median`.
+- **Long tasks** — `PerformanceObserver('longtask')` (`buffered:true` plus an
+  armed-at `startTime` filter, so page-load tasks never count) armed across a
+  scripted burst covering every interaction class the app ships on ONE SPA session:
+  optimistic note create → palette open/type → client-side navigation to the matrix →
+  virtual-window scroll sweep → arrow walk. Tasks ≥ `thresholdMs` must number ≤ `max`.
+
+**Why it is not a chain step.** Wall-clock browser timing on shared runners is the
+flakiest measurement in the repo; the validate chain and the Stop hook promise
+determinism and warm ≈5 s, so the lane runs ONLY as the blocking `perf-lane` job in
+the consumer quality-gate workflow. The exclusion is mechanical, not conventional:
+the `perf` Playwright project **exists only under `HARNESS_PERF_LANE=1`**
+(playwright.config.ts), the default chromium project `testIgnore`s the spec, and
+`tools/check-e2e.mjs` strips the env var before spawning — the agent-time e2e gate
+provably runs exactly the non-perf suite. `reducedMotion: 'reduce'` is inherited
+deliberately: freezing decorative motion-safe animation removes paint noise while
+leaving the scripted work the lane times untouched (animation cost is bounded by the
+motion-opt-in doctrine, e2e/motion.spec.ts).
+
+**Calibration doctrine.** Budgets are shared-runner-generous: local median × ~6–8
+headroom, rounded to clean numbers — the lane catches step-function regressions (a
+300 ms main-thread stall on keydown), not 10 % drifts; `perf-budget` (gate 19) stays
+the tight relative canary inside the chain. Re-baseline only in a reviewed commit,
+from a fresh `HARNESS_PERF_LANE=1 pnpm exec playwright test --project perf` median.
+**Anti-vacuity:** a missing or malformed budget file FAILS the enabled lane (never
+skips — only the CI job's explicit pre-0.1.5 `tools/interaction-budget.json`-absent
+check may skip, loudly); the harness selftest injects a 300 ms per-keydown busy loop
+into the scaffold and asserts the lane REDS (long-task count + arrow median), then
+that the clean scaffold stays green. This canary lives in the harness selftest, not
+`tests/canary/injections.json` — the registry is scoped to chain/Stop-hook steps by
+construction.
+
 ## Opt-in modules
 
 `npx tauri-postgres-agent-harness enable <module>` copies the module's files and records
@@ -553,7 +604,9 @@ Recorded so the next maintainer doesn't re-litigate:
   `mutation` module, which catches the damage rather than the act.
 - **max-lines file/function caps** — proxy metrics that punish cohesive modules;
   sonarjs cognitive-complexity ≤ 15 targets the actual failure mode.
-- **Playwright-trace interaction budget on a pinned runner** — deferred: an absolute
-  UX latency metric (input→paint) needs a dedicated pinned CI runner to be stable,
-  whereas `perf-budget`'s relative render canary catches regressions cheaply with no
-  browser; revisit if a hosted runner class with pinned CPU lands.
+- **Playwright-trace interaction budget on a pinned runner** — originally deferred
+  pending a pinned-CPU runner class; shipped in 0.1.5 as the CI-only
+  `interaction-latency` lane (see "CI-only lanes") with shared-runner-generous
+  budgets and median-of-N instead of a pinned runner. Revisit TIGHTENING the budgets
+  if a hosted pinned-CPU runner class lands; the lane stays outside the chain either
+  way.

@@ -76,7 +76,10 @@ inputs make a warm validate skip build/contracts/licenses/rust-check/**e2e**/ver
 in milliseconds (a vacuous run never stamps; CI always re-runs everything), and the Stop
 hook's `--report-all` runs the read-only gates through a small concurrency pool —
 measured on the fresh scaffold: cold ≈ 70 s (real cargo check + 45 chromium e2e tests),
-warm ≈ 5 s for all 22 steps.
+warm ≈ 5 s for all 22 steps. Absolute wall-clock UX budgets (TTI, arrow-key latency,
+main-thread long tasks) deliberately live **outside** the chain, in a blocking
+consumer-CI perf lane that exists only under `HARNESS_PERF_LANE=1` — browser timing
+noise can never flake an agent turn.
 
 Rust/database gates **skip loudly** without the toolchain locally and **fail closed in
 CI** (`HARNESS_REQUIRE_TOOLCHAINS=1`) — a skip is never mistakable for a pass.

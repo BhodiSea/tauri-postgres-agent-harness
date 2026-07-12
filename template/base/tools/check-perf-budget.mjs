@@ -43,8 +43,11 @@
 //
 // This is deliberately a RELATIVE canary, not a UX metric: it catches "someone
 // made cell rendering 5× slower" in the validate chain, cheaply, with no browser.
-// Budgets ship ~10× above a fresh-scaffold median so real features fit; add a
-// playwright-trace interaction budget on a pinned runner for absolute UX numbers.
+// Budgets ship ~10× above a fresh-scaffold median so real features fit; the
+// ABSOLUTE UX numbers (TTI, arrow-key latency, long tasks) live in the CI-only
+// interaction-latency lane — e2e/interaction-latency.spec.ts under
+// HARNESS_PERF_LANE=1, budgets in tools/interaction-budget.json — which runs as
+// the blocking quality-gate perf-lane job, never inside this chain.
 // SOURCE: docs/harness/gates-catalog.md (perf-budget gate) [corpus: harness/doctrine]
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'

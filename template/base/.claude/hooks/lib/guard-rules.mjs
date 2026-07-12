@@ -181,6 +181,9 @@ export const WRITE_PROTECTED = [
   // in a reviewed commit — an agent editing it would re-baseline its own regression.
   { id: 'perf-baseline', re: /^tools\/perf-baseline\.json$/ },
   { id: 'perf-budget', re: /^tools\/perf-budget\.json$/ },
+  // Wall-clock budgets for the CI-only interaction-latency lane — raising one
+  // re-baselines the agent's own UX regression, so the edit is human-only.
+  { id: 'interaction-budget', re: /^tools\/interaction-budget\.json$/ },
   { id: 'styleguide-manifest', re: /^tools\/styleguide\.manifest\.json$/ },
   { id: 'mutation-baseline', re: /^tools\/mutation-baseline\.json$/ }, // accepting a surviving mutant is a human decision
   { id: 'route-allowlist', re: /^tools\/route-allowlist\.json$/ }, // exempting a features dir from ROUTES is a human decision

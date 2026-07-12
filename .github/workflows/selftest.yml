@@ -312,6 +312,48 @@ jobs:
             echo '::error::warm validate did not skip e2e via its stamp — the warm-path win regressed'
             exit 1
           fi
+      # The CI-only interaction-latency lane (quality-gate perf-lane in consumer
+      # repos): green on the clean scaffold, then provably able to fail — a
+      # 300ms keydown busy loop injected into the scaffold must red it. One leg
+      # only: the lane is wall-clock, so the node-24 duplicate adds noise, not
+      # coverage. Lives here (not tests/canary/injections.json) because the perf
+      # lane is NOT a VALIDATE_STEPS/STOP_HOOK_STEPS member — check-canary-coverage
+      # rejects registry entries for non-chain steps by design.
+      - name: Perf lane GREEN on the clean scaffold (interaction-latency budgets)
+        if: matrix.node == 22
+        working-directory: .selftest/boot
+        env:
+          HARNESS_PERF_LANE: '1'
+        run: pnpm exec playwright test --project perf --workers 1
+      - name: 'Perf-lane canary: a 300ms keydown busy loop must RED the lane'
+        if: matrix.node == 22
+        working-directory: .selftest/boot
+        env:
+          HARNESS_PERF_LANE: '1'
+        run: |
+          cat >> apps/desktop/src/main.tsx <<'EOF'
+
+          // selftest perf canary: block the main thread 300ms on every keydown —
+          // the interaction-latency lane must catch exactly this class of stall.
+          window.addEventListener(
+            'keydown',
+            () => {
+              const blockUntil = performance.now() + 300
+              while (performance.now() < blockUntil) {
+                // spin
+              }
+            },
+            true,
+          )
+          EOF
+          if pnpm exec playwright test --project perf --workers 1 > perf-canary.log 2>&1; then
+            tail -n 50 perf-canary.log
+            echo '::error::PERF CANARY: the lane PASSED with a 300ms main-thread busy loop on every keydown — the perf lane cannot fail'
+            exit 1
+          fi
+          grep -E 'long task|latency' perf-canary.log | tail -n 5 || true
+          git checkout -q -- apps/desktop/src/main.tsx
+          echo 'canary OK: perf lane went red under the injected busy loop'
       - name: RLS runner FAILS CLOSED without a database (CI=true)
         working-directory: .selftest/boot
         run: |

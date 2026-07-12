@@ -18,6 +18,9 @@ import {
 //   2. 500 envelope → rollback: the temp row is REMOVED and the envelope's
 //      human message surfaces as a toast; the inline zod error and the
 //      post-rollback surface are axe-swept in BOTH themes.
+// Capability-gated like matrix.spec/palette.spec: an upgraded consumer whose
+// SEEDED notes surface predates the composer (features/notes is 0.1.5
+// seedOnInitOnly) skips instead of failing — update must never red a clean install.
 // SOURCE: harness doctrine — latency feel is a first-class UI concern; the
 // optimistic row must never outlive a failed write [corpus: harness/doctrine]
 
@@ -90,6 +93,19 @@ async function routeNotes(page: Page, post: PostStub): Promise<void> {
   })
 }
 
+/** Skip on a pre-optimistic-notes consumer: the composer (features/notes
+ *  NoteComposer) is 0.1.5 seedOnInitOnly starting content, so an upgraded
+ *  0.1.4 install runs this OWNED spec against a home screen with no
+ *  "Add a note" field — skip instead of failing, the same capability gate
+ *  palette.spec applies to the pre-grouped palette. */
+async function skipUnlessComposer(page: Page): Promise<void> {
+  const composer = await page.getByLabel('Add a note').count()
+  test.skip(
+    composer === 0,
+    'notes surface predates the optimistic create exemplar (pre-0.1.5 seeded features/notes)',
+  )
+}
+
 async function expectAxeClean(page: Page, context: string): Promise<void> {
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag22aa'])
@@ -116,6 +132,7 @@ test('optimistic insert: the pending row renders BEFORE the POST resolves, then 
 
   await page.goto('/')
   await expect(page.getByText('Note 1', { exact: true })).toBeVisible()
+  await skipUnlessComposer(page)
 
   await page.getByLabel('Add a note').fill(NEW_TITLE)
   await page.getByRole('button', { name: 'Add note' }).click()
@@ -153,6 +170,7 @@ for (const theme of ['dark', 'light'] as const) {
 
     await page.goto('/')
     await expect(page.getByText('Note 1', { exact: true })).toBeVisible()
+    await skipUnlessComposer(page)
 
     // Inline contract validation first: an empty title never reaches the
     // network; the zod message renders through Field's error line, wired to

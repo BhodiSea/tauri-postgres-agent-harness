@@ -212,6 +212,9 @@ const RULE_CANARIES = {
   // own regression; `pnpm perf:baseline` + a reviewed commit is the only path.
   'perf-baseline': [pathDeny('tools/perf-baseline.json')],
   'perf-budget': [pathDeny('tools/perf-budget.json')],
+  // The CI perf lane's wall-clock budgets: an agent raising them would
+  // re-baseline its own interaction-latency regression.
+  'interaction-budget': [pathDeny('tools/interaction-budget.json')],
   'styleguide-manifest': [pathDeny('tools/styleguide.manifest.json')],
   'mutation-baseline': [pathDeny('tools/mutation-baseline.json')],
   'route-allowlist': [pathDeny('tools/route-allowlist.json')],

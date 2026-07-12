@@ -75,6 +75,10 @@ export const SEEDED_FILES = new Set([
   // project raises them deliberately — update must plant-when-absent, never clobber.
   'tools/styleguide.manifest.json',
   'tools/perf-budget.json',
+  // Wall-clock budgets for the CI-only interaction-latency lane — human-tuned
+  // like perf-budget.json, and seedOnInitOnly (0.1.5): update withholds it so
+  // the lane arms only when a consumer adopts the budget deliberately.
+  'tools/interaction-budget.json',
   'tools/bundle-budget.json',
   // The gzip-ratchet baseline: a project's committed measurement, regenerated
   // only by `pnpm perf:baseline` — plant-when-absent, never clobber (and it is

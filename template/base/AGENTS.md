@@ -131,11 +131,17 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   every declared pair in both themes — extend tokens + manifest in one reviewed
   diff and keep the pairs green. Light/dark parity is axe-swept per route in e2e.
 - **Interactive controls render through `src/components` primitives**
-  (Button/Input/Skeleton/Toast/EmptyState) — a raw button/input/select/textarea
-  tag with a literal `className` outside `src/components` is gate-red (the
-  styleguide gate's primitive-boundary scan; reviewed `controlAllow` entries in
-  `tools/styleguide.manifest.json` are the only escape); new control styling
-  goes into the primitive.
+  (Button/Input/Field/Skeleton/Toast/EmptyState) — a raw button/input/select/
+  textarea tag with a literal `className` outside `src/components` is gate-red
+  (the styleguide gate's primitive-boundary scan; reviewed `controlAllow`
+  entries in `tools/styleguide.manifest.json` are the only escape); new control
+  styling goes into the primitive.
+- **Write UX follows `features/notes`**: optimistic insert with a temp id,
+  reconcile-or-rollback in ONE plain reducer (`useCreateNote.ts`), the form
+  through Field/Input/Button with inline zod errors at the fetch boundary,
+  failures surfaced as envelope-message toasts — never a phantom row after a
+  failed write (`NoteComposer.tsx` is the worked pattern; `e2e/mutation.spec.ts`
+  locks both paths with held/fulfilled routes, zero sleeps).
 - **Motion is opt-in**: animations only behind `motion-safe:`, with the global
   `prefers-reduced-motion` backstop in styles.css — e2e asserts the held
   loading skeleton runs ZERO animations under reduced motion.

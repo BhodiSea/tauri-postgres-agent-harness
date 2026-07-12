@@ -23,12 +23,12 @@
 // This makes the release-time "update the docs" sweep MECHANICAL: change the
 // chain and this gate names exactly the lines to fix.
 // SOURCE: docs/harness/README.md (docs-sync gate) [corpus: harness/doctrine]
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { VALIDATE_STEPS } from './harness.config.mjs'
 import {
+  parseFrontmatter,
   REVIEWER_AGENTS,
   REVIEWER_READONLY_TOOLS,
-  parseFrontmatter,
   splitList,
 } from './lib/agent-roster.mjs'
 import { fail, failures, ok, rampNote, skipOrFail } from './lib/gate.mjs'

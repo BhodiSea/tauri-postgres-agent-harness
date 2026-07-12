@@ -329,7 +329,9 @@ duplicate path, or reused state id → FAIL naming the offender; malformed allow
 ### 21. e2e — `node tools/check-e2e.mjs`
 
 The agent-time Playwright lane: runs the whole `e2e/` directory (a11y + states +
-degraded-network) in chromium against `vite dev` — the same suite CI runs. Chromium
+theme + motion + matrix + degraded-network + mutation — the last locks the optimistic
+create-note write path: held-POST optimistic row, reconcile on 201, rollback + envelope
+toast on 500) in chromium against `vite dev` — the same suite CI runs. Chromium
 presence is detected from playwright's own registry (`chromium.executablePath()` +
 existsSync); absent → loud local skip with the exact install command
 (`pnpm exec playwright install chromium`), CI → fail closed. Hard 10-minute kill;

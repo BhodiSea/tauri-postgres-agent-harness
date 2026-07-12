@@ -21,7 +21,9 @@
 - **Every screen is REGISTERED** in `apps/desktop/src/routes.ts` (`ROUTES`):
   `{ id, label, path, features: [...], states: { loading, empty, error } }` —
   the states are `data-testid`s your UI must render for each state
-  (`NotesPanel.tsx` + `useListQuery.ts` are the worked pattern;
+  (read path: `NotesPanel.tsx` + `useListQuery.ts`; write path:
+  `NoteComposer.tsx` + `useCreateNote.ts` — optimistic insert,
+  reconcile-or-rollback, envelope-message toasts, locked by `e2e/mutation.spec.ts`;
   `e2e/states.spec.ts` drives every declared state and runs axe on it). A
   `src/features/<dir>` not referenced by any ROUTES entry (or allowlisted with a
   reason in `tools/route-allowlist.json` — human decision) fails the

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { ToastProvider } from '../components/Toast'
 import { HomeScreen } from './HomeScreen'
 
 // Both host modes are unit territory: outside the Tauri host the IPC bridge is
@@ -16,10 +17,20 @@ vi.mock('../ipc', () => ({
   commands: { appVersion: ipc.appVersion },
 }))
 
+// NotesPanel (the screen's data panel) raises write-failure toasts, so the
+// screen renders under the same provider App mounts it with.
+function renderHome() {
+  return render(
+    <ToastProvider>
+      <HomeScreen />
+    </ToastProvider>,
+  )
+}
+
 describe('HomeScreen', () => {
   it('outside the Tauri host: renders the welcome card and never calls the IPC bridge', () => {
     ipc.isTauri.mockReturnValue(false)
-    render(<HomeScreen />)
+    renderHome()
     expect(screen.getByRole('heading', { level: 2, name: 'Ready to build' })).toBeDefined()
     expect(screen.getByText('Running outside the Tauri host')).toBeDefined()
     expect(ipc.appVersion).not.toHaveBeenCalled()
@@ -27,7 +38,7 @@ describe('HomeScreen', () => {
 
   it('inside the Tauri host: probes and renders the host version', async () => {
     ipc.isTauri.mockReturnValue(true)
-    render(<HomeScreen />)
+    renderHome()
     expect(await screen.findByText('Tauri host v9.9.9')).toBeDefined()
   })
 })

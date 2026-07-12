@@ -65,7 +65,10 @@ const res = spawnSync('pnpm exec playwright test', {
 const out = `${res.stdout ?? ''}${res.stderr ?? ''}`
 const tail = out.split('\n').slice(-TAIL_LINES).join('\n')
 
-if (res.error !== undefined && /** @type {NodeJS.ErrnoException} */ (res.error).code === 'ETIMEDOUT') {
+if (
+  res.error !== undefined &&
+  /** @type {NodeJS.ErrnoException} */ (res.error).code === 'ETIMEDOUT'
+) {
   console.error(tail)
   fail(
     GATE,

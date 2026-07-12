@@ -193,6 +193,7 @@ const RULE_CANARIES = {
     pathDeny('tools/run-rust-gates.mjs'),
     pathDeny('tools/build-check.mjs'),
     pathDeny('tools/check-mutation-ratchet.mjs'),
+    pathDeny('tools/perf-baseline.mjs'),
   ],
   // Listed before tools-lib in WRITE_PROTECTED so the citation allowlist carries
   // its own named deny; the SELF_EDIT escape stays human-only, like every rule.
@@ -207,6 +208,9 @@ const RULE_CANARIES = {
   'provenance-overrides': [pathDeny('tools/provenance-overrides.json')],
   'license-exceptions': [pathDeny('tools/license-exceptions.json')],
   'bundle-budget': [pathDeny('tools/bundle-budget.json')],
+  // The gzip-ratchet baseline: agent-editing it would re-baseline the agent's
+  // own regression; `pnpm perf:baseline` + a reviewed commit is the only path.
+  'perf-baseline': [pathDeny('tools/perf-baseline.json')],
   'perf-budget': [pathDeny('tools/perf-budget.json')],
   'styleguide-manifest': [pathDeny('tools/styleguide.manifest.json')],
   'mutation-baseline': [pathDeny('tools/mutation-baseline.json')],

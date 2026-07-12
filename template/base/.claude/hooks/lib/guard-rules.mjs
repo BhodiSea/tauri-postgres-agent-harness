@@ -163,7 +163,9 @@ export const WRITE_PROTECTED = [
   // The frozen CI floor: `validate.mjs --min-floor` trusts THIS file over the config, so a
   // shell/tool edit here would be the way to weaken CI without touching the config.
   { id: 'validate-floor', re: /^tools\/validate\.floor\.json$/ },
-  { id: 'gate-scripts', re: /^tools\/(check-[^/]+|run-rust-gates|build-check)\.mjs$/ },
+  // perf-baseline.mjs is the ratchet-baseline regenerator — same trust level as
+  // the gate that consumes its output.
+  { id: 'gate-scripts', re: /^tools\/(check-[^/]+|run-rust-gates|build-check|perf-baseline)\.mjs$/ },
   // The bare-URL citation allowlist the provenance gate resolves against — widening it
   // weakens the gate, so adding a domain is a human decision. Listed BEFORE tools-lib
   // (which also covers the path) so the deny carries its own named, canaried rule id.
@@ -175,6 +177,9 @@ export const WRITE_PROTECTED = [
   { id: 'provenance-overrides', re: /^tools\/provenance-overrides\.json$/ }, // cross-group citation escapes are a human decision
   { id: 'license-exceptions', re: /^tools\/license-exceptions\.json$/ }, // license exceptions are a human decision
   { id: 'bundle-budget', re: /^tools\/bundle-budget\.json$/ },
+  // The committed gzip-ratchet baseline: regenerated ONLY by `pnpm perf:baseline`
+  // in a reviewed commit — an agent editing it would re-baseline its own regression.
+  { id: 'perf-baseline', re: /^tools\/perf-baseline\.json$/ },
   { id: 'perf-budget', re: /^tools\/perf-budget\.json$/ },
   { id: 'styleguide-manifest', re: /^tools\/styleguide\.manifest\.json$/ },
   { id: 'mutation-baseline', re: /^tools\/mutation-baseline\.json$/ }, // accepting a surviving mutant is a human decision

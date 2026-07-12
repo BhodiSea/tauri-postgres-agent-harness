@@ -395,7 +395,11 @@ anti-vacuity proofs) in the [gates catalog](./gates-catalog.md).
   actually `vite build`, and the emitted `dist/` must be PURE: no ORM markers, no
   privileged DSN names, no connection strings, no signing-material references. Bundle
   purity is the runtime backstop for the depcruise/lint walls — a transitive import that
-  sneaks past static analysis still shows up in the emitted JS.
+  sneaks past static analysis still shows up in the emitted JS. Bytes are gated twice:
+  absolute gzip budgets (`tools/bundle-budget.json`, ~3x headroom) and the byte-true
+  ratchet against the committed `tools/perf-baseline.json` (measured ≤ baseline ×
+  ratioCap; re-baseline only via `pnpm perf:baseline` in a reviewed commit — see
+  gates-catalog §16).
 
 ## Stop-hook cost (and how to trim it)
 

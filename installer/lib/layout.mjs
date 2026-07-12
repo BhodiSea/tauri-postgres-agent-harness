@@ -76,6 +76,11 @@ export const SEEDED_FILES = new Set([
   'tools/styleguide.manifest.json',
   'tools/perf-budget.json',
   'tools/bundle-budget.json',
+  // The gzip-ratchet baseline: a project's committed measurement, regenerated
+  // only by `pnpm perf:baseline` — plant-when-absent, never clobber (and it is
+  // seedOnInitOnly: `update` withholds it from existing installs so the
+  // template scaffold's bytes never ratchet someone else's bundle).
+  'tools/perf-baseline.json',
   'tools/route-allowlist.json',
   'tests/rls/db-context.ts',
 ])

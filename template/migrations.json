@@ -49,6 +49,7 @@
   "0.1.5": {
     "seedOnInitOnly": [
       "tools/provenance-overrides.json",
+      "tools/perf-baseline.json",
       "apps/desktop/src/components/Field.tsx",
       "apps/desktop/src/components/Field.test.tsx",
       "apps/desktop/src/features/notes/",

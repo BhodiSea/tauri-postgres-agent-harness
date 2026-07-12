@@ -65,3 +65,25 @@ Pull any exemplar the new shape references first (a pre-0.1.4 install needs
 `update --refresh-seeded apps/desktop/src/features/matrix/` before the budget's
 matrix subject can measure), then re-run `pnpm validate`. Graduation here is the
 file pull itself — no `baseVersion` bump.
+
+### Adopting the gzip ratchet on a 0.1.4 install (tools/perf-baseline.json)
+
+The build gate's byte-true ratchet (0.1.5) keys off the PRESENCE of
+`tools/perf-baseline.json`. It is seeded + `seedOnInitOnly`, so `update` never
+plants it: your install keeps the absolute-cap behavior and the build gate
+prints a NOTE naming the file. To adopt, generate the baseline from **your own
+bundle's real bytes** — do NOT pull the template's shipped baseline, its numbers
+describe the fresh scaffold, not your app:
+
+```
+node tools/perf-baseline.mjs      # `update` refreshed this owned script for you
+```
+
+(Fresh 0.1.5 installs spell it `pnpm perf:baseline`; add that script to your
+package.json if you want the same sugar — package.json is seeded, so `update`
+did not add it for you.) Review the printed measurements, commit the JSON, and
+from the next validate the build gate fails on measured gzip > baseline ×
+`ratioCap`. Re-baseline after any DELIBERATE size change with the same command
+in a reviewed commit — the file is write-guard-protected against ad-hoc agent
+edits. The nightly Windows job also starts asserting `installerBudgetBytes`
+from the same file (it skips loudly until the baseline exists).

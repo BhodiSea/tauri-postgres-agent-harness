@@ -173,8 +173,35 @@ also denies it in-session) → FAIL with the violation path.
 (ORM names, `MIGRATOR_DATABASE_URL`, connection-string prefixes, signing-material
 references). The runtime backstop for gates 4/14: a transitive leak past static
 analysis still shows up in the emitted JS.
+
+Two byte checks, one measurer (`tools/lib/bundle-measure.mjs`):
+
+- **Absolute budgets** (`tools/bundle-budget.json`, gzip KB — total, largest
+  chunk, largest asset): the coarse ceiling, deliberately ~3x above the fresh
+  scaffold so real features fit while a heavyweight-dependency accident reds.
+- **Gzip ratchet** (`tools/perf-baseline.json`): the committed baseline of real
+  gzip BYTES (total + per-logical-chunk, vite hashes stripped so keys stay
+  stable across builds). The gate fails when measured > baseline × `ratioCap`
+  (shipped 1.25) — total always, per chunk where declared; exactly AT the cap is
+  green. Bytes are hardware-independent, so this delta check is deterministic
+  everywhere, agent time included. **Re-baseline ceremony:** after a DELIBERATE
+  size change run `pnpm perf:baseline` (rebuilds, re-measures through the same
+  lib, preserves the human-tuned `ratioCap`/`installerBudgetBytes`, prints the
+  diff) and commit the result for review — the JSON is write-guard-protected and
+  seeded, so neither an agent edit nor an `update` can move it. **Self-disable:**
+  no baseline (a pre-0.1.5 install) → a NOTE names the file and the command and
+  ONLY the absolute budgets apply, byte-identical to 0.1.4; a malformed baseline
+  FAILS CLOSED. The baseline also carries `installerBudgetBytes`, asserted
+  against the NSIS artifact by the nightly `desktop-windows` job in
+  `quality-gate.yml` (loud skip when the baseline is absent).
+
+The baseline is a **build-stamp input**: editing (or creating) it invalidates
+`.harness/build.ok`, so a warm validate re-runs the real build instead of riding
+a stale green.
 **Anti-vacuity:** embed the literal string `MIGRATOR_DATABASE_URL` in a desktop
-constant → build succeeds, gate FAILs on bundle purity.
+constant → build succeeds, gate FAILs on bundle purity. Halve `gzip.total` in
+`tools/perf-baseline.json` → gate FAILs naming measured vs baseline × ratioCap
+and the `pnpm perf:baseline` ceremony (proven by `tests/gates/build-check.test.mjs`).
 
 ### 17. rust-check — `node tools/run-rust-gates.mjs check`
 

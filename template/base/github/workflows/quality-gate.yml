@@ -366,6 +366,36 @@ jobs:
       - name: Tauri debug build (NSIS bundle, embedded offline WebView2)
         run: pnpm --filter desktop exec tauri build --debug
 
+      # Installer size vs the committed budget (tools/perf-baseline.json,
+      # installerBudgetBytes — regenerated only via `pnpm perf:baseline` in a
+      # reviewed commit). This is a DEBUG artifact embedding the ~150 MB offline
+      # WebView2, so the number is a coarse bundled-dependency canary (duplicate
+      # runtimes, debug-symbol explosions), not a ship-size promise; the shipped
+      # budget is generous — read the printed size from the first nightly run and
+      # ratchet DOWN. Loud skip when the baseline is absent (pre-0.1.5 installs);
+      # a baseline WITHOUT the field fails closed — reviewable data or no gate.
+      - name: Installer size budget (tools/perf-baseline.json)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'tools/perf-baseline.json')) {
+            Write-Host '::warning::tools/perf-baseline.json absent - installer size budget SKIPPED. Generate it with `pnpm perf:baseline` in a reviewed commit (see docs/runbooks/harness-upgrade.md).'
+            exit 0
+          }
+          $baseline = Get-Content 'tools/perf-baseline.json' -Raw | ConvertFrom-Json
+          $budget = $baseline.installerBudgetBytes
+          if ($null -eq $budget -or $budget -le 0) {
+            Write-Error 'tools/perf-baseline.json carries no positive installerBudgetBytes - the size gate fails closed on unreviewable data; re-run `pnpm perf:baseline` and commit the diff'
+            exit 1
+          }
+          $installer = Get-ChildItem 'apps/desktop/src-tauri/target/debug/bundle/nsis/*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { Write-Error 'no NSIS installer found under target/debug/bundle/nsis'; exit 1 }
+          $size = (Get-Item $installer.FullName).Length
+          Write-Host "installer: $($installer.Name) - $size bytes ($([math]::Round($size / 1MB, 1)) MB); budget $budget bytes ($([math]::Round($budget / 1MB, 1)) MB)"
+          if ($size -gt $budget) {
+            Write-Error 'installer exceeds installerBudgetBytes - investigate what got bundled (duplicate runtime? debug symbols?) or, after a DELIBERATE change, raise the budget in tools/perf-baseline.json via a reviewed commit'
+            exit 1
+          }
+
       - name: Upload debug installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

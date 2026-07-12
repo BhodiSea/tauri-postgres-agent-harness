@@ -6,9 +6,25 @@
 // transitive import that sneaks past static analysis still shows up in the emitted
 // JS. The budget is the deterministic performance floor: a 15 MB unsplit bundle is
 // a shipped regression whether or not anyone profiles it.
+//
+// RATCHET (v0.1.5): the absolute budgets carry ~3x headroom by design, so a 2-3x
+// regression used to ship green. When tools/perf-baseline.json exists (committed
+// gzip bytes, regenerated ONLY by `pnpm perf:baseline` in a reviewed commit), the
+// gate ALSO fails on measured > baseline × ratioCap — total always, per logical
+// chunk when declared. Bytes are hardware-independent: deterministic everywhere,
+// agent time included. No baseline (a pre-0.1.5 install) → a NOTE names the file
+// and the command, and the absolute-cap behavior stays byte-identical; a
+// MALFORMED baseline fails closed. Measurement lives in lib/bundle-measure.mjs,
+// shared with the regenerator, so the two can never measure differently.
 // SOURCE: docs/harness/README.md (build gate; desktop-bundle purity) [corpus: harness/doctrine]
 import { existsSync, readFileSync } from 'node:fs'
-import { gzipSync } from 'node:zlib'
+import {
+  BASELINE_COMMAND,
+  BASELINE_FILE,
+  measureDist,
+  parseBaseline,
+  ratchetFindings,
+} from './lib/bundle-measure.mjs'
 import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
@@ -48,20 +64,21 @@ const FORBIDDEN = [
 ]
 
 const hits = []
-const files = [] // { path, gzipBytes, isJs }
-// dist is walked EXHAUSTIVELY (no exclude set): purity markers and byte budgets
-// must see every emitted file.
+// dist is walked EXHAUSTIVELY (no exclude set): purity markers must see every
+// emitted text file. Byte accounting happens in the SHARED measurer below.
 for (const rel of walkFiles(dist)) {
+  if (!/\.(js|css|html)$/.test(rel)) continue
   const p = `${dist}/${rel}`
-  const raw = readFileSync(p)
-  files.push({ path: p, gzipBytes: gzipSync(raw).length, isJs: /\.js$/.test(rel) })
-  if (/\.(js|css|html)$/.test(rel)) {
-    const text = raw.toString('utf8')
-    for (const [marker, why] of FORBIDDEN) {
-      if (text.includes(marker)) hits.push(`${p}: contains "${marker}" — ${why}`)
-    }
+  const text = readFileSync(p).toString('utf8')
+  for (const [marker, why] of FORBIDDEN) {
+    if (text.includes(marker)) hits.push(`${p}: contains "${marker}" — ${why}`)
   }
 }
+
+// One measurement for BOTH byte checks (absolute budgets + ratchet), through the
+// same lib the `pnpm perf:baseline` regenerator uses — gate and baseline can
+// never disagree about what a byte is.
+const measured = measureDist(dist)
 
 // Byte budgets: gzip (what the WebView actually parses off disk is closer to
 // raw, but gzip normalizes minifier noise and matches how budgets are quoted).
@@ -78,9 +95,10 @@ if (existsSync(BUDGET_FILE)) {
     )
   }
   const kb = (bytes) => bytes / 1024
-  const totalKb = kb(files.reduce((sum, f) => sum + f.gzipBytes, 0))
-  const biggestChunk = files.filter((f) => f.isJs).sort((a, b) => b.gzipBytes - a.gzipBytes)[0]
-  const biggestAsset = files.filter((f) => !f.isJs).sort((a, b) => b.gzipBytes - a.gzipBytes)[0]
+  const totalKb = kb(measured.totalBytes)
+  const byBytes = (a, b) => b.gzipBytes - a.gzipBytes
+  const biggestChunk = measured.files.filter((f) => f.isJs).sort(byBytes)[0]
+  const biggestAsset = measured.files.filter((f) => !f.isJs).sort(byBytes)[0]
 
   if (typeof budget.totalGzipKb === 'number' && totalKb > budget.totalGzipKb) {
     hits.push(
@@ -93,7 +111,7 @@ if (existsSync(BUDGET_FILE)) {
     kb(biggestChunk.gzipBytes) > budget.largestChunkGzipKb
   ) {
     hits.push(
-      `${biggestChunk.path}: ${kb(biggestChunk.gzipBytes).toFixed(1)} KB gzip exceeds the ${String(budget.largestChunkGzipKb)} KB per-chunk budget — code-split the entry`,
+      `${dist}/${biggestChunk.rel}: ${kb(biggestChunk.gzipBytes).toFixed(1)} KB gzip exceeds the ${String(budget.largestChunkGzipKb)} KB per-chunk budget — code-split the entry`,
     )
   }
   if (
@@ -102,7 +120,7 @@ if (existsSync(BUDGET_FILE)) {
     kb(biggestAsset.gzipBytes) > budget.largestAssetGzipKb
   ) {
     hits.push(
-      `${biggestAsset.path}: ${kb(biggestAsset.gzipBytes).toFixed(1)} KB gzip exceeds the ${String(budget.largestAssetGzipKb)} KB per-asset budget`,
+      `${dist}/${biggestAsset.rel}: ${kb(biggestAsset.gzipBytes).toFixed(1)} KB gzip exceeds the ${String(budget.largestAssetGzipKb)} KB per-asset budget`,
     )
   }
 } else {
@@ -111,6 +129,32 @@ if (existsSync(BUDGET_FILE)) {
   )
 }
 
+// The gzip ratchet: committed baseline × ratioCap, byte-true. Self-disables
+// LOUDLY when the baseline is absent (a 0.1.4-vintage install keeps exactly the
+// absolute-cap behavior above); fails CLOSED when it is malformed — an
+// unreviewable ratchet must never fail open.
+if (existsSync(BASELINE_FILE)) {
+  let baseline
+  try {
+    baseline = parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
+  } catch (e) {
+    fail(
+      GATE,
+      `${BASELINE_FILE} ${e.message} — the ratchet FAILS CLOSED on unreviewable data; regenerate with \`${BASELINE_COMMAND}\` in a reviewed commit (the file is write-guard-protected)`,
+    )
+  }
+  const { errs, notes } = ratchetFindings(measured, baseline)
+  for (const note of notes) console.log(`${GATE}: NOTE — ${note}`)
+  hits.push(...errs)
+} else {
+  console.log(
+    `${GATE}: NOTE — ${BASELINE_FILE} absent: the gzip ratchet is OFF and only the absolute byte budgets in ${BUDGET_FILE} apply (~3x headroom — a sub-budget regression ships green). Generate the committed baseline with \`${BASELINE_COMMAND}\` (or \`node tools/perf-baseline.mjs\` on installs whose package.json predates the script) and commit it in a reviewed diff; see docs/runbooks/harness-upgrade.md (content-conditional checks)`,
+  )
+}
+
 failures(GATE, hits)
 recordGreen()
-ok(GATE, 'desktop bundle builds, is pure, and fits the byte budgets')
+ok(
+  GATE,
+  `desktop bundle builds, is pure, and fits the byte budgets (gzip total ${String(measured.totalBytes)} B)`,
+)

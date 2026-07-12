@@ -27,7 +27,11 @@
     "contracts": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
     "dead-code": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "knip --strict exits non-zero on unused exports/files" }],
     "architecture": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "depcruise exits non-zero on rule violations; the DAL-boundary rules were proven firing when added" }],
-    "build": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "build": [
+      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
+      { "kind": "fixture", "ref": "tests/gates/build-check.test.mjs", "note": "gzip ratchet: a committed tools/perf-baseline.json with a tiny total → build red naming measured vs baseline × ratioCap and the `pnpm perf:baseline` re-baseline ceremony; exactly AT the cap stays green" },
+      { "kind": "fixture", "ref": "tests/gates/build-check.test.mjs", "note": "self-disable + fail-closed: absent baseline → NOTE naming the file and `pnpm perf:baseline` while the absolute byte budgets keep their 0.1.4 behavior; malformed baseline JSON/shape → red, never fail-open" }
+    ],
     "rust-check": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
     "styleguide": [
       { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },

@@ -5,7 +5,10 @@
 // class and asserts the stamp invalidates; extend BOTH together.
 // SOURCE: docs/harness/README.md (rust gates; stamp) [corpus: harness/doctrine]
 export const STAMP_INPUTS = {
-  // vite build + bundle purity + byte budgets
+  // vite build + bundle purity + byte budgets + the gzip ratchet baseline
+  // (tools/perf-baseline.json is declared even where absent: the missing-path
+  // token means the baseline APPEARING — e.g. `pnpm perf:baseline` — also
+  // invalidates a warm stamp, so the ratchet arms on the very next validate).
   build: [
     'apps/desktop/src',
     'apps/desktop/index.html',
@@ -13,6 +16,7 @@ export const STAMP_INPUTS = {
     'apps/desktop/vite.config.ts',
     'apps/desktop/tsconfig.json',
     'tools/bundle-budget.json',
+    'tools/perf-baseline.json',
     'pnpm-lock.yaml',
   ],
   // openapi regen-diff + tsconfig project-references sync

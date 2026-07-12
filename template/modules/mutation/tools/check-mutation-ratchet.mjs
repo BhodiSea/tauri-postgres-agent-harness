@@ -21,7 +21,10 @@ const BASELINE = 'tools/mutation-baseline.json'
 const writeMode = process.argv.includes('--write')
 
 if (!existsSync(REPORT)) {
-  fail(GATE, `${REPORT} missing — run \`pnpm exec stryker run stryker.config.mjs\` (json reporter) first`)
+  fail(
+    GATE,
+    `${REPORT} missing — run \`pnpm exec stryker run stryker.config.mjs\` (json reporter) first`,
+  )
 }
 let report
 try {
@@ -46,7 +49,9 @@ survivors.sort()
 
 if (writeMode) {
   writeFileSync(BASELINE, `${JSON.stringify({ survivors }, null, 2)}\n`)
-  console.log(`${GATE}: baseline rewritten with ${String(survivors.length)} survivor(s) — commit it as a reviewed decision`)
+  console.log(
+    `${GATE}: baseline rewritten with ${String(survivors.length)} survivor(s) — commit it as a reviewed decision`,
+  )
   process.exit(0)
 }
 
@@ -77,4 +82,7 @@ if (fresh.length > 0) {
     `${String(fresh.length)} NEW surviving mutant(s) — write a test that kills each, or (human decision) record it in ${BASELINE}:\n  ${fresh.join('\n  ')}`,
   )
 }
-ok(GATE, `${String(survivors.length)} survivor(s), all within the committed baseline${killed.length > 0 ? ` (${String(killed.length)} ready to ratchet out)` : ''}`)
+ok(
+  GATE,
+  `${String(survivors.length)} survivor(s), all within the committed baseline${killed.length > 0 ? ` (${String(killed.length)} ready to ratchet out)` : ''}`,
+)

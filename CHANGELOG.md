@@ -3,6 +3,99 @@
 All notable changes to the harness are documented here. Consuming projects
 pick up fixes with `npx --yes github:BhodiSea/tauri-postgres-agent-harness update`.
 
+## [0.1.5] — 2026-07-12
+
+The promise becomes checkable. A 42-agent audit (8 lens assessors → 30
+adversarial verifiers → completeness critic → 3 release designers; distilled
+record in `design/v0.1.5-audit.md`) named every way an agent could end a turn
+green while the four pillars quietly weren't true — and each named path got a
+deterministic countermeasure. No new names in the 22-step chain (the floor is
+unchanged); the depth is inside existing gates, one new Stop-chain step, two
+CI-only lanes, and the scaffold itself raised to be the benchmark it claims.
+
+**What `update` does for an existing 0.1.4 install** (lead story): owned
+surfaces (gate scripts, hooks, e2e specs, corpus, agent roster, workflows)
+refresh as usual, and **a clean 0.1.4 consumer stays green — now a CI
+invariant, not a convention**: the update-skew matrix gained a v0.1.4 leg that
+runs `pnpm install` + the full 22-gate validate after `update` on every PR.
+The mechanics: `.harness/manifest.json` gains `baseVersion` (your pre-update
+vintage; future updates preserve it), and the semantic-provenance checks print
+`NOTE — (ramp)` findings instead of reds until you sweep and graduate
+deliberately (`docs/runbooks/harness-upgrade.md`). Everything else activates
+by data shape you control: perf closure when your budget adopts `subjects[]`,
+the primitive-boundary scan when your styleguide manifest gains
+`controlPrimitives`, the gzip ratchet when `perf-baseline.json` exists
+(regenerate from **your** bytes via `pnpm perf:baseline`, don't pull the
+template's), and diff-coverage is inherently safe (empty diff passes — only
+code you change after upgrading is held to the per-file floors). The ~30 new
+seeded exemplar files (features/notes write slice, `Field` primitive, the
+deeper palette, the three new budget/override JSONs) are withheld as
+`seedOnInitOnly` — and a new selftest gate diffs every release against the
+previous tag, so *forgetting* a seedOnInitOnly registration is now
+machine-impossible. Pull clusters on your terms with `update --refresh-seeded
+<path>`.
+
+- **Research-grade**: provenance now checks that a citation *justifies*, not
+  merely resolves — a `[corpus: id]` cite at a decision site of group G must
+  cite an entry whose `groups` cover G (cross-group escapes live in reviewed,
+  write-guard-protected `tools/provenance-overrides.json`), and a bare URL
+  grounds a citation only on a `citation-domains.mjs` allowlisted host (one
+  list, shared with the citation-verifier agent). The dual-license claim is
+  machine-verifiable: REUSE 3.3 compliant (`REUSE.toml` + `LICENSES/`,
+  `Apache-2.0 OR 0BSD` on `template/**`), `reuse lint` blocking in CI with a
+  dependency-free offline mirror. "Reviewers are read-only by construction"
+  is now a gate: docs-sync parses every agent's frontmatter and reds a
+  reviewer granted Write/Edit/Bash (fail-closed on unparseable frontmatter).
+- **Maintainability**: per-file coverage floors (50/40/45/50 under the
+  70/60/65/70 aggregates) plus a new `diff-coverage` Stop-chain step — every
+  changed or untracked source file must appear in the coverage map and clear
+  the floors, so the 0%-covered-feature aggregate dodge is closed. And the
+  machinery obeys its own bar: blocking repo CI runs eslint (cognitive
+  complexity 15, the consumer budget, with an honest 11-site ratchet —
+  `init()` measures 133 today and may not grow), `tsc --checkJs`, and knip
+  over ~5,200 LOC of installer/gate/hook code. The new lint immediately paid
+  for itself: a mangled dead test helper and two silent empty catches.
+- **UI/UX**: the doctrine finally has a write-path exemplar — an optimistic
+  create-note slice (`Field` primitive with computed aria wiring, ONE reducer:
+  temp-id head insert → reconcile-by-id or single-path rollback + envelope
+  toast), locked by a held-POST e2e spec that proves the optimistic row
+  renders *before* fulfillment. The command palette grows up: deterministic
+  DP fuzzy ranking (fast-check properties against an independent oracle),
+  required typed `group`, subtitle + `keys` hints derived from the shortcut
+  registry, capped localStorage recents (empty-query only — recency never
+  biases ranking), and typed contextual commands contributed by screens.
+  Interactive controls through primitives is now gate-red (`controlPrimitives`
+  source scan; the shipped tree passes armed with zero exemptions). Contrast:
+  the primary reading pairs are **AAA (7:1), computed, both themes**
+  (measured 15.8/14.4 dark, 14.7/13.0 light — pure manifest data, no retune
+  needed; ink-muted stays honestly AA), plus a principled
+  `forced-colors: active` layer and a Windows High Contrast e2e lane with a
+  no-preference control. The e2e lane: 30 → 45 tests, retries still 0.
+- **Performance**: perf-budget closes over every dense feature —
+  `subjects[]` budgets measured through the same median-of-7 path, and a
+  feature dir importing `useVirtualWindow`/`useRovingGrid` without a declared
+  `perfSubject.ts` is gate-red (reviewed `exempt` escape). Regressions are
+  now measured against a **committed baseline**, not a 10× cliff: gzip total
+  164,280 B × ratioCap 1.25 (the 250 KB absolute cap remains as backstop),
+  re-baselined only by `pnpm perf:baseline` in a reviewed commit; the nightly
+  Windows smoke asserts installer size. Wall-clock UX gets its own blocking
+  CI lane — deliberately **outside** the Stop chain (warm validate stays
+  ≈6 s): TTI, in-page rAF-bracketed ArrowDown→frame median, and a longtask
+  ceiling, with a selftest busy-loop canary proving the lane can red (303 ms
+  arrow median and 24 long tasks fail decisively).
+- **Permission posture**: the shipped settings allow Bash/WebFetch/WebSearch
+  wholesale — the deterministic PreToolUse guards, not permission prompts,
+  are the enforcement layer; prompts remain only for genuinely irreversible
+  surfaces, and the tamper-evidence deny layer is byte-unchanged.
+- **Fixed (fail-open class)**: three shipped scripts weren't biome-clean, so
+  a truly fresh (or strict-tier) scaffold's `format` gate went red before the
+  agent wrote a line; `e2e/mutation.spec.ts` drove the note composer
+  unconditionally, which would have redded an upgraded 0.1.4 consumer — the
+  new skew invariant caught it before CI ever did (capability-gated now).
+- 558 → 674 harness tests; canary registry 25 → 26 steps / 56 → 60 guard-rule
+  ids, all provably red; measured on the final scaffold: cold ≈85 s (real
+  cargo + 45 chromium tests), warm ≈6 s.
+
 ## [0.1.4] — 2026-07-11
 
 The four pillars deepened. The reference UI becomes a real gate subject (a

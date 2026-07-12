@@ -234,4 +234,46 @@ describe('primary navigation (hand-rolled router + lazy matrix route)', () => {
     expect(screen.getByRole('img', { name: /Distribution/ })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Load more' })).toBeDefined()
   })
+
+  // The contextual-command contract (RegisterCommands in CommandPalette.tsx):
+  // the matrix screen contributes commands while mounted, they DO something
+  // real, and they vanish once the screen unmounts. (Jump to top's cell focus
+  // needs a real viewport — the virtual window renders zero rows under jsdom —
+  // so that half of the contract is locked browser-side in e2e/palette.spec.ts.)
+  it('matrix contributes palette commands while mounted; Reload refetches; navigating away withdraws them', async () => {
+    stubNotesPages([note('1'), note('2'), note('3')], null)
+    render(<App />)
+    fireEvent.click(screen.getByRole('link', { name: 'Matrix' }))
+    expect(await screen.findByRole('grid')).toBeDefined()
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    expect(await screen.findByRole('option', { name: /Jump to top/ })).toBeDefined()
+    expect(screen.getByRole('option', { name: /Reload matrix rows/ })).toBeDefined()
+
+    // Run "Reload matrix rows": the palette closes and the keyset query
+    // restarts from page one — a REAL data refetch, not a dead menu entry.
+    // Count /api/notes requests only (the health probe shares the fetch stub).
+    const notesCalls = (): number =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([input]) =>
+          (input instanceof Request ? input.url : input.toString()).includes('/api/notes'),
+        ).length
+    const callsBefore = notesCalls()
+    const input = screen.getByRole('combobox', { name: 'Search commands' })
+    fireEvent.change(input, { target: { value: 'reload' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(await screen.findByRole('grid')).toBeDefined()
+    expect(notesCalls()).toBe(callsBefore + 1)
+
+    // Leave the screen through the palette itself; its contributions unregister.
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search commands' }), {
+      target: { value: 'home' },
+    })
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Search commands' }), { key: 'Enter' })
+    expect(await screen.findByText('note 1')).toBeDefined()
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    expect(screen.queryByRole('option', { name: /Jump to top/ })).toBeNull()
+  })
 })

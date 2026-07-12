@@ -25,6 +25,13 @@ const THEME_LABEL: Record<ThemePreference, string> = {
   dark: 'Dark',
 }
 
+// Palette key hints derive from the ONE shortcut registry — a palette command
+// that mirrors a shortcut looks its combo up here, so the hint can never drift
+// from what the keyboard actually does.
+const SHORTCUT_KEYS = Object.fromEntries(
+  SHORTCUTS.map((shortcut) => [shortcut.id, shortcut.keys]),
+) as Record<ShortcutId, string>
+
 // The header theme control: cycles system → light → dark → system, names the NEXT
 // state for assistive tech, and confirms each switch with a toast (the shell's
 // first Toast consumer).
@@ -51,6 +58,11 @@ function ThemeToggle() {
 function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // Contextual palette commands, contributed by the ACTIVE screen: App hands
+  // setScreenCommands down as the typed `registerCommands` prop (see
+  // RegisterCommands in CommandPalette.tsx); the screen registers on mount and
+  // unregisters on unmount — plain props + state, no event bus.
+  const [screenCommands, setScreenCommands] = useState<readonly Command[]>([])
   const pathname = usePathname()
   const toast = useToast()
 
@@ -67,26 +79,27 @@ function AppShell() {
   }
   useShortcuts(handlers)
 
-  // Palette commands: the static shell actions, the two theme switches, plus a
-  // generated "Go to <label>" per route. React Compiler memoizes the array.
+  // Palette commands: a generated "Go to <label>" per route, the two theme
+  // switches, the static shell actions, then whatever the active screen
+  // contributed. Registration order is also the empty-query section order;
+  // typing re-ranks the flat list (fuzzyScore.ts) and regroups it. React
+  // Compiler memoizes the array.
   const paletteCommands: readonly Command[] = [
-    {
-      id: 'shortcuts.show',
-      title: 'Show keyboard shortcuts',
-      run: () => {
-        setShortcutsOpen(true)
-      },
-    },
-    {
-      id: 'connection.probe',
-      title: 'Probe API connection now',
-      run: () => {
-        window.dispatchEvent(new Event(PROBE_CONNECTION_EVENT))
-      },
-    },
+    ...ROUTES.map(
+      (route): Command => ({
+        id: `nav.${route.id}`,
+        title: `Go to ${route.label}`,
+        group: 'Navigation',
+        subtitle: route.path,
+        run: () => {
+          navigate(route.path)
+        },
+      }),
+    ),
     {
       id: 'theme.light',
       title: 'Use light theme',
+      group: 'Theme',
       run: () => {
         setThemePreference('light')
         toast.show('Theme: light')
@@ -95,18 +108,31 @@ function AppShell() {
     {
       id: 'theme.dark',
       title: 'Use dark theme',
+      group: 'Theme',
       run: () => {
         setThemePreference('dark')
         toast.show('Theme: dark')
       },
     },
-    ...ROUTES.map((route) => ({
-      id: `nav.${route.id}`,
-      title: `Go to ${route.label}`,
+    {
+      id: 'shortcuts.show',
+      title: 'Show keyboard shortcuts',
+      group: 'View',
+      keys: SHORTCUT_KEYS['show-shortcuts'],
       run: () => {
-        navigate(route.path)
+        setShortcutsOpen(true)
       },
-    })),
+    },
+    {
+      id: 'connection.probe',
+      title: 'Probe API connection now',
+      group: 'View',
+      subtitle: '/healthz',
+      run: () => {
+        window.dispatchEvent(new Event(PROBE_CONNECTION_EVENT))
+      },
+    },
+    ...screenCommands,
   ]
 
   // Unknown paths fall back to home (ROUTES[0]).
@@ -149,7 +175,7 @@ function AppShell() {
       <main className="flex flex-1 flex-col">
         {active.id === 'matrix' ? (
           <Suspense fallback={<Skeleton lines={8} className="w-full max-w-2xl p-8" />}>
-            <MatrixScreen />
+            <MatrixScreen registerCommands={setScreenCommands} />
           </Suspense>
         ) : (
           <HomeScreen />

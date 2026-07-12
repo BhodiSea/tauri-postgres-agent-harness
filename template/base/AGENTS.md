@@ -142,6 +142,15 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   failures surfaced as envelope-message toasts — never a phantom row after a
   failed write (`NoteComposer.tsx` is the worked pattern; `e2e/mutation.spec.ts`
   locks both paths with held/fulfilled routes, zero sleeps).
+- **The command palette follows `features/palette`**: every command is typed —
+  `group` REQUIRED (the CommandGroup union), optional subtitle/keys, keys hints
+  DERIVED from `keyboard/registry.ts`, never hand-typed. Ranking is the pure
+  deterministic subsequence scorer (`fuzzyScore.ts`: word-boundary + run
+  bonuses, score→title→id tie-break, property-tested); recents (`recents.ts`,
+  capped + corrupt-safe localStorage) pin first ONLY on the empty query —
+  typing swaps wholly to ranked results. Screens contribute contextual
+  commands via the `RegisterCommands` prop (matrix is the worked pattern);
+  `e2e/palette.spec.ts` locks ranking, recents, and the keyboard-only flow.
 - **Motion is opt-in**: animations only behind `motion-safe:`, with the global
   `prefers-reduced-motion` backstop in styles.css — e2e asserts the held
   loading skeleton runs ZERO animations under reduced motion.

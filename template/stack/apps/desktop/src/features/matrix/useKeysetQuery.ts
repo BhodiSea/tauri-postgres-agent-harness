@@ -1,5 +1,5 @@
 import { type Note, NotesPage } from '@app/schema'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // Keyset pagination over the server's { items, nextCursor } contract — the paged
 // counterpart to features/notes/useListQuery. Pages append; the initial load owns
@@ -99,10 +99,13 @@ export function useKeysetQuery(onLoadMoreError: (message: string) => void): Keys
     }
   }, [reloadToken])
 
-  const reload = (): void => {
+  // Identity-stable (only touches stable useState setters): screens hand this
+  // to long-lived closures — the matrix palette contribution registers it once
+  // in a mount effect — without effect churn on every render.
+  const reload = useCallback((): void => {
     setState(INITIAL)
     setReloadToken((token) => token + 1)
-  }
+  }, [])
 
   const loadMore = (): void => {
     if (state.status !== 'ready' || state.cursor === null || state.loadingMore) return

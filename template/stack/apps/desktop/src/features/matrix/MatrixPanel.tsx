@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { Button } from '../../components/Button'
 import { EmptyState } from '../../components/EmptyState'
 import { Skeleton } from '../../components/Skeleton'
 import { useToast } from '../../components/Toast'
 import { ROUTES } from '../../routes'
+import type { Command, RegisterCommands } from '../palette/CommandPalette'
 import { MatrixGrid } from './MatrixGrid'
 import { MatrixSummary } from './MatrixSummary'
 import { MATRIX_COLUMNS, notesToMatrixRows } from './matrixData'
@@ -20,7 +22,12 @@ function matrixRoute() {
 }
 const MATRIX = matrixRoute()
 
-export function MatrixPanel() {
+interface MatrixPanelProps {
+  /** Contextual-palette registration callback — see CommandPalette.tsx. */
+  readonly registerCommands: RegisterCommands
+}
+
+export function MatrixPanel({ registerCommands }: MatrixPanelProps) {
   const toast = useToast()
   const { state, loadMore, reload } = useKeysetQuery((message) => {
     toast.show(`Could not load more rows: ${message}`)
@@ -31,6 +38,39 @@ export function MatrixPanel() {
     colCount: MATRIX_COLUMNS.length + 1,
     pageRows: 10,
   })
+
+  // This screen's palette contributions. Every dependency is identity-stable
+  // (setActive is a raw useState setter, reload is useCallback'd, App's
+  // registerCommands is a raw setter), so this registers ONCE on mount and the
+  // cleanup withdraws the commands on unmount — the palette never advertises a
+  // dead matrix command from another screen. "Jump to top" drives the grid's
+  // real follow-focus seam: setActive(0,0) scrolls the virtual window to the
+  // top and moves the roving focus onto the first cell.
+  const setActive = roving.setActive
+  useEffect(() => {
+    const contributions: readonly Command[] = [
+      {
+        id: 'matrix.jump-top',
+        title: 'Jump to top',
+        group: 'Matrix',
+        subtitle: 'First cell',
+        run: () => {
+          setActive({ row: 0, col: 0 })
+        },
+      },
+      {
+        id: 'matrix.reload',
+        title: 'Reload matrix rows',
+        group: 'Matrix',
+        subtitle: 'From page one',
+        run: reload,
+      },
+    ]
+    registerCommands(contributions)
+    return () => {
+      registerCommands([])
+    }
+  }, [registerCommands, setActive, reload])
 
   if (state.status === 'loading') {
     return <Skeleton data-testid={MATRIX.states.loading} lines={8} className="max-w-2xl p-8" />

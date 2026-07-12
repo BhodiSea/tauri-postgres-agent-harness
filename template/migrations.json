@@ -51,7 +51,8 @@
       "tools/provenance-overrides.json",
       "apps/desktop/src/components/Field.tsx",
       "apps/desktop/src/components/Field.test.tsx",
-      "apps/desktop/src/features/notes/"
+      "apps/desktop/src/features/notes/",
+      "apps/desktop/src/features/palette/"
     ]
   }
 }

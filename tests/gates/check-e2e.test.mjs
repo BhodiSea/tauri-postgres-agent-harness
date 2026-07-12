@@ -29,6 +29,7 @@ function fixture({ surface = true } = {}) {
   return dir
 }
 
+/** @param {string} dir @param {{ ci?: boolean, extraEnv?: Record<string, string> }} [opts] */
 function runGate(dir, { ci = false, extraEnv = {} } = {}) {
   const env = { ...process.env, ...extraEnv }
   delete env.CI

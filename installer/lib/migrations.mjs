@@ -95,6 +95,19 @@ export function matchSeedOnInitOnly(installPath, patterns) {
   return null
 }
 
+// A module promoted into base: drop it from the module list and clear the
+// stale per-file module attribution so a later `disable` of a retired module
+// cannot delete default gates (the files moved into base).
+function promoteModule(mod, { files, modules, report }) {
+  if (modules.has(mod)) {
+    modules.delete(mod)
+    report.notes.push(`module '${mod}' is now part of the default harness — removed from the module list`)
+  }
+  for (const meta of Object.values(files)) {
+    if (meta.module === mod) delete meta.module
+  }
+}
+
 // Apply removed/renamed/promotedModules records. Deletion is sha-guarded:
 // a locally-modified file is never deleted — it is reported and left in place
 // (the human resolves it; doctor keeps naming it until then).
@@ -121,17 +134,7 @@ export function applyFileMigrations({ targetDir, files, modules, report, entries
     for (const [oldIp, newIp] of Object.entries(entry.renamed ?? {})) {
       removeOne(oldIp, `renamed by template migration (now ${newIp})`)
     }
-    for (const mod of entry.promotedModules ?? []) {
-      if (modules.has(mod)) {
-        modules.delete(mod)
-        report.notes.push(`module '${mod}' is now part of the default harness — removed from the module list`)
-      }
-      // The files moved into base; drop the stale module attribution so a
-      // later `disable` of a retired module cannot delete default gates.
-      for (const meta of Object.values(files)) {
-        if (meta.module === mod) delete meta.module
-      }
-    }
+    for (const mod of entry.promotedModules ?? []) promoteModule(mod, { files, modules, report })
   }
 }
 
@@ -141,6 +144,7 @@ export function applyFileMigrations({ targetDir, files, modules, report, entries
 // `after` step (or before the array close). Returns the new content, or null
 // when the anchors are gone (doctor then reports the missing step — fail loud,
 // never guess at a mangled config).
+/** @param {string} content @param {{ name: string, cmd: string, after?: string }} step */
 export function injectConfigStep(content, { name, cmd, after }) {
   const lines = content.split('\n')
   const declIdx = lines.findIndex((l) => l.includes('VALIDATE_STEPS') && l.includes('['))

@@ -26,6 +26,7 @@ const REPORT = {
 }
 const SURVIVOR_KEY = 'apps/server/src/errors.ts:10:3 ConditionalExpression → "true"'
 
+/** @param {{ report?: any, baseline?: any }} [opts] */
 function fixture({ report = REPORT, baseline } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-ratchet-'))
   mkdirSync(join(dir, 'reports/mutation'), { recursive: true })

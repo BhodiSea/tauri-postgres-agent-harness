@@ -46,12 +46,6 @@ function materialize(files) {
 
 // hashInputs resolves declared paths against cwd, so every case runs chdir'd
 // into its own fixture (node:test runs a file's tests serially by default).
-function inFixture(files, fn) {
-  const dir = mkdtempSync(join(tmpdir(), 'tpah-hashinputs-'))
-  const prev = process.cwd()
-  process.chdir(materialize.call(null, files) && dir, undefined)
-}
-
 function withFixture(files, fn) {
   const dir = materialize(files)
   const prev = process.cwd()

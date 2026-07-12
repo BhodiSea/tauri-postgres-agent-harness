@@ -16,6 +16,7 @@ const GATE_LIB = pathToFileURL(
   fileURLToPath(new URL('../../template/base/tools/lib/gate.mjs', import.meta.url)),
 ).href
 
+/** @param {string} script @param {{ env?: Record<string, string>, cwd?: string }} [opts] */
 function runInFixture(script, { env = {}, cwd } = {}) {
   const dir = cwd ?? mkdtempSync(join(tmpdir(), 'tpah-gatelib-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })

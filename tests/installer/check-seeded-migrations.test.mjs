@@ -17,6 +17,7 @@ const MIGRATIONS = {
   '0.1.5': { seedOnInitOnly: ['apps/desktop/src/features/notes/'] },
 }
 
+/** @param {string[]} paths @param {{ allowlist?: any[], migrations?: any }} [opts] */
 const check = (paths, { allowlist = [], migrations = MIGRATIONS } = {}) =>
   findUnregisteredSeededAdditions({ addedTemplatePaths: paths, migrations, allowlist })
 

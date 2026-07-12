@@ -35,6 +35,7 @@ import { classifyDrift } from '../lib/reconcile.mjs'
 import { printReport } from '../lib/report.mjs'
 import { writeInstallFile } from '../lib/write-file.mjs'
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 66 today; do not raise
 export async function update(opts, { migrations = readTemplateMigrations() } = {}) {
   const targetDir = opts.dir
   const manifest = readManifest(targetDir)

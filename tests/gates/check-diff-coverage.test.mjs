@@ -186,6 +186,7 @@ test('a config without the floor block (or with a metric missing) parses to null
 
 // ---- CLI wrapper against a real throwaway git repo --------------------------------
 
+/** @param {{ vitestConfig?: string, coverage?: any }} [opts] */
 function gitFixture({ vitestConfig, coverage } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-diffcov-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })

@@ -12,6 +12,11 @@ import { join } from 'node:path'
 // (false-green prevention is a caller policy, not a walker one).
 // excludeDirs prunes by DIRECTORY name at every depth; filter sees the POSIX
 // relative path of each file.
+/**
+ * @param {string} root
+ * @param {{ excludeDirs?: Iterable<string>, filter?: (rel: string) => boolean }} [opts]
+ * @returns {string[]}
+ */
 export function walkFiles(root, { excludeDirs = [], filter } = {}) {
   if (!existsSync(root)) return []
   const excluded = new Set(excludeDirs)

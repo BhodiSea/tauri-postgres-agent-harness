@@ -27,6 +27,7 @@ const MOD = fileURLToPath(new URL('../../installer/lib/prompts.mjs', import.meta
 
 // A minimal ctx: collectAnswers only reads ctx.dirName / ctx.gitOwner and sets
 // ctx.answers itself.
+/** @returns {{ dirName: string, gitOwner: string, answers?: any }} */
 const ctx = (over = {}) => ({ dirName: 'demo-app', gitOwner: 'acme-co', ...over })
 
 // ---------------------------------------------------------------------------
@@ -146,7 +147,7 @@ test('parseSets: duplicate keys — last one wins', () => {
 test('parseSets: a token without "=" throws the VAR=value usage', () => {
   assert.throws(
     () => parseSets(['PROJECT_NAME']),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /--set expects VAR=value/)
       assert.ok(err.message.includes('PROJECT_NAME'), err.message)
       return true
@@ -157,7 +158,7 @@ test('parseSets: a token without "=" throws the VAR=value usage', () => {
 test('parseSets: an unknown key throws and lists the known placeholders', () => {
   assert.throws(
     () => parseSets(['TYPO_VAR=x']),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /unknown placeholder/)
       assert.ok(err.message.includes('TYPO_VAR'), err.message)
       assert.ok(err.message.includes('PROJECT_NAME'), 'known list must be shown')
@@ -221,7 +222,7 @@ test('an invalid --set value is rejected up front with name, reason, and the off
       sets: { PRODUCT_IDENTIFIER: 'com.example.waaaay-too-long-identifier-value' },
       ctx: ctx(),
     }),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /invalid placeholder value/)
       assert.ok(err.message.includes('PRODUCT_IDENTIFIER'), err.message)
       assert.ok(err.message.includes('30'), err.message)
@@ -234,7 +235,7 @@ test('an invalid --set value is rejected up front with name, reason, and the off
 test('an empty --set value trips validation, echoing "" via JSON.stringify', async () => {
   await assert.rejects(
     collectAnswers({ yes: true, sets: { PROJECT_NAME: '' }, ctx: ctx() }),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /invalid placeholder value/)
       assert.ok(err.message.includes('PROJECT_NAME must not be empty (got: "")'), err.message)
       return true

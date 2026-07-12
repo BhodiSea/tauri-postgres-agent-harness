@@ -28,11 +28,11 @@ const recordGreen = stampGate(GATE, STAMP_INPUTS[GATE])
 
 const root = readJson('package.json')
 const versions = { 'package.json': root.version }
-for (const [label, path, pick] of [
+for (const [label, path, pick] of /** @type {[string, string, (j: any) => any][]} */ ([
   ['tauri.conf.json', 'apps/desktop/src-tauri/tauri.conf.json', (j) => j.version],
   ['apps/server', 'apps/server/package.json', (j) => j.version],
   ['apps/desktop', 'apps/desktop/package.json', (j) => j.version],
-]) {
+])) {
   if (existsSync(path)) versions[label] = pick(readJson(path))
 }
 const distinct = new Set(Object.values(versions).filter(Boolean))

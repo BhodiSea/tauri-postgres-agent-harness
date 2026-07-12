@@ -93,6 +93,10 @@ export function renderEntry(entry, answers) {
 
 // Walk + render one template tree and return
 // [{ storagePath, installPath, content }] with placeholders rendered.
+// (`module` is stamped post-hoc by init on module-tree entries.)
+/**
+ * @returns {{ storagePath: string, installPath: string, content: string | Buffer, module?: string }[]}
+ */
 export function planTree(tree, answers) {
   return walkTemplate(tree).map(({ storagePath, installPath, sourcePath }) => ({
     storagePath,

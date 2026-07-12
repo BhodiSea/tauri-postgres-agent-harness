@@ -137,6 +137,7 @@ function measureViaSubject(subjectRel, cells, runs, expect) {
 // Median-of-runs with the re-measure-once discipline, parameterized by subject
 // entry; fails the gate on two independent over-budget medians, otherwise
 // returns the human-readable detail line.
+/** @param {{ subject: string, cells: number, runs: number, medianBudgetMs: number, expect?: string }} entry */
 function measureWithRetry({ subject, cells, runs, medianBudgetMs, expect }) {
   let { median, samples } = measureViaSubject(subject, cells, runs, expect)
   let retried = false

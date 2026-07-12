@@ -125,6 +125,7 @@ const GREEN_SOLUTION = ['packages/schema', 'apps/desktop']
 // Build a scaffold-shaped tree; a package's `tsconfig: null` omits its tsconfig.json,
 // a string tsconfig/solution is written verbatim (to exercise JSONC), `solution: null`
 // omits the root tsconfig.json, and `emit: true` plants emit-openapi.ts.
+/** @param {{ packages?: any, solution?: any, emit?: boolean }} [opts] */
 function fixture({ packages = GREEN_PACKAGES, solution = GREEN_SOLUTION, emit = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-contract-'))
   for (const [rel, spec] of Object.entries(packages)) {

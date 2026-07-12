@@ -75,7 +75,7 @@ test('parser fails closed on anything outside the pinned subset', () => {
     ['arrays rejected (subset emits single strings)', VALID.replace('"template/**"', '["template/**"]'), /outside the pinned/],
     ['no annotations at all rejected', 'version = 1\n', /no \[\[annotations\]\]/],
   ]
-  for (const [name, text, re] of cases) {
+  for (const [name, text, re] of /** @type {[string, string, RegExp][]} */ (cases)) {
     assert.throws(() => parseReuseToml(text), re, name)
   }
 })

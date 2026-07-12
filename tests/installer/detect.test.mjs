@@ -57,7 +57,7 @@ test('package.json with a `next` dependency throws with the redirect story', () 
   writePkg(d, { name: 'x', dependencies: { next: '16.0.0' } })
   assert.throws(
     () => detect(d),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /Tauri 2 \+ Hono/)
       assert.match(err.message, /next-supabase-agent-harness/)
       return true
@@ -78,7 +78,7 @@ test('each foreign lockfile throws, naming the lockfile and the pnpm migration p
     writeFileSync(join(d, lock), '')
     assert.throws(
       () => detect(d),
-      (err) => {
+      (/** @type {Error} */ err) => {
         assert.ok(err.message.includes(lock), `message must name ${lock}: ${err.message}`)
         assert.match(err.message, /requires pnpm/)
         assert.match(err.message, /pnpm import/)
@@ -107,7 +107,7 @@ test('package.json without pnpm-workspace.yaml throws with the monorepo-shape gu
   writePkg(d, { name: 'x', dependencies: { hono: '^4.0.0' } })
   assert.throws(
     () => detect(d),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.match(err.message, /no pnpm-workspace\.yaml/)
       assert.ok(err.message.includes('apps/*, packages/*'), err.message)
       return true
@@ -121,7 +121,7 @@ test('pnpm workspace without tauri or hono markers throws with layout guidance',
   writeFileSync(join(d, 'pnpm-workspace.yaml'), "packages:\n  - 'apps/*'\n")
   assert.throws(
     () => detect(d),
-    (err) => {
+    (/** @type {Error} */ err) => {
       assert.ok(err.message.includes('apps/desktop/src-tauri/tauri.conf.json'), err.message)
       assert.ok(err.message.includes('apps/server'), err.message)
       assert.match(err.message, /configurable-layout/)

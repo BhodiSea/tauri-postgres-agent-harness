@@ -13,6 +13,7 @@ import { printReport } from '../lib/report.mjs'
 import { collectAnswers, parseSets } from '../lib/prompts.mjs'
 import { writeInstallFile } from '../lib/write-file.mjs'
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 133 today; do not raise
 export async function init(opts) {
   const targetDir = opts.dir
   mkdirSync(targetDir, { recursive: true })
@@ -87,7 +88,8 @@ export async function init(opts) {
   )
 
   if (pkgEntry) {
-    const incoming = JSON.parse(pkgEntry.content)
+    // package.json is a rendered text template, never a verbatim Buffer.
+    const incoming = JSON.parse(/** @type {string} */ (pkgEntry.content))
     if (det.mode === 'retrofit') {
       const existing = JSON.parse(readFileSync(join(targetDir, 'package.json'), 'utf8'))
       const { merged, report: mergeReport } = mergePackageJson(existing, incoming)

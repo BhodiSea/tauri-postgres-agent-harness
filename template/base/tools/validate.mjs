@@ -183,6 +183,16 @@ function runBatch(batch, poolSize) {
   })
 }
 
+// Flush a pooled batch's captured output + results in canonical order.
+function printBatchResults(batch, captured) {
+  for (const step of batch) {
+    const { name, ok, ms, text } = captured.get(step.i)
+    console.log(`\n=== ${name}: ${step.cmd}`)
+    if (text.length) process.stdout.write(text.endsWith('\n') ? text : `${text}\n`)
+    results.push([name, ok, ms])
+  }
+}
+
 // Walk the steps in canonical order; fold maximal runs of consecutive PARALLEL_SAFE
 // steps into a pooled batch, run every other step exclusively. Output and results[]
 // stay in canonical order regardless of finish order.
@@ -205,12 +215,7 @@ async function runReportAll() {
       continue
     }
     const captured = await runBatch(batch, poolSize)
-    for (const step of batch) {
-      const { name, ok, ms, text } = captured.get(step.i)
-      console.log(`\n=== ${name}: ${step.cmd}`)
-      if (text.length) process.stdout.write(text.endsWith('\n') ? text : `${text}\n`)
-      results.push([name, ok, ms])
-    }
+    printBatchResults(batch, captured)
   }
 }
 

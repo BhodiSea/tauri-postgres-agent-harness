@@ -65,6 +65,7 @@ function plantReactStub(dir) {
 
 // budget: an object (serialized), a raw string (for the invalid-JSON case), or
 // null to omit the file entirely. desktop/react toggle the two prerequisites.
+/** @param {{ budget?: any, desktop?: boolean, react?: boolean }} [opts] */
 function fixture({ budget = { cells: 2500, runs: 5, medianBudgetMs: 100000 }, desktop = true, react = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-perfgate-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })
@@ -80,6 +81,7 @@ function fixture({ budget = { cells: 2500, runs: 5, medianBudgetMs: 100000 }, de
   return dir
 }
 
+/** @param {string} dir @param {{ ci?: boolean, extraEnv?: Record<string, string> }} [opts] */
 function runGate(dir, { ci = true, extraEnv = {} } = {}) {
   const env = { ...process.env, ...extraEnv }
   delete env.CI
@@ -99,6 +101,7 @@ function plantFile(dir, rel, content) {
 }
 
 // A minimal subjects[]-shape budget: one matrix entry under a generous budget.
+/** @param {Record<string, any>} [overrides] */
 function subjectsBudget(overrides = {}) {
   return {
     runs: 3,
@@ -115,6 +118,7 @@ const DENSE_FEATURE_SOURCE =
 // prints one {"samples":[…]} line exactly like the real perf-subject CLI would.
 // requireExpect pins the gate→CLI anti-vacuity contract: the shim refuses to
 // "measure" unless PERF_SUBJECT_EXPECT arrives with exactly that value.
+/** @param {string} dir @param {{ samples?: number[], requireExpect?: string }} [opts] */
 function fakePnpm(dir, { samples = [1, 1, 1], requireExpect } = {}) {
   const bin = join(dir, 'fakebin')
   mkdirSync(bin, { recursive: true })
@@ -289,6 +293,7 @@ test('RED: a present subject whose measurement spawn fails is a FAIL, never a sy
 const CLI = fileURLToPath(
   new URL('../../template/base/tools/lib/perf-subject-cli.mjs', import.meta.url),
 )
+/** @param {string} subjectSource @param {number} cells @param {number} runs @param {{ expect?: string }} [opts] */
 function runCli(subjectSource, cells, runs, { expect } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-perfcli-'))
   const subj = join(dir, 'subject.mjs')

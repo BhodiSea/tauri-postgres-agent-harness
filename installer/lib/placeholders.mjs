@@ -50,7 +50,7 @@ export const PLACEHOLDERS = {
   // tauri.conf.json (connect-src) — which is why it is a placeholder, not env.
   API_ORIGIN: {
     prompt: 'API origin the desktop client connects to (e.g. https://api.internal.example.edu)',
-    default: () => 'http://127.0.0.1:8787',
+    default: (_ctx) => 'http://127.0.0.1:8787',
     validate: (v) =>
       /^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(v)
         ? null

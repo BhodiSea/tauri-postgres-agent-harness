@@ -19,6 +19,7 @@ const FLOOR_JSON = join(TEMPLATE, 'tools/validate.floor.json')
 // Build a self-contained scaffold-tools dir: validate.mjs statically imports
 // ./harness.config.mjs, so that file must exist for the runner to load at all.
 // The floor snapshot is planted (or withheld) per-case.
+/** @param {{ floor?: any, config?: any }} parts */
 function fixture({ floor, config }) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-floor-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })

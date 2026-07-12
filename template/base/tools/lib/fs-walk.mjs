@@ -15,6 +15,11 @@ export const toPosix = (p) => p.split('\\').join('/')
 // TO root. A missing root returns []: surface-absence policy (skip vs fail)
 // belongs to the calling gate, not the walker. excludeDirs prunes by directory
 // NAME at every depth; filter sees the relative POSIX path.
+/**
+ * @param {string} root
+ * @param {{ excludeDirs?: Set<string>, filter?: (rel: string) => boolean }} [opts]
+ * @returns {string[]}
+ */
 export function walkFiles(root, { excludeDirs = new Set(), filter } = {}) {
   if (!existsSync(root)) return []
   const out = []

@@ -36,6 +36,7 @@ const SHIPPED_SCRIPTS = JSON.parse(
 // for the version-ramp cases. The shipped .claude/agents roster is copied in by
 // default (the GREEN case proves the real shipped agents against the real gate);
 // `roster` overlays it — filename -> content plants/overwrites a file, null deletes.
+/** @param {{ agents?: any, claude?: any, scripts?: any, catalog?: any, manifest?: any, roster?: any }} parts */
 function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS, catalog = shippedCatalog, manifest, roster }) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-docs-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })

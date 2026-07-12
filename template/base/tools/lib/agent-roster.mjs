@@ -49,6 +49,7 @@ function unquote(v) {
 // guesses. Folded (`>`) continuation lines join with a space, literal (`|`)
 // with a newline; callers here assert content, not layout, so paragraph-break
 // fidelity is deliberately out of scope.
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 29 today; do not raise
 export function parseFrontmatter(text) {
   const lines = String(text)
     .replace(/^\uFEFF/, '') // strip a BOM so it cannot hide the opening `---`

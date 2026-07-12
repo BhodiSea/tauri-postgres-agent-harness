@@ -38,6 +38,7 @@ const asText = (v) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2))
 
 // conf/lock/caps: string = verbatim file body, object = serialized, null = absent.
 // caps is a { filename: content } map; null skips creating the capabilities dir.
+/** @param {{ conf?: any, lock?: any, caps?: Record<string, any> | null }} [opts] */
 function fixture({ conf = SHIPPED_CONF, lock = SHIPPED_LOCK, caps = { 'main.json': SHIPPED_CAP } } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-tauripolicy-'))
   mkdirSync(join(dir, 'apps/desktop/src-tauri'), { recursive: true })

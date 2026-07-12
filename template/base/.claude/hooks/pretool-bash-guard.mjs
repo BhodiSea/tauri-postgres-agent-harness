@@ -41,7 +41,10 @@ if (cmd) {
   // allowWhen predicate sanctions this specific command (e.g. the migrator DSN in a
   // drizzle-kit/RLS-runner context, or a self-edit under HARNESS_ALLOW_SELF_EDIT=1).
   for (const rule of BASH_RULES) {
-    const hit = typeof rule.test === 'function' ? rule.test(cmd) : rule.re.test(cmd)
+    const hit =
+      typeof rule.test === 'function'
+        ? rule.test(cmd)
+        : /** @type {{ re: RegExp }} */ (rule).re.test(cmd)
     if (!hit) continue
     if (rule.allowWhen?.(cmd, { selfEdit })) continue
     denyTool('PreToolUse', rule.message)

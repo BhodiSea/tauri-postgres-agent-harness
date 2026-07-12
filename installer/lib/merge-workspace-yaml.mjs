@@ -13,6 +13,7 @@ export function mergeWorkspaceYaml(existingText, incomingText) {
   const incoming = parseSimpleYaml(incomingText)
   if (!existing || !incoming) return null
 
+  /** @type {{ kind: string, name: string, existing?: string, tested?: string }[]} */
   const report = []
   let out = existingText.replace(/\s+$/, '')
 
@@ -28,6 +29,14 @@ export function mergeWorkspaceYaml(existingText, incomingText) {
     for (const g of missingGlobs) report.push({ kind: 'glob-added', name: g })
   }
 
+  out = mergeCatalogSection(out, existing, incoming, report)
+
+  return { merged: `${out}\n`, report }
+}
+
+// Catalog entries are added only when missing; a differing existing pin is
+// reported (kept-yours), never overwritten.
+function mergeCatalogSection(out, existing, incoming, report) {
   const haveCatalog = existing.maps.catalog ?? {}
   const wantCatalog = incoming.maps.catalog ?? {}
   const missingEntries = Object.entries(wantCatalog).filter(([k]) => !(k in haveCatalog))
@@ -45,8 +54,7 @@ export function mergeWorkspaceYaml(existingText, incomingText) {
     }
     for (const [k] of missingEntries) report.push({ kind: 'catalog-added', name: k })
   }
-
-  return { merged: `${out}\n`, report }
+  return out
 }
 
 function quoteKey(k) {
@@ -78,6 +86,7 @@ function appendMapItems(text, section, lines) {
 // Minimal parser for the documented pnpm-workspace.yaml shape. Returns
 // { lists: {key: [...]}, maps: {key: {k: v}} } or null when it sees syntax
 // it does not fully understand (the caller then refuses to merge).
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
 function parseSimpleYaml(text) {
   const lists = {}
   const maps = {}

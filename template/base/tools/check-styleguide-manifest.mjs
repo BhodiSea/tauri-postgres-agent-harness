@@ -198,21 +198,25 @@ function parseOklch(value) {
   return { l, c: Number.parseFloat(m[2]), h: Number.parseFloat(m[3]) }
 }
 
+function assertContrastPairShape(pair) {
+  if (
+    pair === null ||
+    typeof pair !== 'object' ||
+    typeof pair.fg !== 'string' ||
+    typeof pair.bg !== 'string' ||
+    typeof pair.min !== 'number' ||
+    pair.min <= 0
+  ) {
+    fail(
+      GATE,
+      `${MANIFEST} contrast entries must be { "fg": string, "bg": string, "min": positive number } — got ${JSON.stringify(pair)}`,
+    )
+  }
+}
+
 function checkContrast(themeLabel, tokenValues) {
   for (const pair of manifest.contrast) {
-    if (
-      pair === null ||
-      typeof pair !== 'object' ||
-      typeof pair.fg !== 'string' ||
-      typeof pair.bg !== 'string' ||
-      typeof pair.min !== 'number' ||
-      pair.min <= 0
-    ) {
-      fail(
-        GATE,
-        `${MANIFEST} contrast entries must be { "fg": string, "bg": string, "min": positive number } — got ${JSON.stringify(pair)}`,
-      )
-    }
+    assertContrastPairShape(pair)
     const { fg, bg, min } = pair
     const fgVal = tokenValues.get(fg)
     const bgVal = tokenValues.get(bg)

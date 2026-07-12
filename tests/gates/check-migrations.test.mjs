@@ -66,6 +66,7 @@ function addAdr(dir, name) {
   writeFileSync(join(dir, 'docs/adr', name), '# ADR: drop widgets\n\nAccepted.\n')
 }
 
+/** @param {string} dir @param {{ ci?: boolean, baseRef?: string }} [opts] */
 function runGate(dir, { ci = true, baseRef } = {}) {
   const env = { ...process.env }
   delete env.GITHUB_BASE_REF

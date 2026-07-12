@@ -8,6 +8,7 @@ import { sha256 } from './manifest.mjs'
 // hashes both identically). recordedSha absent means "no provenance": update
 // treats that as unmodified (refresh-seeded layers its stricter park-on-
 // no-provenance policy on top — that is caller policy, not classification).
+/** @param {{ current: Buffer | string | null, recordedSha?: string, incoming: Buffer | string, force?: boolean }} spec */
 export function classifyDrift({ current, recordedSha, incoming, force = false }) {
   if (current === null) return 'create'
   const currentSha = sha256(current)

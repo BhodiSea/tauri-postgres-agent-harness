@@ -2,6 +2,7 @@
 // script keeps its body and ours lands under harness:<name>; existing dep
 // ranges are kept (with a floor warning), never downgraded.
 export function mergePackageJson(existing, incoming) {
+  /** @type {{ kind: string, name: string, existing?: string, incoming?: string, tested?: string, range?: string }[]} */
   const report = []
   const merged = structuredClone(existing)
 

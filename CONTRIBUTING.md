@@ -36,7 +36,16 @@ node scripts/hygiene.mjs        # leaked-string + placeholder closure
 node scripts/check-reuse.mjs    # REUSE dual-license structure (offline mirror of `reuse lint`)
 node --test tests/              # installer lifecycle + hook contracts
 node installer/cli.mjs init --dir /tmp/scratch --yes   # manual smoke test
+
+# The machinery under its own bar (pnpm install once at the repo root):
+pnpm exec eslint .              # complexity <= 15 (ratcheted) + no-unused-vars over the machinery
+pnpm exec tsc --noEmit          # checkJs over installer/, scripts/, tests/, template gate scripts + hooks
+pnpm exec knip                  # dead exports/files/deps in the machinery
 ```
+
+Root `devDependencies` are exact-pinned and never ship: the npm `files` list
+excludes every root config/lockfile, and with no `prepare` script `npx
+github:…` never installs them.
 
 ## Releases
 

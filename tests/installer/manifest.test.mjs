@@ -170,7 +170,7 @@ test('writeManifest: creates .harness, pins key order, sorts modules and files, 
 
 test('writeManifest: output is stable across insertion order (byte-identical)', () => {
   const a = sampleManifest()
-  const b = sampleManifest()
+  const b = /** @type {any} */ (sampleManifest())
   b.modules = ['ci-provenance', 'ci-windows-release'] // reversed relative to a
   b.files = Object.fromEntries(Object.entries(a.files).reverse())
 

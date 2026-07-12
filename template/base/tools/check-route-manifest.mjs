@@ -128,6 +128,7 @@ const ids = new Set()
 const pathOwners = new Map()
 const stateIdOwners = new Map()
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
 entries.forEach((entry, i) => {
   const id = entry.match(/\bid:\s*['"]([a-z0-9-]+)['"]/)?.[1]
   const name = id ?? `ROUTES[${i}]`

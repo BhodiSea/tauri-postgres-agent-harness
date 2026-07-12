@@ -11,6 +11,7 @@ import { RETIRED_MODULES } from '../lib/layout.mjs'
 import { readManifest, sha256 } from '../lib/manifest.mjs'
 import { readTemplateMigrations, requiredConfigSteps } from '../lib/migrations.mjs'
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 74 today; do not raise
 export async function doctor(opts) {
   const targetDir = opts.dir
   const manifest = readManifest(targetDir)

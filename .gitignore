@@ -1,6 +1,8 @@
 node_modules/
 *.log
 .DS_Store
+# Coverage artifacts (nothing generates these at the root today; belt-and-braces)
+coverage/
 # Rust build output (reference app + consuming-project scratch)
 target/
 # Local gate stamps

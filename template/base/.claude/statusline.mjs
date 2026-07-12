@@ -8,12 +8,16 @@ import process from 'node:process'
 let raw = ''
 try {
   for await (const chunk of process.stdin) raw += chunk
-} catch {}
+} catch {
+  /* statusline is best-effort: no stdin payload → render without model info */
+}
 
 let model = ''
 try {
   model = JSON.parse(raw)?.model?.display_name ?? ''
-} catch {}
+} catch {
+  /* malformed payload → render without model info */
+}
 
 const git = (args) => {
   try {

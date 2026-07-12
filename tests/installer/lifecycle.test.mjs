@@ -26,6 +26,7 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex')
 
 // Run the CLI, always returning { code, out } — exit codes are part of the
 // contract here (0 clean, 1 broken, 2 conflicts/drift), so never throw.
+/** @param {string[]} args @param {{ cwd?: string }} [opts] */
 function run(args, { cwd } = {}) {
   const res = spawnSync('node', [CLI, ...args], { cwd, encoding: 'utf8' })
   return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}` }

@@ -96,6 +96,7 @@ async function probe() {
 // releases it automatically when the holding session dies (crash-safe).
 // SOURCE: PostgreSQL explicit locking — advisory locks
 // https://www.postgresql.org/docs/16/explicit-locking.html
+/** @type {any} */ // postgres client is loaded dynamically (loadPostgres) — untyped here
 let lockSql = null
 async function acquireRunLock() {
   const postgres = loadPostgres()

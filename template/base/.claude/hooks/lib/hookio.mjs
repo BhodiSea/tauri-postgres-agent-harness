@@ -30,6 +30,11 @@ export async function readHookInput() {
 }
 
 // Block the current action: stderr is fed back to the model, exit 2.
+/**
+ * @public hookio API surface — exercised via a generated fixture in
+ * tests/hooks/hookio-failclosed.test.mjs (string-built dynamic import that
+ * static dead-export analysis cannot see).
+ */
 export function block(reason) {
   process.stderr.write(`${String(reason)}\n`)
   process.exit(2)

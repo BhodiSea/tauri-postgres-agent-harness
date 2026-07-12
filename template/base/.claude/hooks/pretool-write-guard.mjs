@@ -107,6 +107,7 @@ const isWholeFile = typeof ti.content === 'string'
 
 // ---- Tauri config surface: content-checked, not blanket-protected ----
 if (/(^|\/)tauri\.conf\.json$/.test(rel)) {
+  /** @type {[RegExp, string][]} */
   const weakenings = [
     [/"csp"\s*:\s*null/, 'CSP must never be null — the committed CSP is a security invariant.'],
     [/dangerousDisableAssetCspModification|dangerousRemoteDomainIpcAccess|dangerousUseHttpScheme/, 'dangerous* Tauri options are banned.'],
@@ -116,6 +117,7 @@ if (/(^|\/)tauri\.conf\.json$/.test(rel)) {
   for (const [re, msg] of weakenings) if (re.test(text)) denyTool('PreToolUse', `tauri.conf.json: ${msg}`)
 }
 if (/(^|\/)capabilities\/[^/]+\.json$/.test(rel)) {
+  /** @type {[RegExp, string][]} */
   const weakenings = [
     [/"remote"\s*:/, 'remote-URL capabilities are banned — IPC is local-window only.'],
     [/shell:allow-|process:allow-/, 'shell/process execution permissions are banned; add a typed #[tauri::command] instead.'],

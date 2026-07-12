@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/*.mjs",
+    "tests/**/*.test.mjs",
+    "template/base/tools/*.mjs",
+    "template/base/tools/lib/perf-subject-cli.mjs",
+    "template/base/tools/mcp/*.mjs",
+    "template/base/.claude/hooks/*.mjs",
+    "template/base/.claude/statusline.mjs",
+    "template/base/.claude/skills/*/scripts/*.mjs",
+    "template/base/tests/rls/run-rls.mjs",
+    "template/base/tests/migrations/migration-apply.mjs"
+  ],
+  "project": [
+    "installer/**/*.mjs",
+    "scripts/**/*.mjs",
+    "tests/**/*.mjs",
+    "template/base/tools/**/*.mjs",
+    "template/base/.claude/hooks/**/*.mjs",
+    "template/base/tests/**/*.mjs"
+  ],
+  "ignore": [
+    "template/stack/**",
+    "template/modules/**",
+    "template/base/**/*.ts"
+  ],
+  "ignoreDependencies": ["@modelcontextprotocol/sdk"],
+  "ignoreBinaries": ["playwright", "vitest", "biome"]
+}

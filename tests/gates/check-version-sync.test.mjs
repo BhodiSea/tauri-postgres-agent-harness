@@ -23,6 +23,7 @@ const GATE = fileURLToPath(
 
 // Every knob is optional; an undefined field means "do not write that file", which
 // is exactly how a real scaffold looks before the corresponding surface exists.
+/** @param {{ version?: any, serverVersion?: any, desktopVersion?: any, tauriVersion?: any, nvmrc?: any, nodeVersion?: any, enginesNode?: any, workspace?: any }} [knobs] */
 function fixture({
   version = '0.1.4',
   serverVersion,

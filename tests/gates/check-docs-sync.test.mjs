@@ -5,15 +5,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  parseFrontmatter,
+  splitList,
+} from '../../template/base/tools/lib/agent-roster.mjs'
 
 const TOOLS = fileURLToPath(new URL('../../template/base/tools', import.meta.url))
 const AGENTS_TEMPLATE = fileURLToPath(new URL('../../template/base/AGENTS.md', import.meta.url))
 const CATALOG_TEMPLATE = fileURLToPath(
   new URL('../../template/base/docs/harness/gates-catalog.md', import.meta.url),
+)
+const ROSTER_TEMPLATE = fileURLToPath(
+  new URL('../../template/base/.claude/agents', import.meta.url),
 )
 
 // The REAL shipped scripts (placeholders neutralized) — the GREEN case must
@@ -26,13 +33,20 @@ const SHIPPED_SCRIPTS = JSON.parse(
 // The shipped catalog is the canonical fixture for the catalog-lockstep check,
 // exactly like the shipped AGENTS.md is for the gate-list check. `catalog: null`
 // simulates a deleted catalog; `manifest` (an object) plants .harness/manifest.json
-// for the version-ramp cases.
-function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS, catalog = shippedCatalog, manifest }) {
+// for the version-ramp cases. The shipped .claude/agents roster is copied in by
+// default (the GREEN case proves the real shipped agents against the real gate);
+// `roster` overlays it — filename -> content plants/overwrites a file, null deletes.
+function fixture({ agents, claude = '@AGENTS.md\n', scripts = SHIPPED_SCRIPTS, catalog = shippedCatalog, manifest, roster }) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-docs-'))
   mkdirSync(join(dir, 'tools'), { recursive: true })
   cpSync(join(TOOLS, 'lib'), join(dir, 'tools/lib'), { recursive: true })
   cpSync(join(TOOLS, 'harness.config.mjs'), join(dir, 'tools/harness.config.mjs'))
   cpSync(join(TOOLS, 'check-docs-sync.mjs'), join(dir, 'tools/check-docs-sync.mjs'))
+  cpSync(ROSTER_TEMPLATE, join(dir, '.claude/agents'), { recursive: true })
+  for (const [name, content] of Object.entries(roster ?? {})) {
+    if (content === null) rmSync(join(dir, '.claude/agents', name))
+    else writeFileSync(join(dir, '.claude/agents', name), content)
+  }
   writeFileSync(join(dir, 'AGENTS.md'), agents)
   writeFileSync(join(dir, 'CLAUDE.md'), claude)
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts }))
@@ -143,4 +157,161 @@ test('RAMP: a pre-0.1.5 baseVersion downgrades a catalog miss to NOTE + pass; 0.
   )
   assert.equal(live.code, 1, live.out)
   assert.ok(live.out.includes("gate 'perf-budget' has no section"), live.out)
+})
+
+// ── agent roster (v0.1.5): "read-only by construction" is machine-asserted.
+// The GREEN baseline above already proves the SHIPPED roster parses clean —
+// fixture() copies the real .claude/agents in by default. Deliberately no ramp
+// cases: the roster is harness-owned, so it refreshes with the gate. ──
+
+function shippedAgent(name) {
+  return readFileSync(join(ROSTER_TEMPLATE, name), 'utf8')
+}
+
+test('GREEN: the shipped roster passes and the summary counts all five reviewers', () => {
+  const r = runGate(fixture({ agents: shippedAgents }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes('5/5 reviewers read-only'), r.out)
+})
+
+test('RED: a reviewer granted Bash names the agent, the grant, and the doctrine', () => {
+  const widened = shippedAgent('security-reviewer.md').replace(
+    'tools: Read, Grep, Glob, mcp__rls_verify',
+    'tools: Read, Grep, Glob, mcp__rls_verify, Bash',
+  )
+  assert.ok(widened.includes(', Bash'), 'fixture must actually widen the grant')
+  const r = runGate(fixture({ agents: shippedAgents, roster: { 'security-reviewer.md': widened } }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes(".claude/agents/security-reviewer.md: reviewer granted 'Bash'"), r.out)
+  assert.ok(r.out.includes('read-only by construction'), r.out)
+  assert.ok(r.out.includes('FIX[docs-sync]:'), r.out)
+})
+
+test('RED: a reviewer granted Write, and a reviewer with disallowedTools dropped, both red', () => {
+  const written = shippedAgent('torvalds-reviewer.md').replace(
+    'tools: Read, Grep, Glob',
+    'tools: Read, Grep, Glob, Write',
+  )
+  const w = runGate(fixture({ agents: shippedAgents, roster: { 'torvalds-reviewer.md': written } }))
+  assert.equal(w.code, 1, w.out)
+  assert.ok(w.out.includes(".claude/agents/torvalds-reviewer.md: reviewer granted 'Write'"), w.out)
+
+  const undisallowed = shippedAgent('tauri-security-reviewer.md').replace(
+    /disallowedTools: Write, Edit\n/,
+    '',
+  )
+  assert.ok(!undisallowed.includes('disallowedTools'), 'fixture must actually drop the key')
+  const d = runGate(
+    fixture({ agents: shippedAgents, roster: { 'tauri-security-reviewer.md': undisallowed } }),
+  )
+  assert.equal(d.code, 1, d.out)
+  assert.ok(d.out.includes("'disallowedTools' must include Write"), d.out)
+  assert.ok(d.out.includes("'disallowedTools' must include Edit"), d.out)
+})
+
+test('RED: a reviewer with NO tools list (inherit-everything) fails closed', () => {
+  const inherit = shippedAgent('accessibility-reviewer.md').replace(/tools: Read, Grep, Glob\n/, '')
+  assert.ok(!/^tools:/m.test(inherit), 'fixture must actually drop the tools list')
+  const r = runGate(
+    fixture({ agents: shippedAgents, roster: { 'accessibility-reviewer.md': inherit } }),
+  )
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("declares no 'tools' list"), r.out)
+})
+
+test('GREEN: author agents are unconstrained — a consumer-added author with Bash/Write stays green', () => {
+  const custom =
+    '---\nname: db-tuner\ndescription: consumer-added author agent\ntools: Read, Edit, Write, Bash\nmodel: sonnet\n---\nBody.\n'
+  const r = runGate(fixture({ agents: shippedAgents, roster: { 'db-tuner.md': custom } }))
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes('9 agent(s) parsed'), r.out)
+})
+
+test('RED: missing model, name/filename mismatch, unparseable frontmatter, deleted reviewer', () => {
+  const noModel = runGate(
+    fixture({
+      agents: shippedAgents,
+      roster: { 'helper.md': '---\nname: helper\ndescription: x\n---\nBody.\n' },
+    }),
+  )
+  assert.equal(noModel.code, 1, noModel.out)
+  assert.ok(noModel.out.includes("helper.md: missing/empty frontmatter field 'model'"), noModel.out)
+
+  const mismatch = runGate(
+    fixture({
+      agents: shippedAgents,
+      roster: { 'helper.md': '---\nname: other\ndescription: x\nmodel: sonnet\n---\nBody.\n' },
+    }),
+  )
+  assert.equal(mismatch.code, 1, mismatch.out)
+  assert.ok(mismatch.out.includes("name 'other' must match the filename ('helper')"), mismatch.out)
+
+  // A reviewer rewritten with a block SEQUENCE (outside the pinned grammar): the
+  // Bash grant inside it must NOT be silently skipped — parse failure is the red.
+  const unparseable = runGate(
+    fixture({
+      agents: shippedAgents,
+      roster: {
+        'security-reviewer.md':
+          '---\nname: security-reviewer\ndescription: x\nmodel: opus\ntools:\n  - Read\n  - Bash\n---\nBody.\n',
+      },
+    }),
+  )
+  assert.equal(unparseable.code, 1, unparseable.out)
+  assert.ok(unparseable.out.includes('frontmatter does not parse'), unparseable.out)
+  assert.ok(unparseable.out.includes('fails CLOSED'), unparseable.out)
+
+  const gone = runGate(fixture({ agents: shippedAgents, roster: { 'citation-verifier.md': null } }))
+  assert.equal(gone.code, 1, gone.out)
+  assert.ok(gone.out.includes('citation-verifier.md: reviewer agent missing'), gone.out)
+})
+
+// ── the pinned frontmatter grammar itself (tools/lib/agent-roster.mjs) ──
+
+test('agent-roster parser: scalars, quotes, folded/literal blocks, inline + bracketed lists, comments', () => {
+  const parsed = parseFrontmatter(
+    [
+      '---',
+      '# a comment line',
+      'name: security-reviewer',
+      "model: 'opus'",
+      'description: >',
+      '  Read-only auditor.',
+      '  Second folded line.',
+      '',
+      'notes: |',
+      '  line one',
+      '  line two',
+      'tools: Read, Grep, Glob',
+      'flow: [Read, "Grep"]',
+      'empty:',
+      '---',
+      'body text is never parsed',
+    ].join('\n'),
+  )
+  assert.equal(parsed.ok, true, JSON.stringify(parsed))
+  assert.equal(parsed.data.name, 'security-reviewer')
+  assert.equal(parsed.data.model, 'opus')
+  assert.equal(parsed.data.description, 'Read-only auditor. Second folded line.')
+  assert.equal(parsed.data.notes, 'line one\nline two')
+  assert.deepEqual(splitList(parsed.data.tools), ['Read', 'Grep', 'Glob'])
+  assert.deepEqual(splitList(parsed.data.flow), ['Read', 'Grep'])
+  assert.equal(parsed.data.empty, '')
+  assert.deepEqual(splitList(undefined), [])
+})
+
+test('agent-roster parser: everything outside the pinned grammar FAILS — never fail-open', () => {
+  const bad = {
+    'no frontmatter': 'just a body\n',
+    unterminated: '---\nname: x\n',
+    'block sequence': '---\ntools:\n  - Read\n  - Bash\n---\n',
+    'nested map': '---\nmeta: x\n  nested: y\n---\n',
+    'duplicate key': '---\nname: a\nname: b\n---\n',
+    'not key-value': '---\njust some words\n---\n',
+  }
+  for (const [label, text] of Object.entries(bad)) {
+    const parsed = parseFrontmatter(text)
+    assert.equal(parsed.ok, false, `${label} must fail to parse`)
+    assert.ok(parsed.error.length > 0, label)
+  }
 })

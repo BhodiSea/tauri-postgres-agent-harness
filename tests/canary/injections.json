@@ -47,7 +47,8 @@
     "e2e": [{ "kind": "fixture", "ref": "tests/gates/check-e2e.test.mjs" }],
     "docs-sync": [
       { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs", "note": "renaming/removing a numbered gates-catalog section reds the catalog-lockstep sub-check; a pre-0.1.5 baseVersion manifest downgrades it to a ramp NOTE" }
+      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs", "note": "renaming/removing a numbered gates-catalog section reds the catalog-lockstep sub-check; a pre-0.1.5 baseVersion manifest downgrades it to a ramp NOTE" },
+      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs", "note": "agent roster: granting a reviewer Write or Bash, dropping its disallowedTools, omitting its tools list, or unparseable frontmatter each red the roster sub-check — reviewers are read-only by construction; deliberately NOT ramped (the roster is harness-owned and refreshes with the gate in the same update)" }
     ],
     "validate": [{ "kind": "fixture", "ref": "tests/gates/validate-runner.test.mjs" }],
     "rls-isolation": [{ "kind": "selftest", "ref": "RLS runner FAILS CLOSED without a database (CI=true)" }],

@@ -12,11 +12,25 @@
 //      gate. Version-ramped: NOTE-only on pre-0.1.5 baseVersions (a consumer's
 //      custom step must not red the update that shipped the check), live on
 //      fresh installs and the template tree.
+//   5. The agent roster matches the docs' claim: every .claude/agents/*.md
+//      parses under the pinned frontmatter grammar (a parse failure is a RED,
+//      never a skip) and carries name (== filename), description, and model;
+//      the five reviewer agents hold ONLY read-only tools and disallow
+//      Write + Edit — "read-only by construction" (README "The agent roster"),
+//      machine-asserted. Deliberately NOT version-ramped: the agent files are
+//      harness-OWNED, so the update that delivers this check refreshes the
+//      roster with it — only a hand-widened reviewer reds, and that is the point.
 // This makes the release-time "update the docs" sweep MECHANICAL: change the
 // chain and this gate names exactly the lines to fix.
 // SOURCE: docs/harness/README.md (docs-sync gate) [corpus: harness/doctrine]
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { VALIDATE_STEPS } from './harness.config.mjs'
+import {
+  REVIEWER_AGENTS,
+  REVIEWER_READONLY_TOOLS,
+  parseFrontmatter,
+  splitList,
+} from './lib/agent-roster.mjs'
 import { fail, failures, ok, rampNote, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'docs-sync'
@@ -118,8 +132,72 @@ if (catalogErrs.length > 0) {
   }
 }
 
+// 5. Agent roster. Every roster file must parse (fail-open here would let a
+//    malformed reviewer hide a write grant) and carry the universal fields;
+//    the five reviewers may hold only read-only tools and must disallow
+//    Write + Edit. Author agents keep their write tools — universal fields only.
+const AGENTS_DIR = '.claude/agents'
+const DOCTRINE = 'reviewers are read-only by construction (README "The agent roster")'
+const rosterFiles = existsSync(AGENTS_DIR)
+  ? readdirSync(AGENTS_DIR)
+      .filter((f) => f.endsWith('.md'))
+      .sort()
+  : []
+const rosterStems = new Set(rosterFiles.map((f) => f.slice(0, -3)))
+for (const reviewer of REVIEWER_AGENTS) {
+  if (!rosterStems.has(reviewer)) {
+    errs.push(
+      `${AGENTS_DIR}/${reviewer}.md: reviewer agent missing — the roster is harness-owned; run \`npx tauri-postgres-agent-harness update\` to restore it`,
+    )
+  }
+}
+let reviewersChecked = 0
+for (const file of rosterFiles) {
+  const path = `${AGENTS_DIR}/${file}`
+  const stem = file.slice(0, -3)
+  const parsed = parseFrontmatter(readFileSync(path, 'utf8'))
+  if (!parsed.ok) {
+    errs.push(
+      `${path}: frontmatter does not parse (${parsed.error}) — an unreadable roster fails CLOSED; the accepted grammar is pinned in tools/lib/agent-roster.mjs`,
+    )
+    continue
+  }
+  const fm = parsed.data
+  for (const field of ['name', 'description', 'model']) {
+    if (!fm[field]?.trim()) errs.push(`${path}: missing/empty frontmatter field '${field}'`)
+  }
+  if (fm.name?.trim() && fm.name.trim() !== stem) {
+    errs.push(
+      `${path}: name '${fm.name.trim()}' must match the filename ('${stem}') — the subagent's identity is its filename`,
+    )
+  }
+  if (!REVIEWER_AGENTS.includes(stem)) continue
+  reviewersChecked += 1
+  if (!fm.tools?.trim()) {
+    errs.push(
+      `${path}: reviewer declares no 'tools' list — an absent list inherits EVERY tool; ${DOCTRINE}. Pin tools to a subset of: ${REVIEWER_READONLY_TOOLS.join(', ')}`,
+    )
+  } else {
+    for (const tool of splitList(fm.tools)) {
+      if (!REVIEWER_READONLY_TOOLS.includes(tool)) {
+        errs.push(
+          `${path}: reviewer granted '${tool}' — ${DOCTRINE}. Remove the grant; the read-only allowlist is: ${REVIEWER_READONLY_TOOLS.join(', ')}`,
+        )
+      }
+    }
+  }
+  const disallowed = splitList(fm.disallowedTools ?? '')
+  for (const t of ['Write', 'Edit']) {
+    if (!disallowed.includes(t)) {
+      errs.push(
+        `${path}: reviewer 'disallowedTools' must include ${t} (belt-and-suspenders under the tools allowlist) — ${DOCTRINE}`,
+      )
+    }
+  }
+}
+
 failures(GATE, errs)
 ok(
   GATE,
-  `AGENTS.md gate list in lockstep with the ${String(stepNames.length)}-step chain; CLAUDE.md pure; ${String(advertised.size)} advertised commands all exist; ${catalogSummary}`,
+  `AGENTS.md gate list in lockstep with the ${String(stepNames.length)}-step chain; CLAUDE.md pure; ${String(advertised.size)} advertised commands all exist; ${catalogSummary}; roster: ${String(rosterFiles.length)} agent(s) parsed, ${String(reviewersChecked)}/${String(REVIEWER_AGENTS.length)} reviewers read-only`,
 )

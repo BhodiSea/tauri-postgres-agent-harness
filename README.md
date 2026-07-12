@@ -130,7 +130,9 @@ positive control — never a vacuous green).
 
 Eight subagents: `migration-rls-author`, `dal-author`, `test-author` write;
 `security-reviewer`, `torvalds-reviewer`, `accessibility-reviewer`,
-`tauri-security-reviewer`, `citation-verifier` are read-only by construction. Three
+`tauri-security-reviewer`, `citation-verifier` are read-only by construction — and
+gate-asserted: `docs-sync` parses each reviewer's frontmatter and reds any
+write-capable grant (repo CI mirrors the same check over the shipped roster). Three
 commands: `/new-feature` (one-turn vertical slice: migration → RLS → DAL → contract →
 desktop feature → tests → provenance → green gate), `/adr`, `/verify-citations`.
 `AGENTS.md` is the canonical project memory; `CLAUDE.md` is a pure `@AGENTS.md` include

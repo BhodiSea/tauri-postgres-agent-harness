@@ -330,8 +330,12 @@ session. The spec is necessary but not sufficient; the gate holds the line eithe
 
 Reviewer subagents are **read-only by construction** — `Read, Grep, Glob` only, so a
 prompt-injected reviewer cannot become a writer. `citation-verifier` additionally holds
-`WebFetch` (allow-listed documentation domains) + `corpus_search`, but still no write or
-shell tool.
+`WebFetch` (allow-listed documentation domains) + `corpus_search`, and `security-reviewer`
+the read-only `rls_verify` probe — but never a write or shell tool. The claim is
+machine-asserted: the `docs-sync` gate parses every `.claude/agents/*.md` frontmatter
+(the pinned grammar in `tools/lib/agent-roster.mjs`; unparseable frontmatter fails
+closed) and reds a reviewer holding anything outside that read-only allowlist or
+missing `disallowedTools: Write, Edit`.
 
 - `security-reviewer` — MUST run on any change to RLS SQL, the DAL/`withUserContext`,
   auth verification, capabilities, or the CSP.

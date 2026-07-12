@@ -346,10 +346,26 @@ so an undocumented step cannot ship. The catalog check is version-ramped: on an
 install whose `baseVersion` predates 0.1.5 it reports NOTE-only (a consumer's custom
 step must not go red on the update that shipped the check — graduate via
 `docs/runbooks/harness-upgrade.md`); fresh installs run it live.
+
+The agent roster is part of the same surface: every `.claude/agents/*.md` must parse
+under the pinned frontmatter grammar (`tools/lib/agent-roster.mjs` — a deliberate YAML
+subset; a parse failure is a RED, never a skip, because an unreadable reviewer could
+hide a write grant) and carry `name` (matching its filename), `description`, and
+`model`. The five reviewer agents (`security-reviewer`, `torvalds-reviewer`,
+`accessibility-reviewer`, `tauri-security-reviewer`, `citation-verifier`) may hold
+ONLY the read-only allowlist (`Read`, `Grep`, `Glob`, `WebFetch`, `mcp__rls_verify`,
+`mcp__corpus_search`) and must disallow `Write` + `Edit` — the README's "read-only by
+construction" claim, machine-asserted (the harness repo mirrors the same check over
+the shipped roster in its own CI). Author agents keep their write tools; only the
+universal fields apply to them. The roster sub-check is deliberately NOT
+version-ramped: the agent files are harness-owned, so the update that ships the check
+refreshes the roster with it — only a hand-widened reviewer reds, and that is the point.
 **Anti-vacuity:** add a gate to VALIDATE_STEPS without touching AGENTS.md → FAIL
 printing documented-vs-actual chains; advertise `pnpm ghost` → FAIL naming it;
 rename or delete a numbered catalog section (e.g. this one) → FAIL naming the
-undocumented gate.
+undocumented gate; grant `security-reviewer` Bash, drop a reviewer's
+`disallowedTools`, or rewrite its frontmatter as a block sequence → FAIL naming
+the agent, the offending grant, and the doctrine.
 
 ### the validate runner — serial by default, pooled under `--report-all`
 

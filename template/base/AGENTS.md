@@ -169,7 +169,8 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   migration → RLS → DAL → route → IPC/UI → test → provenance → gate recipe.
 - Schema changes follow the expand→contract runbook
   (`docs/runbooks/expand-contract.md`) — desktop clients skew by a version.
-- Reviewers are read-only subagents: `security-reviewer` (MUST run on RLS/DAL/
+- Reviewers are read-only subagents (the `docs-sync` gate asserts their
+  frontmatter stays read-only): `security-reviewer` (MUST run on RLS/DAL/
   auth/capabilities/CSP changes), `torvalds-reviewer` before finishing,
   `citation-verifier` via `/verify-citations`.
 - PRs paste real `pnpm validate` + `pnpm test:rls` output; CODEOWNERS

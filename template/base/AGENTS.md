@@ -123,13 +123,15 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   `tools/check-diff-coverage.mjs` holds every CHANGED source file to the
   per-file floors there — a feature landing without tests reds the turn.
 - **Styling is tokens-only, in BOTH themes.** The `@theme` in
-  `apps/desktop/src/styles.css` (dark = base) + the `:root[data-theme='light']`
-  override + `tools/styleguide.manifest.json` are the ENTIRE design vocabulary:
-  the default Tailwind palette/scales are erased, and raw hex, raw px, inline
-  `style={}`, and Tailwind arbitrary-value escapes (`w-[13px]`) are gate-red.
-  The styleguide gate COMPUTES WCAG contrast from the OKLCH token values for
-  every declared pair in both themes — extend tokens + manifest in one reviewed
-  diff and keep the pairs green. Light/dark parity is axe-swept per route in e2e.
+  `apps/desktop/src/styles.css` (dark = base) + `:root[data-theme='light']` +
+  `tools/styleguide.manifest.json` are the ENTIRE design vocabulary: default
+  Tailwind palette/scales are erased; raw hex/px, inline `style={}`, and
+  arbitrary-value escapes (`w-[13px]`) are gate-red. The gate COMPUTES WCAG
+  contrast from the OKLCH tokens for every pair in both themes (extend tokens
+  + manifest in one reviewed diff); body text (ink on canvas/surface) holds
+  AAA 7:1, secondary ink stays AA 4.5. Light/dark parity is axe-swept per
+  route; `@media (forced-colors: active)` keeps boundaries/focus/pending-dashed
+  visible under Windows High Contrast (e2e-locked, no-preference control).
 - **Interactive controls render through `src/components` primitives**
   (Button/Input/Field/Skeleton/Toast/EmptyState) — a raw button/input/select/
   textarea tag with a literal `className` outside `src/components` is gate-red

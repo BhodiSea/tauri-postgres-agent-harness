@@ -284,6 +284,25 @@ test('RED: a contrast pair below its min reds, printing the computed ratio to 2d
   assert.ok(r.out.includes('FIX:'), r.out)
 })
 
+test('RED: the AAA (min 7) tier reds an ink that would still pass the old 4.5 floor', () => {
+  // v0.1.5: the primary reading pairs (ink/canvas, ink/surface) carry min 7 in
+  // the shipped manifest. An ink at the muted lightness computes ~6.2:1 on the
+  // light canvas — comfortably past AA 4.5, short of AAA 7 — so this red can
+  // ONLY come from the raised per-pair min, proving the tier is live data, not
+  // gate code.
+  const styles = SHIPPED_STYLES.replace(
+    '--color-ink: oklch(0.25 0.01 240)',
+    '--color-ink: oklch(0.47 0.01 240)',
+  )
+  assert.notEqual(styles, SHIPPED_STYLES, 'fixture replacement must hit')
+  const r = runGate(fixture({ styles }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('theme "light" contrast ink on'), r.out)
+  assert.ok(r.out.includes('(min 7:1)'), r.out)
+  // The AA-scoped pairs stay green: no ink-muted/accent failure rides along.
+  assert.ok(!r.out.includes('contrast ink-muted'), r.out)
+})
+
 test('RED: an out-of-gamut token reds as contrast unverifiable', () => {
   const styles = SHIPPED_STYLES.replace(
     '--color-accent: oklch(0.475 0.08 200)',

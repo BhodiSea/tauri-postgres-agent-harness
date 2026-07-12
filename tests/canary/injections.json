@@ -33,6 +33,7 @@
       { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
       { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs" },
       { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "primitive boundary: a hand-rolled <button className=…> outside the controlPrimitives home → red with the FIX line naming the Button/Input primitive; controlAllow (file + reason) is the reviewed escape and malformed/stale entries fail closed; a manifest without controlPrimitives self-disables with the update --refresh-seeded adoption NOTE" },
+      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "AAA tier: an ink between the AA and AAA boundaries (~6.2:1 on the light canvas) → red printing '(min 7:1)' — the body-text pairs (ink/canvas, ink/surface) enforce 7:1 per-pair while ink-muted/accent stay at the honest 4.5 floor, so the red can only come from the raised min" },
       { "kind": "selftest", "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL" }
     ],
     "perf-budget": [

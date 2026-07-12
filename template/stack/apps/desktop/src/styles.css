@@ -32,6 +32,11 @@
   --color-canvas: oklch(0.16 0.006 240);
   --color-surface: oklch(0.21 0.006 240);
   --color-edge: oklch(0.32 0.008 240);
+  /* Body-text ink holds the AAA (7:1) tier on both paint surfaces — measured
+     15.80:1 on canvas / 14.42:1 on surface by the styleguide gate (manifest
+     min: 7). ink-muted is secondary text and keeps the AA 4.5 floor.
+     SOURCE: WCAG 2.2 SC 1.4.6 Contrast (Enhanced) — 7:1 for body text
+     https://www.w3.org/TR/WCAG22/#contrast-enhanced */
   --color-ink: oklch(0.93 0.005 240);
   --color-ink-muted: oklch(0.72 0.01 240);
   --color-accent: oklch(0.8 0.12 200);
@@ -110,6 +115,10 @@
     --color-canvas: oklch(0.97 0.004 240);
     --color-surface: oklch(0.93 0.005 240);
     --color-edge: oklch(0.82 0.008 240);
+    /* AAA body-text tier, light theme: measured 14.66:1 on canvas / 13.01:1 on
+       surface (styleguide gate, manifest min: 7) — the 0.25 L ink clears 7:1
+       with ~2x headroom, no retune needed. ink-muted stays AA-scoped (6.25 /
+       5.54, min 4.5). */
     --color-ink: oklch(0.25 0.01 240);
     --color-ink-muted: oklch(0.47 0.012 240);
     /* Chroma is 0.08 (not the dark theme's 0.12): at this lightness hue-200 is
@@ -145,6 +154,44 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
+    }
+  }
+  /* Windows High Contrast (forced-colors): the OS swaps every authored color
+     for its small user-chosen system palette, FLATTENS backgrounds toward
+     Canvas, and strips shadows — but border/outline geometry survives,
+     recolored to system inks. Most boundaries here already hold without help:
+     Input/Toast/AppDialog/matrix rows carry border-edge borders the UA
+     recolors to CanvasText, and the pending-note affordance is border-STYLE
+     (dashed), which flattening preserves. The rules below cover only the
+     affordances that genuinely vanish, in system-color KEYWORDS only (they
+     resolve to the user's palette — not raw values, not tokens).
+     e2e/forced-colors.spec.ts locks this layer with a no-preference control.
+     SOURCE: forced-colors media query — backgrounds flatten, borders/outlines
+     persist in system colors; style within the mode via system color keywords
+     [corpus: web/forced-colors]
+     https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors */
+  @media (forced-colors: active) {
+    /* Ghost buttons mark their bounds by background/hover alone — flattened,
+       the hit area disappears into the canvas. ButtonText (the system's own
+       button ink) restores a visible boundary; `thin` (1px in every engine)
+       instead of a raw px literal. Bordered controls are unaffected: their
+       utility border-width wins in the utilities layer and the UA recolors it. */
+    button {
+      border: thin solid ButtonText;
+    }
+    /* The focus ring is authored in accent, which forced colors would remap
+       arbitrarily; Highlight is the palette slot the user chose for emphasis.
+       The ring itself needs no help — outlines survive flattening, which is
+       exactly why focus stays outline-based here. */
+    :focus-visible {
+      outline-color: Highlight;
+    }
+    /* The palette's active option is a bg-canvas cue with NO focus-ring backup
+       (combobox pattern: focus stays in the input; aria-activedescendant only
+       points at the option) — flattened, the selection vanishes. Mark it with
+       the system selection color instead. */
+    [role="option"][aria-selected="true"] {
+      outline: thin solid Highlight;
     }
   }
 }

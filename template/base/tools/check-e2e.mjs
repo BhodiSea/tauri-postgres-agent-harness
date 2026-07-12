@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Gate: e2e — the agent-time Playwright lane. Runs the WHOLE e2e/ directory
 // (a11y + states + theme + motion + matrix + degraded-network + mutation +
-// palette) through the root playwright.config.ts:
+// palette + forced-colors) through the root playwright.config.ts:
 // chromium against `vite dev`, Tauri IPC mocked, API stubbed — exactly what the
 // quality-gate e2e job runs in CI, so an agent turn cannot end green while the
 // browser suite is red.

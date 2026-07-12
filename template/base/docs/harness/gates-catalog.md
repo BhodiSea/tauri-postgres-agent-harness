@@ -208,7 +208,11 @@ module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` a
   → WCAG relative luminance (`0.2126R+0.7152G+0.0722B` on the linear channels) →
   `(Lhi+0.05)/(Llo+0.05)` — and asserted `>= min`. An out-of-gamut token FAILs
   'unverifiable' (the browser would gamut-map it, so its painted contrast is not the
-  computed one). The numbers thus cannot drift from the token values.
+  computed one). The numbers thus cannot drift from the token values. The shipped
+  manifest holds the primary reading pairs (ink/canvas, ink/surface) to the **AAA
+  7:1 body-text tier** in BOTH themes (measured 15.80/14.42 dark, 14.66/13.01
+  light); ink-muted and accent pairs keep the honest AA 4.5 floor — AAA is scoped
+  to body text, not blanket-claimed.
   SOURCE: CSS Color 4 OKLCH→sRGB [corpus: csswg/oklch-srgb]; WCAG relative luminance
   [corpus: wcag/relative-luminance].
 - **Source scan.** The desktop source carries no raw hex, no raw px, no inline
@@ -238,7 +242,9 @@ module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` a
 **Anti-vacuity:** delete an erasure marker → FAIL naming the namespace; add
 `text-red-500` to any TSX → FAIL naming the file; add a hex literal or a `text-[#…]`
 arbitrary value → FAIL; darken a light token below its floor → FAIL printing the
-computed ratio (e.g. `accent on surface = 4.24:1 (min 4.5:1)`); push a token
+computed ratio (e.g. `accent on surface = 4.24:1 (min 4.5:1)`); lighten ink into
+the 4.5–7 band → FAIL at the AAA boundary printing `(min 7:1)` (the red can only
+come from the raised per-pair min); push a token
 out of the sRGB gamut → FAIL 'unverifiable'; drop a light-theme token override → FAIL
 ('the base value paints through'); hand-roll a `<button className=…>` in a screen →
 FAIL with the primitive-naming FIX line; strip `controlPrimitives` from the manifest
@@ -329,11 +335,18 @@ duplicate path, or reused state id → FAIL naming the offender; malformed allow
 ### 21. e2e — `node tools/check-e2e.mjs`
 
 The agent-time Playwright lane: runs the whole `e2e/` directory (a11y + states +
-theme + motion + matrix + degraded-network + mutation + palette — mutation locks the
+theme + motion + matrix + degraded-network + mutation + palette + forced-colors —
+mutation locks the
 optimistic create-note write path: held-POST optimistic row, reconcile on 201, rollback +
 envelope toast on 500; palette locks the command palette keyboard-only: pinned fuzzy
 ranking, grouped sections, recents persistence across reload, contextual matrix
-commands, axe-clean open state in both themes) in chromium against `vite dev` — the
+commands, axe-clean open state in both themes; forced-colors locks the Windows High
+Contrast layer under chromium's `forcedColors: 'active'` emulation: the keyboard
+focus ring stays a visible outline, Button/Input/matrix-row boundaries stay
+non-transparent borders, the pending-row dashed affordance survives flattening, with
+a no-preference CONTROL running the identical border probe where no border exists —
+proving the assert can red — and a stylesheet capability probe that skips loudly on
+a pre-0.1.5 seeded styles.css) in chromium against `vite dev` — the
 same suite CI runs. Chromium
 presence is detected from playwright's own registry (`chromium.executablePath()` +
 existsSync); absent → loud local skip with the exact install command

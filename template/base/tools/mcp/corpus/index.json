@@ -280,5 +280,13 @@
     "title": "prefers-reduced-motion / WCAG 2.3.3 and 2.2.2: honor the OS reduce-motion setting — non-essential motion becomes opt-in",
     "url": "https://www.w3.org/TR/WCAG22/#animation-from-interactions",
     "version": "2.2"
+  },
+  {
+    "id": "web/forced-colors",
+    "sha256": "d38f69cf227a87a9cda0c514a317633a59301d937e1cf782f5d82e4e124abaf5",
+    "text": "The forced-colors: active media feature detects a forced colors mode (Windows High Contrast / Contrast Themes), in which the user agent replaces the author's palette with a limited user-chosen system palette. Backgrounds are flattened toward Canvas and box shadows are removed, while border and outline geometry is preserved with colors forced to system inks — so an affordance carried by background color alone disappears, and a border-STYLE difference (for example dashed) survives flattening. Authors should style within the mode using the CSS system color keywords (Canvas, CanvasText, ButtonText, Highlight, HighlightText, …), which resolve to the user's chosen palette; keep focus indicators outline-based, because outlines persist; and reach for forced-color-adjust: none only where overriding the user's color choice is genuinely necessary.",
+    "title": "forced-colors media query: backgrounds flatten to Canvas, borders/outlines persist in system colors — style with system color keywords, keep focus outline-based",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors",
+    "version": "2026"
   }
 ]

@@ -75,7 +75,7 @@ advertised commands exist). The expensive gates are content-hash **stamped**: un
 inputs make a warm validate skip build/contracts/licenses/rust-check/**e2e**/version-sync
 in milliseconds (a vacuous run never stamps; CI always re-runs everything), and the Stop
 hook's `--report-all` runs the read-only gates through a small concurrency pool —
-measured on the fresh scaffold: cold ≈ 70 s (real cargo check + 40 chromium e2e tests),
+measured on the fresh scaffold: cold ≈ 70 s (real cargo check + 45 chromium e2e tests),
 warm ≈ 5 s for all 22 steps.
 
 Rust/database gates **skip loudly** without the toolchain locally and **fail closed in

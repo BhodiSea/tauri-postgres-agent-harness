@@ -17,7 +17,9 @@
   "files": [
     "installer",
     "template",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "REUSE.toml",
+    "LICENSES"
   ],
   "scripts": {
     "bootstrap": "node installer/cli.mjs init --consume",

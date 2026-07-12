@@ -199,5 +199,9 @@ ships in [`design/`](design/).
 
 ## License
 
-Apache-2.0; everything under `template/**` additionally 0BSD (scaffolded code carries
-no attribution requirement). Cite via [CITATION.cff](CITATION.cff).
+Apache-2.0; everything under `template/**` is dual-licensed `Apache-2.0 OR 0BSD` —
+recipients pick either, and 0BSD means scaffolded code carries no attribution
+requirement. The split is REUSE-verified ([REUSE.toml](REUSE.toml) +
+[LICENSES/](LICENSES/), REUSE spec 3.3): check with `pipx run reuse==6.2.0 lint`
+(blocking in CI) or offline via `node scripts/check-reuse.mjs`. Cite via
+[CITATION.cff](CITATION.cff).

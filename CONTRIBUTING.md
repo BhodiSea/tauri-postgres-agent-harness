@@ -33,6 +33,7 @@
 ```sh
 node scripts/check-syntax.mjs   # syntax over installer + template (.tmpl aware)
 node scripts/hygiene.mjs        # leaked-string + placeholder closure
+node scripts/check-reuse.mjs    # REUSE dual-license structure (offline mirror of `reuse lint`)
 node --test tests/              # installer lifecycle + hook contracts
 node installer/cli.mjs init --dir /tmp/scratch --yes   # manual smoke test
 ```

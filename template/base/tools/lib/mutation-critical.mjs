@@ -27,7 +27,11 @@
 // SOURCE: docs/harness/gates-catalog.md (mutation-ratchet) [corpus: harness/doctrine]
 
 /** Directory roots (trailing slash) whose .ts files are mutated. */
-export const CRITICAL_ROOTS = ['apps/server/src/', 'apps/desktop/src/auth/', 'apps/desktop/src/lib/']
+export const CRITICAL_ROOTS = [
+  'apps/server/src/',
+  'apps/desktop/src/auth/',
+  'apps/desktop/src/lib/',
+]
 
 /**
  * Carve-outs INSIDE those roots. Each is code no unit test can honestly reach, so every

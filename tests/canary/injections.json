@@ -301,6 +301,13 @@
         "ref": "tests/gates/check-test-quality.test.mjs",
         "note": "G09 (v0.1.6), the AGENT-TIME half of assertion quality. A test body with no assertion call reds naming the test; a committed `.only` reds with NO reviewed escape (it silently disables every other test in the run while the suite still reports green); a `.skip`/`.todo`/`.failing` MODIFIER or an xit/xdescribe reds as a declared test that never runs. Playwright's RUNTIME conditional skip — test.skip(condition, reason), which this harness's own data-driven e2e specs use constantly — is NOT a disabled test and must stay green: the discriminator is whether the first argument is a string TITLE. An assertion inside a comment does not satisfy the gate. tools/test-quality-allow.json mutes a reviewed exemption BY TEST TITLE (position-independent) and a missing reason fails closed. Ramped: a pre-0.1.6 baseVersion downgrades findings to a NOTE, turn-fatal from 0.1.6. This half is deliberately GAMEABLE ALONE (`expect(true).toBe(true)` clears it) — the primary control is the mutation lane below."
       }
+    ],
+    "native-perf": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-native-perf.test.mjs",
+        "note": "G05 (v0.1.6). The CLOSURE half, and it is what makes this a floor rather than a note about the two commands that happened to ship with the scaffold: every #[tauri::command] in apps/desktop/src-tauri/src/lib.rs must have a criterion bench in benches/host.rs AND a budget entry. Adding a command without benching it reds turn-fatally; so does a stale COMMANDS entry, an unbudgeted subject, and deleting benches/host.rs outright. A plain helper fn beside a command is NOT a command (the #[tauri::command] attribute anchors the match). Static (~10ms) because the MEASUREMENT half needs cargo bench (minutes) and runs in the CI rust lane — see lanes.rust. Ramped: an install predating 0.1.6 has no budget (seedOnInitOnly — the subjects[] name THIS project's command surface) and gets an adoption NOTE; once graduated, a missing budget is FATAL, so the floor cannot be disarmed by deleting one file."
+      }
     ]
   },
   "hookRules": {
@@ -357,6 +364,11 @@
       {
         "kind": "steps",
         "note": "runs the rust-fmt/rust-check gates plus clippy/deny/specta-drift — proven under 'rust-check' above."
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-native-perf.test.mjs",
+        "note": "The MEASUREMENT half of the native perf floor (G05) — the only check in the harness that observes the REAL Rust host: criterion drives the actual invoke handler (tauri's mock runtime) and the actual builder chain from lib.rs. Every other lane mocks the IPC bridge, which is how #[tauri::command] cost and the boot path went entirely unmeasured through v0.1.5 — a command could get 100x slower with all 22 gates, the whole e2e suite and the perf lane green. Budgets are RATIOS to the cheapest command, never nanoseconds: measured over six runs alternating idle and 8-core-loaded, normalizing cut run-to-run variance from 27-40% to 10-14% (and a synthetic fixed-CPU calibration loop, tried FIRST, was WORSE than no normalization at 15% — a tight ALU loop is clock-bound while the invoke path is allocator-bound, so its noise is independent and a noisy denominator only injects variance). The fixture proves the arithmetic: a subject over its cap reds; a 3x slower runner does NOT (the ratio cancels it); and a regression that slows the NORMALIZER itself — which would deflate every other ratio and hide them — reds on its own absolute nanosecond ceiling. Proven end-to-end against a real cargo bench on a real scaffold: std::thread::sleep(1ms) in access_token produced 'ipc/access_token: 787.12x the normalizer, over its budget of 2x' and exit 1."
       }
     ],
     "e2e-fast": [

@@ -215,6 +215,10 @@ export const WRITE_PROTECTED = [
   // Wall-clock budgets for the CI-only interaction-latency lane — raising one
   // re-baselines the agent's own UX regression, so the edit is human-only.
   { id: 'interaction-budget', re: /^tools\/interaction-budget\.json$/ },
+  // Ratio budgets for the Rust host's criterion benches (and the real-binary cold-start
+  // ceiling). Same reason as every budget above it: raising a cap re-baselines the very
+  // regression the gate just caught, so it is a reviewed human act.
+  { id: 'native-perf-budget', re: /^tools\/native-perf-budget\.json$/ },
   { id: 'styleguide-manifest', re: /^tools\/styleguide\.manifest\.json$/ },
   { id: 'mutation-baseline', re: /^tools\/mutation-baseline\.json$/ }, // accepting a surviving mutant is a human decision
   { id: 'route-allowlist', re: /^tools\/route-allowlist\.json$/ }, // exempting a features dir from ROUTES is a human decision

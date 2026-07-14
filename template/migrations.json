@@ -87,7 +87,7 @@
     ]
   },
   "0.1.6": {
-    "//": "packages/schema/drizzle/0002_notes_keyset_idx.sql is seedOnInitOnly for a reason that is NOT cosmetic: drizzle/ is a seeded PREFIX, so `update` would otherwise auto-plant a NEW MIGRATION into an existing project's schema — DDL they never wrote, applied to their database on the next db:migrate, with a filename that may collide with their own 0002_*. The harness does not write migrations for you. A fresh install gets the composite keyset index as part of its exemplar; an upgraded install is told to author its own by the DAL plan probe, which reds on the Sort and names the index shape (see tests/rls/plan-regression.test.ts). || tools/mutation-baseline.json and tools/test-quality-allow.json are seedOnInitOnly for the same class of reason: both record a PROJECT'S OWN JUDGEMENTS (\"this surviving mutant is genuinely equivalent, and here is why\"; \"this test is deliberately pending\"). Planting the template's judgements into someone else's repo on `update` would silently ACCEPT survivors they never reviewed — the exact opposite of what the ratchet is for. An upgraded install therefore has no baseline, and the ratchet self-disables with an adoption NOTE until they seed their own: `pnpm mutation:baseline`, write a reason for every survivor, commit.",
+    "//": "packages/schema/drizzle/0002_notes_keyset_idx.sql is seedOnInitOnly for a reason that is NOT cosmetic: drizzle/ is a seeded PREFIX, so `update` would otherwise auto-plant a NEW MIGRATION into an existing project's schema — DDL they never wrote, applied to their database on the next db:migrate, with a filename that may collide with their own 0002_*. The harness does not write migrations for you. A fresh install gets the composite keyset index as part of its exemplar; an upgraded install is told to author its own by the DAL plan probe, which reds on the Sort and names the index shape (see tests/rls/plan-regression.test.ts). || tools/mutation-baseline.json and tools/test-quality-allow.json are seedOnInitOnly for the same class of reason: both record a PROJECT'S OWN JUDGEMENTS (\"this surviving mutant is genuinely equivalent, and here is why\"; \"this test is deliberately pending\"). Planting the template's judgements into someone else's repo on `update` would silently ACCEPT survivors they never reviewed — the exact opposite of what the ratchet is for. An upgraded install therefore has no baseline, and the ratchet self-disables with an adoption NOTE until they seed their own: `pnpm mutation:baseline`, write a reason for every survivor, commit. || tools/native-perf-budget.json is seedOnInitOnly for a THIRD reason, structural rather than judgemental: its subjects[] enumerate THIS project's #[tauri::command] surface, and its partner (apps/desktop/src-tauri/benches/host.rs) lives under the seeded `apps/` prefix, which `update` never overwrites. Planting the budget alone would arm a closure check against a bench that is not there; planting the bench alone would inject code calling a configure_app() signature the consumer's own lib.rs does not have, and their crate would stop compiling. So `update` plants NEITHER, the gate self-disables with an adoption NOTE naming the three-step recipe, and `graduate` refuses while that NOTE stands.",
     "seedOnInitOnly": [
       "LICENSE",
       "CITATION.cff",
@@ -101,8 +101,16 @@
       "apps/desktop/src/lib/",
       "apps/desktop/src/auth/",
       "apps/server/src/app.cors.test.ts",
+      "apps/server/src/app.auth.test.ts",
+      "apps/server/src/app.routes.test.ts",
+      "apps/server/src/app.version.test.ts",
+      "apps/server/src/dal/cursor.test.ts",
+      "apps/server/src/errors.test.ts",
+      "apps/desktop/src/lib/boot-timing.test.ts",
+      "apps/desktop/src-tauri/benches/",
       "tools/mutation-baseline.json",
-      "tools/test-quality-allow.json"
+      "tools/test-quality-allow.json",
+      "tools/native-perf-budget.json"
     ],
     "promotedModules": [
       "mutation"
@@ -124,6 +132,12 @@
         "name": "test-quality",
         "cmd": "node tools/check-test-quality.mjs",
         "after": "i18n",
+        "array": "STOP_HOOK_STEPS"
+      },
+      {
+        "name": "native-perf",
+        "cmd": "node tools/check-native-perf.mjs --closure",
+        "after": "test-quality",
         "array": "STOP_HOOK_STEPS"
       }
     ]

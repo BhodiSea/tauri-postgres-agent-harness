@@ -64,6 +64,12 @@ export async function installMockIpc(page: Page, options: MockIpcOptions = {}): 
           // send (a request with no token is a bug, not a 401 to render) and every
           // data-driven spec would sit in its error state.
           if (cmd === 'access_token') return Promise.resolve(token)
+          // Cold-start elapsed. A fixed value on purpose: this lane runs `vite dev` in
+          // plain chromium, so there is no host process whose boot could be timed, and a
+          // wall-clock number from here would be a fiction. The REAL budget is measured
+          // against the real binary in the ci-windows-e2e module. Answering keeps
+          // main.tsx's stamp on its normal path rather than silently in its catch block.
+          if (cmd === 'boot_elapsed_ms') return Promise.resolve(0)
           nextCallbackId += 1
           return Promise.resolve(nextCallbackId)
         },

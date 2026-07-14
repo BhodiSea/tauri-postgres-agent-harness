@@ -51,6 +51,7 @@ const ESCAPE_LISTS = [
   'tools/i18n-allow.json', // letting a user-facing string bypass the catalog
   'tools/perf-budget.json',
   'tools/interaction-budget.json',
+  'tools/native-perf-budget.json', // raising a Rust-host ratio cap or the cold-start ceiling
   'tools/bundle-budget.json',
   'tools/perf-baseline.json',
   'tools/styleguide.manifest.json',

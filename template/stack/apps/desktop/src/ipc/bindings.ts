@@ -25,5 +25,21 @@ export const commands = {
 	 *  `None` means unauthenticated — the client surfaces it, it never sends a bare request.
 	 */
 	accessToken: () => __TAURI_INVOKE<string | null>("access_token"),
+	/**
+	 *  Milliseconds from host start to now.
+	 * 
+	 *  The webview stamps this onto `<html data-boot-ms>` at first paint, which is what
+	 *  makes cold-start TTI measurable AT ALL: the host owns the process clock and the
+	 *  webview owns "interactive", and neither half can see the other. The real-binary
+	 *  lane reads the attribute and budgets it.
+	 * 
+	 *  `u32` (not `u64`) deliberately: specta's default bigint policy REFUSES to export a
+	 *  64-bit integer to TypeScript rather than silently truncate it through `number`, so a
+	 *  `u64` here would fail the bindings export. Milliseconds fit in `u32` for 49 days of
+	 *  uptime, and a boot that took 49 days has a bigger problem than a saturated counter.
+	 * 
+	 *  Returns 0 before `run()` has started the clock (unit tests, benches) — not a boot.
+	 */
+	bootElapsedMs: () => __TAURI_INVOKE<number>("boot_elapsed_ms"),
 };
 

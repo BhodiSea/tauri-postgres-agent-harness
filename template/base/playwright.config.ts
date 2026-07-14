@@ -114,6 +114,7 @@ export default defineConfig({
       // passes its origin through, so the bundle talks to it instead of a stub.
       // `||`, not `??`: an exported-but-EMPTY VITE_API_ORIGIN survives `??` and would be
       // forwarded to Vite as '', turning every request into a same-origin relative path.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- here `??` IS the bug, not the fix (see above)
       VITE_API_ORIGIN: process?.env.VITE_API_ORIGIN || 'http://127.0.0.1:8787',
     },
   },

@@ -9,3 +9,12 @@ target/
 .harness/*.ok
 # Scratch fixtures created by local selftest runs
 .fixtures/
+# Build artifacts a local `tsc -b` / vite build can drop INSIDE the template tree.
+# template/base/gitignore ships these rules to every scaffold — but that file only protects
+# CONSUMERS. Nothing stopped an artifact being committed HERE until an 87 KB
+# tsconfig.tsbuildinfo rode a `git add -A` into template/stack/, where the seeded-migrations
+# gate then correctly flagged it as an unregistered file `update` would plant into every
+# existing install.
+template/**/dist/
+template/**/dist-types/
+*.tsbuildinfo

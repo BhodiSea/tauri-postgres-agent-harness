@@ -17,6 +17,23 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = ["isolation"] }
 
+[dev-dependencies]
+# The native-perf bench drives the REAL invoke handler over tauri's mock runtime, which
+# needs tauri's `test` feature. Declared as a DEV-dependency so it never reaches the
+# shipped binary: the v2 feature resolver (edition 2021) only unifies dev-dependency
+# features for targets that pull dev-deps — benches and tests — never `cargo build --release`.
+tauri = { version = "2.11.5", features = ["isolation", "test"] }
+# default-features off: `plotters`/`rayon` only exist to draw HTML reports nobody reads in
+# CI. `cargo_bench_support` is what makes plain `cargo bench` work, and criterion writes
+# target/criterion/<id>/new/estimates.json either way — that JSON is what the gate reads.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+# SOURCE: criterion.rs user guide — `harness = false` hands `cargo bench` to criterion's
+# own main() instead of libtest's [corpus: rust/criterion-bench]
+[[bench]]
+name = "host"
+harness = false
+
 [dependencies]
 # SOURCE: CVE-2026-42184 / GHSA-7gmj-67g7-phm9 — is_local_url() origin
 # confusion fixed in tauri 2.11.1; never float below it [corpus: tauri/csp]

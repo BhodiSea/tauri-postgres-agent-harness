@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { initLocale } from './i18n'
 import { attachConsole, isTauri } from './ipc'
 import { setAccessTokenProvider } from './lib/api-client'
+import { stampBootTiming } from './lib/boot-timing'
 import { initTheme } from './theme/theme'
 import './styles.css'
 
@@ -45,3 +46,12 @@ createRoot(container).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// Cold start is only real once the user can SEE the shell, so the measurement waits for the
+// frame to land: the first rAF callback runs before that paint, the second after it. Asking
+// the host any earlier would report a number the user never experienced.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    void stampBootTiming()
+  })
+})

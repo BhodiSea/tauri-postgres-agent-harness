@@ -688,7 +688,107 @@ below, and that is why both exist.
 Playwright-skip distinction, the `it.each` second-call body, an assertion hidden in a comment,
 the mandatory-reason fail-closed, and the ramp NOTE ↔ turn-fatal split.
 
+### native-perf — `node tools/check-native-perf.mjs --closure`
+
+The **closure** half of the Rust host's performance floor (the measurement half is the CI rust
+lane, below). Static — it reads two files, ~10 ms — so it belongs in the chain.
+
+It asserts one thing: **every `#[tauri::command]` in `apps/desktop/src-tauri/src/lib.rs` has a
+criterion bench in `benches/host.rs` and a budget entry in `tools/native-perf-budget.json`.**
+
+That is what makes this a floor rather than a note about the two commands that happened to ship
+with the scaffold. Without it, the benches cover the exemplar forever and the command an agent
+adds next week is host cost that no machine check will ever look at — which is *exactly* how the
+entire IPC seam stayed unmeasured through v0.1.5. An agent cannot end a turn having added an
+unmeasured command. Deleting `benches/host.rs` outright reds too; so does a stale `COMMANDS`
+entry naming a command that no longer exists.
+
+**Ramp / adoption.** The budget is `seedOnInitOnly`: its `subjects[]` enumerate *this* project's
+command surface, and its partner (`benches/host.rs`) lives under the seeded `apps/` prefix that
+`update` never overwrites. Planting the budget alone would arm a closure check against a bench
+that is not there; planting the bench alone would inject code calling a `configure_app()`
+signature the consumer's `lib.rs` does not have, and their crate would stop compiling. So
+`update` plants **neither**, and the gate emits an adoption NOTE naming the three-step recipe
+(refresh the budget + bench, add the `criterion` / `tauri["test"]` dev-deps and `[[bench]]`
+stanza, measure and write a `subjects[]` entry per command). `graduate` refuses while that NOTE
+stands. Once on baseVersion 0.1.6 a **missing budget is fatal** — the floor cannot be disarmed
+by deleting one file.
+
 ## CI-only lanes (outside the chain and the Stop hook)
+
+### native-perf (measurement) — `cargo bench --bench host` + `node tools/check-native-perf.mjs`
+
+Runs in the blocking `rust` job of `quality-gate.yml`.
+
+**This is the only check in the harness that observes the real Rust host.** Every other lane
+mocks the Tauri IPC bridge — the perf lane runs `vite dev` against a stub — so through v0.1.5
+`#[tauri::command]` cost, the serde round-trip and the boot path were measured by *nothing*. A
+command could get 100× slower with all 22 gates, the whole e2e suite and the perf lane green.
+
+The benches drive the **real** invoke handler (tauri's mock runtime, via `tauri::test`) and the
+**real** builder chain (`app_lib::configure_app`, the same function `run()` boots through). A
+bench that registered its own lookalike handler would measure a fiction.
+
+**Budgets are ratios, not nanoseconds — and that choice was measured, not assumed.**
+
+Raw nanoseconds on a shared runner are not a budgetable quantity. The first draft normalized
+against a synthetic FNV-1a ALU loop, on the theory that a fixed CPU workload tracks runner
+speed. **It does not track this workload, and it made the gate worse than no normalization at
+all.** A tight integer loop is clock- and thermal-bound while the invoke path is allocator- and
+memory-bound, so its noise is *independent* of the subjects' — a noisy denominator merely injects
+variance. Coefficient of variation over six runs, alternating idle and 8-core-loaded:
+
+| subject               | raw ns | ÷ FNV loop | ÷ `ipc/app_version` |
+|-----------------------|--------|-----------|---------------------|
+| `boot/app_build`      | 40.0%  |   15.0%   |  **11.5%**          |
+| `ipc/access_token`    | 27.5%  |   11.1%   |   **9.8%**          |
+| `ipc/boot_elapsed_ms` | 28.0%  |   13.7%   |  **14.3%**          |
+
+So the normalizer is **`ipc/app_version`** — the cheapest possible command (its body is a
+compile-time constant clone), which measures the bare cost of an invoke round-trip and has no
+reason to change when project code changes. It shares the subjects' cost profile, so the runner's
+effect on it *is* the effect on them. On a quiet machine the same normalization lands at 0.2–0.6%.
+
+**What it therefore catches, honestly.** 2.5–4× better than raw is not "deterministic". The caps
+sit above the worst ratio seen under that torture test, which makes this a net for regressions of
+roughly **2× and up** — a sleep, a sync file read, a network call in a command, an accidental
+O(n²), a blocking op added to `.setup()` — and **not** for slow drift. A flaky perf gate is worse
+than none, because it teaches a team to ignore red. The gate prints every measured ratio, so a
+project can tighten its caps from its own CI history rather than from this table.
+
+**The hole in any ratio scheme, and its backstop.** Slow the *denominator* and every ratio below
+it deflates. So the normalizer carries an absolute nanosecond ceiling (`normalizer.maxNanos`) —
+deliberately loose, since it is the one number that cannot be normalized. Residual: a dependency
+upgrade that made the *whole* invoke path uniformly ~2× slower would move `app_version` too,
+leave the ratios flat, and pass. That is a Renovate-owned dependency regression rather than an
+agent's, and it is recorded here rather than papered over.
+
+**What the benches structurally cannot see:** the OS loader, WebView2 startup, asset decode, the
+real logger install (the log plugin's global `set_boxed_logger` can only run once per process, so
+the bench passes `skip_logger()`), React mounting. That is the cold-start budget's job:
+
+### cold-start TTI (ci-windows-e2e module, nightly) — `e2e-windows/coldstart.e2e.ts`
+
+Host process start → webview interactive, on the **real signed binary**. The number is joined
+across the two halves that each see only their own: the host stamps its monotonic clock via the
+`boot_elapsed_ms` command, and `main.tsx` writes it to `<html data-boot-ms>` on the frame after
+first paint; the WebDriver session reads the attribute back and budgets it
+(`native-perf-budget.json#coldStart`). A `0` fails — that means the host clock never started, so
+it is not a real boot — and a *missing* attribute fails rather than passing on an absent
+measurement. The module's workflow asserts the spec's pinned constant and the budget file agree
+before the suite runs, so the budget cannot silently drift from what the spec enforces.
+
+**Honest limit: this is a monitor, not a merge gate.** It is wall-clock on a shared Windows runner
+and it runs nightly, so it detects step-functions (a blocking call in boot, a sync network fetch
+at startup), not drift. The per-PR *deterministic* floor is the criterion ratios above.
+
+**Anti-vacuity:** `tests/gates/check-native-perf.test.mjs` pins every red — the unbenched command,
+the unbudgeted subject, the stale `COMMANDS` entry, the deleted bench file, a subject over cap, a
+budgeted subject that silently stopped being measured, and the slow-normalizer backstop — plus the
+two that prove the design: a **3× slower runner still passes** (the ratio cancels it), and a
+missing budget is a NOTE pre-0.1.6 but **fatal** after. Proven end to end against a real
+`cargo bench` on a real scaffold: `thread::sleep(1ms)` in `access_token` produced
+`ipc/access_token: 787.12x the normalizer, over its budget of 2x` and exit 1.
 
 ### mutation — `pnpm mutation` (nightly, full) · per-PR in `quality-gate.yml`
 

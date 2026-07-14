@@ -244,6 +244,9 @@ const RULE_CANARIES = {
   // The CI perf lane's wall-clock budgets: an agent raising them would
   // re-baseline its own interaction-latency regression.
   'interaction-budget': [pathDeny('tools/interaction-budget.json')],
+  // Raising a Rust-host ratio cap (or the cold-start ceiling) re-baselines the exact
+  // regression the bench just caught — a human act, never an agent's route to green.
+  'native-perf-budget': [pathDeny('tools/native-perf-budget.json')],
   'styleguide-manifest': [pathDeny('tools/styleguide.manifest.json')],
   'mutation-baseline': [pathDeny('tools/mutation-baseline.json')],
   'route-allowlist': [pathDeny('tools/route-allowlist.json')],

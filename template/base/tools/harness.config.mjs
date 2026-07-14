@@ -76,4 +76,11 @@ export const STOP_HOOK_STEPS = [
   // code breaking — that is the mutation lane (tools/check-mutation-ratchet.mjs), which runs
   // in CI because it takes minutes and this chain has a ~6s budget. Ramped to 0.1.6.
   ['test-quality', 'node tools/check-test-quality.mjs'],
+  // CLOSURE half of the native perf floor: every #[tauri::command] must have a criterion
+  // bench and a committed budget. Static (~10ms — it reads two files), so it belongs here:
+  // an agent cannot end a turn having added an IPC command that no machine check will ever
+  // time. The MEASUREMENT half needs `cargo bench` (minutes) and runs in the CI rust lane.
+  // Without this closure the benches only ever cover the commands that shipped with the
+  // scaffold, which is precisely how the whole IPC seam stayed unmeasured until 0.1.6.
+  ['native-perf', 'node tools/check-native-perf.mjs --closure'],
 ]

@@ -1,0 +1,32 @@
+{
+  "//": "Budgets for the Rust host — the criterion benches in apps/desktop/src-tauri/benches/host.rs, enforced by tools/check-native-perf.mjs in the CI rust lane. Until v0.1.6 NOTHING here was measured: the perf lane runs vite dev against a MOCKED IPC bridge, so a #[tauri::command] could get 100x slower and every gate stayed green. Budgets are RATIOS to the normalizer, never nanoseconds — see normalizer.note. This file is write-guard-protected and hashed by gate-integrity: raising a cap re-baselines the regression the gate just caught, so it is a reviewed human act, not something an agent does to get to green.",
+
+  "normalizer": {
+    "subject": "ipc/app_version",
+    "maxNanos": 10000,
+    "note": "The cheapest possible command (its body is a compile-time constant clone), so it measures the bare cost of an invoke round-trip and has no reason to change when project code changes. Dividing every other subject by it cancels most of the runner out: measured over six runs alternating idle and 8-core-loaded, it cut the coefficient of variation from 27-40% (raw ns) to 10-14%. A synthetic fixed-CPU calibration loop was tried FIRST and was WORSE THAN NO NORMALIZATION (15%) — a tight ALU loop is clock- and thermal-bound while the invoke path is allocator-bound, so its noise is independent and a noisy denominator only injects variance. Do not reintroduce one. maxNanos is the coarse backstop on the normalizer ITSELF: a regression that slowed app_version down would deflate every ratio below and hide the others, so its absolute time is bounded too. It is deliberately loose (~7x the worst observed under load) because it is the one number that cannot be normalized — it still catches any sleep or file read landing in the version getter by ~100x."
+  },
+
+  "subjects": {
+    "boot/app_build": {
+      "maxRatio": 45,
+      "observed": "19-29x across idle, loaded and hot runs",
+      "note": "The builder chain run() actually boots through (app_lib::configure_app): context build, plugin registration, typed invoke-handler wiring, specta event mount, and the .setup() body. This is the gate that catches a blocking call added to setup(). It does NOT include the log plugin's global-logger + rotating-file install — that can only run once per process by construction (log::set_boxed_logger) and is disk-bound third-party cost that would swamp the signal from the code this project owns; the everything-included number is the cold-start budget below."
+    },
+    "ipc/access_token": {
+      "maxRatio": 2.5,
+      "observed": "1.07-1.42x across idle, loaded and hot runs",
+      "note": "Full round-trip through the real invoke handler: request deserialization, dispatch, the command body, response serialization. The cap is looser than the observed spread suggests it needs to be, for a reason worth knowing: this command calls std::env::var, and getenv cost scales with the SIZE OF THE PROCESS ENVIRONMENT — a CI runner's environment is far larger than a developer's shell, so this ratio moves for reasons that have nothing to do with code quality. Tightening it to hug the local measurement would buy sensitivity nobody needs (the regressions this exists to catch are 50x and up) and pay for it in flakes, which teach a team to ignore red. What it still catches: a real token acquisition (keychain read, MSAL refresh, network) landing on this SYNCHRONOUS invoke path — that work belongs behind an async boundary, and it would show up here at 50-15,000x."
+    },
+    "ipc/boot_elapsed_ms": {
+      "maxRatio": 2.0,
+      "observed": "0.89-1.26x — the most stable subject (it does the least)",
+      "note": "Reads a OnceLock and subtracts an Instant: essentially the normalizer plus an atomic load, which is why it sits at ~1x and stays there. If this one ever drifts materially, the invoke path itself changed rather than the command."
+    }
+  },
+
+  "coldStart": {
+    "maxBootMs": 4000,
+    "note": "Host process start -> webview interactive, measured END TO END on the REAL SIGNED BINARY: the host stamps <html data-boot-ms> from its own monotonic clock at first paint (see boot_elapsed_ms), and e2e-windows/coldstart.e2e.ts reads it back over WebDriver. This is the only number that sees what the criterion benches structurally cannot — the OS loader, WebView2 startup, asset decode, the real logger install, React hydration. It is wall-clock on a shared Windows runner and therefore CANNOT be tight: it is a step-function detector (a blocking op in boot, a sync network call at startup), not a drift ratchet. It also runs NIGHTLY, not per-PR, so it is a monitor and not a merge gate — the per-PR deterministic floor is the criterion ratios above. Print the real number from the first nightly and ratchet this DOWN in a reviewed commit."
+  }
+}

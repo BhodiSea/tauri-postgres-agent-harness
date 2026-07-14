@@ -296,6 +296,26 @@ jobs:
       - name: Specta bindings drift (committed vs regenerated)
         run: git diff --exit-code -- apps/desktop/src/ipc/bindings.ts
 
+      # The native performance floor. Every other lane in this file mocks the Tauri IPC
+      # bridge, which is how #[tauri::command] host cost and the boot path went entirely
+      # unmeasured through v0.1.5 — a command could get 100x slower with the whole board
+      # green. These benches run the REAL invoke handler (tauri's mock runtime) and the REAL
+      # builder chain from lib.rs, and the gate compares each against a committed budget.
+      #
+      # Budgets are RATIOS to the cheapest command, not nanoseconds: measured over six runs
+      # (idle and 8-core-loaded), that cuts run-to-run variance from 27-40% to 10-14% and
+      # makes a budget on a shared runner meaningful at all. Details, including the synthetic
+      # calibration that was tried first and proved worse than no normalization, are in
+      # tools/native-perf-budget.json.
+      #
+      # `--warm-up-time 1 --measurement-time 3` keeps the whole bench near a minute; criterion
+      # still takes 100 samples per subject, which is what the ratios are computed from.
+      - name: Host benches (criterion — real invoke path, real boot chain)
+        run: cargo bench --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --bench host -- --warm-up-time 1 --measurement-time 3
+
+      - name: Native perf budgets (ratios vs tools/native-perf-budget.json)
+        run: node tools/check-native-perf.mjs
+
       - name: cargo-deny (advisories, licenses, bans, sources — deny.toml)
         uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
         with:

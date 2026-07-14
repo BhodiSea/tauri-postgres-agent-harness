@@ -313,5 +313,14 @@
     "title": "forced-colors media query: backgrounds flatten to Canvas, borders/outlines persist in system colors — style with system color keywords, keep focus outline-based",
     "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors",
     "version": "2026"
+  },
+  {
+    "groups": [],
+    "id": "rust/criterion-bench",
+    "sha256": "4771e074f115991e0b9dd6adb1f3bda37b2fb94b78c81bb607a1f4bfda99c657",
+    "text": "Criterion.rs benchmarks are declared with a [[bench]] section in Cargo.toml carrying harness = false, which disables the standard libtest benchmark harness so criterion can install its own; without it the two conflict. Each bench target lives in benches/ and is compiled as a separate crate, so it can only call the library's public API. criterion collects many samples per benchmark and reports a mean with confidence intervals rather than a single timing, and writes its estimates to target/criterion/<group>/<bench>/new/estimates.json.",
+    "title": "Criterion.rs: [[bench]] + harness = false, benches/ as a separate crate, sampled estimates on disk",
+    "url": "https://bheisler.github.io/criterion.rs/book/getting_started.html",
+    "version": "0.8"
   }
 ]

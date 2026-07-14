@@ -27,6 +27,7 @@ import { ApiError } from '@app/schema'
 // request silently becomes a SAME-ORIGIN relative path against the dev server, and the 404s
 // read as a server fault. The same nullish-vs-empty confusion disabled audience validation
 // outright in apps/server/src/auth/verify.ts. Empty means unset.
+// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- here `??` IS the bug, not the fix: it passes '' through as the origin. The rule is right in general and wrong here.
 const API_ORIGIN: string = import.meta.env.VITE_API_ORIGIN || '{{API_ORIGIN}}'
 
 /** Resolves the bearer token, or null when the session is unauthenticated. */

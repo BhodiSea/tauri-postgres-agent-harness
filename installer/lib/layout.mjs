@@ -80,6 +80,11 @@ export const SEEDED_FILES = new Set([
   // like perf-budget.json, and seedOnInitOnly (0.1.5): update withholds it so
   // the lane arms only when a consumer adopts the budget deliberately.
   'tools/interaction-budget.json',
+  // Ratio caps for the Rust host's criterion benches + the real-binary cold-start ceiling.
+  // seedOnInitOnly (0.1.6): its subjects[] name THIS project's #[tauri::command] surface, so
+  // planting the template's three into a repo with five commands of its own would be planting
+  // a wrong file — `update` withholds it and the floor self-disables with an adoption NOTE.
+  'tools/native-perf-budget.json',
   'tools/bundle-budget.json',
   // The gzip-ratchet baseline: a project's committed measurement, regenerated
   // only by `pnpm perf:baseline` — plant-when-absent, never clobber (and it is

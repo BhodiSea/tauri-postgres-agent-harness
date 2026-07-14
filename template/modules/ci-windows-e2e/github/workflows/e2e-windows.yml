@@ -62,6 +62,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The cold-start spec cannot import the budget JSON (it runs dependency-free, with
+      # ambient WDIO types — see the module README), so it pins the number as a constant.
+      # A constant that can drift from the file it claims to enforce is a gate that quietly
+      # stops enforcing, so the two are checked into lockstep BEFORE the suite runs.
+      - name: Cold-start budget is in lockstep with tools/native-perf-budget.json
+        shell: bash
+        run: |
+          budget=$(node -p "require('./tools/native-perf-budget.json').coldStart.maxBootMs")
+          pinned=$(node -p "(/const MAX_BOOT_MS = (\d+)/.exec(require('fs').readFileSync('e2e-windows/coldstart.e2e.ts','utf8'))||[])[1] ?? ''")
+          if [ "$budget" != "$pinned" ]; then
+            echo "::error::coldstart.e2e.ts pins MAX_BOOT_MS=$pinned but tools/native-perf-budget.json#coldStart.maxBootMs is $budget — the spec would enforce a budget nobody agreed to. Update the constant."
+            exit 1
+          fi
+          echo "cold-start budget: ${budget}ms (spec and budget file agree)"
+
       - name: Build debug binary (no bundle — WebDriver drives the exe directly)
         run: pnpm --filter desktop exec tauri build --debug --no-bundle
 

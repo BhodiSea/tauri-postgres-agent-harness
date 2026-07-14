@@ -46,8 +46,9 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   (token clones across `apps/*/src` + `packages/*/src`) + `node tools/check-i18n.mjs`
   (no hardcoded user-facing string; locale-sensitive formatting only in `src/i18n/`)
   + `node tools/check-test-quality.mjs` (every test asserts something; nothing
-  focused or disabled) and exits 2 until everything passes. Fix root causes; do
-  not stop.
+  focused or disabled) + `node tools/check-native-perf.mjs --closure` (every
+  `#[tauri::command]` has a criterion bench and a budget) and exits 2 until
+  everything passes. Fix root causes; do not stop.
 - **Prove, don't claim.** Show passing gate output; never assert "it works".
 - Do NOT edit a test in the same turn as the fix it covers (reward-hacking).
 - The 22 gates, in order: `format`, `gate-integrity`, `rust-fmt`, `types`,
@@ -171,6 +172,21 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   passed, and the JWT algorithm allowlist, the error-envelope truncation bound,
   and the whole `AUTH_MODE=entra` path could each be broken without a single
   test failing.
+- **Every `#[tauri::command]` you add must be benched.** The perf lane runs
+  `vite dev` against a MOCKED IPC bridge, so it sees nothing of the real host —
+  through v0.1.5 command cost and the boot path were measured by nothing at all.
+  `tools/check-native-perf.mjs --closure` (Stop chain) therefore requires every
+  command in `src-tauri/src/lib.rs` to have a criterion bench in
+  `benches/host.rs` AND a `subjects[]` entry in `tools/native-perf-budget.json`;
+  the CI rust lane runs the bench and enforces the budget. Add the command, add
+  it to `COMMANDS`, run `cargo bench --bench host`, write the measured ratio in
+  with headroom. **Budgets are RATIOS to the cheapest command, never
+  nanoseconds** — a shared runner's raw timings vary 27–40% run-to-run, which is
+  enough to make an absolute budget either flaky or meaningless. Do not raise a
+  cap to get to green: the file is write-guard-protected because raising it
+  re-baselines the regression the bench just caught. Keep expensive work
+  (keychain reads, token refresh, network, sync file IO) OFF the synchronous
+  invoke path and out of `.setup()` — that is what this gate exists to catch.
 - **Styling is tokens-only, in BOTH themes.** The `@theme` in
   `apps/desktop/src/styles.css` (dark = base) + `:root[data-theme='light']` +
   `tools/styleguide.manifest.json` are the ENTIRE design vocabulary: default

@@ -3,5 +3,11 @@
   "ttiMs": 5000,
   "arrowLatencyMs": { "median": 100 },
   "longTasks": { "max": 6, "thresholdMs": 50 },
-  "runs": 7
+  "runs": 7,
+  "memoryComment": "The memory ceiling (e2e/memory.spec.ts): mount and unmount every screen `loops` times via the app's own in-page router, force a GC, and compare against the steady state measured after warmup. listenerGrowth counts LIVE listeners on window+document — the targets that outlive every component, where a missing removeEventListener is a true leak that nothing will ever collect. It is an integer and it is sharp: measured on this scaffold, a correct tree grows by 0 and a single un-removed listener per mount grows by 16 over 8 cycles. The allowance of 2 is for a lazily-registered singleton, not for leaking; the honest target is 0. heapGrowthKb is a deliberately COARSE backstop for retention that holds no listener at all (an ever-growing cache): the dev server itself drifts by hundreds of kB per run, so it will catch megabyte-scale retention and nothing subtler — it does not pretend otherwise. CDP's Nodes and JSEventListeners counters are deliberately NOT asserted: calibrated against a real injected leak they did not move (or moved identically on the clean app), and a check that cannot tell the defect from its absence is a fake control. The file is write-guard-protected — raising these is a reviewed human decision.",
+  "memory": {
+    "loops": 8,
+    "listenerGrowth": 2,
+    "heapGrowthKb": 4096
+  }
 }

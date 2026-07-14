@@ -15,8 +15,11 @@ import type { NotesDal } from '../types.js'
 
 const USER_ID = '11111111-1111-4111-8111-111111111111'
 
+// NotesDal.list returns a keyset PAGE ({ items, nextCursor }), not a bare array. This fake
+// still said `[]` — so the observability module has never type-checked against the DAL
+// contract it depends on, and `tsc -b` red on any install that enabled it.
 const emptyDal: NotesDal = {
-  list: () => Promise.resolve([]),
+  list: () => Promise.resolve({ items: [], nextCursor: null }),
   create: () => Promise.reject(new Error('not under test')),
   get: () => Promise.resolve(null),
   remove: () => Promise.resolve(false),

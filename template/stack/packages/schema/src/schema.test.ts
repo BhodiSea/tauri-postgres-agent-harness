@@ -19,6 +19,10 @@ import {
 } from './index.js'
 
 const migrationSql = readFileSync(new URL('../drizzle/0000_init.sql', import.meta.url), 'utf8')
+const keysetMigrationSql = readFileSync(
+  new URL('../drizzle/0002_notes_keyset_idx.sql', import.meta.url),
+  'utf8',
+)
 
 const sample: Note = {
   body: '',
@@ -144,5 +148,23 @@ describe('migration SQL self-check', () => {
     expect(migrationSql).toContain(
       'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "notes" TO "app_api"',
     )
+  })
+
+  it('indexes the keyset the list query orders by, not just the owner column', () => {
+    // 0001 indexed (owner_id) alone. That satisfied the RLS policy predicate, the
+    // pg_catalog leading-column check, and the old plan probe — and still left
+    // notesDal.list() sorting the owner's ENTIRE partition on every page, because an
+    // index on (owner_id) cannot serve `ORDER BY created_at DESC, id DESC`. The index
+    // must carry the ORDERING, not merely the filter. Column order IS the keyset:
+    // equality column first, then the ORDER BY columns in their declared direction.
+    // The live proof is tests/rls/plan-regression.test.ts, which EXPLAINs the SQL the
+    // DAL really emits and reds on any Sort node; this is the cheap unit-lane mirror.
+    // SOURCE: https://use-the-index-luke.com/no-offset [corpus: postgres/rls-initplan]
+    expect(keysetMigrationSql).toContain(
+      'CREATE INDEX "notes_owner_created_id_idx" ON "notes" ("owner_id", "created_at" DESC, "id" DESC)',
+    )
+    // The narrow index is now a strict PREFIX of the composite — keeping both would only
+    // add write amplification on every INSERT.
+    expect(keysetMigrationSql).toContain('DROP INDEX "notes_owner_id_idx"')
   })
 })

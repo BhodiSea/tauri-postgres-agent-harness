@@ -20,6 +20,7 @@ import { join, relative, sep } from 'node:path'
 import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { parseJsonc } from './lib/jsonc.mjs'
+import { blankComments, lineOf, skipBalanced } from './lib/source-text.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'contracts'
@@ -140,37 +141,6 @@ if (existsSync(SCHEMA_SRC)) {
     }
   }
 
-  // Consume a literal delimited by `close` starting just after text[open]; return the
-  // index of the char after the closing delimiter (handling `\` escapes). Shared by the
-  // string ('/"/`) and regex (/) skips so skipBalanced stays flat.
-  const skipDelimited = (text, open, close) => {
-    let i = open + 1
-    while (i < text.length && text[i] !== close) {
-      if (text[i] === '\\') i += 1
-      i += 1
-    }
-    return i + 1
-  }
-  const isStringDelim = (ch) => ch === '"' || ch === "'" || ch === '`'
-  // A `/` begins a regex literal here unless it opens a comment (comments are already
-  // blanked upstream, but the guard keeps this correct in isolation).
-  const isRegexStart = (text, i) => text[i] === '/' && text[i + 1] !== '/' && text[i + 1] !== '*'
-
-  // Consume a balanced (...) starting at text[open] (which must be '('); return the index
-  // just past the matching ')'. Nested parens count; a paren INSIDE a string/regex does
-  // not (a regex like /f(o)o/ would otherwise miscount).
-  const skipBalanced = (text, open) => {
-    let depth = 0
-    for (let i = open; i < text.length; i += 1) {
-      const ch = text[i]
-      if (isStringDelim(ch)) i = skipDelimited(text, i, ch) - 1
-      else if (isRegexStart(text, i)) i = skipDelimited(text, i, '/') - 1
-      else if (ch === '(') depth += 1
-      else if (ch === ')' && (depth -= 1) === 0) return i + 1
-    }
-    return text.length
-  }
-
   // From the end of a `z.string(...)` call, walk the fluent method chain
   // (`.name(...)` / `.name`) and report whether `.max(` appears in it. Whitespace and
   // newlines between a value and its `.method` are the chain continuing.
@@ -189,28 +159,23 @@ if (existsSync(SCHEMA_SRC)) {
     }
   }
 
-  // BLANK comments (replace with spaces) rather than removing them, so byte offsets —
-  // and therefore reported line numbers — stay identical to the source file. Blanking a
-  // commented `z.string()` also stops it matching (no phantom sites), and blanking a
-  // documentation `.max(...)` inside a comment stops it from falsely satisfying a real,
-  // uncommented site — so the strip can only make the check STRICTER, never fail open.
-  const blank = (m) => m.replace(/[^\n]/g, ' ')
-  const stripComments = (src) =>
-    src
-      .replace(/\/\*[\s\S]*?\*\//g, blank)
-      .replace(/(^|[^:])(\/\/[^\n]*)/g, (_, pre, com) => pre + blank(com))
-
+  // blankComments (tools/lib/source-text.mjs) replaces comment text with SPACES rather
+  // than removing it, so byte offsets — and therefore reported line numbers — stay
+  // identical to the source file. Blanking a commented-out `z.string()` also stops it
+  // matching (no phantom sites), and blanking a documentation `.max(...)` inside a comment
+  // stops it falsely satisfying a real, uncommented site — the strip can only make this
+  // check STRICTER, never fail open.
   const STRING_CALL = /\bz\s*\.\s*(?:coerce\s*\.\s*)?string\s*\(/g
   for (const file of walkFiles(SCHEMA_SRC, {
     filter: (p) => /\.ts$/.test(p) && !/\.(test|spec)\.ts$/.test(p),
   })) {
     const rel = `${SCHEMA_SRC}/${file}`
-    const text = stripComments(readFileSync(rel, 'utf8'))
+    const text = blankComments(readFileSync(rel, 'utf8'))
     for (const m of text.matchAll(STRING_CALL)) {
       boundedChecked += 1
       const afterCall = skipBalanced(text, text.indexOf('(', m.index))
       if (chainHasMax(text, afterCall)) continue
-      const line = text.slice(0, m.index).split('\n').length
+      const line = lineOf(text, m.index)
       if (allow.has(`${rel}:${line}`)) continue
       errs.push(
         `${rel}:${line}: unbounded z.string() — every wire string DTO must carry .max(N) (an unbounded string lets a client send an arbitrarily large payload the server buffers and stores). Add a .max(...) bound, or a reviewed {"site": "${rel}:${line}", "reason": …} entry in ${DTO_ALLOW}`,

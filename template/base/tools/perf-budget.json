@@ -7,5 +7,6 @@
       "medianBudgetMs": 500
     }
   ],
-  "exempt": []
+  "exempt": [],
+  "effectCleanupAllow": []
 }

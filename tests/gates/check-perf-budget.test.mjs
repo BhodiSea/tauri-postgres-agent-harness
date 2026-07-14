@@ -594,3 +594,149 @@ test('no NOTE on the subject-absent synthetic shape (pre-0.1.4 budgets stay byte
   assert.equal(r.code, 0, r.out)
   assert.ok(!r.out.includes('NOTE'), r.out)
 })
+
+// ---- v0.1.6 (G15): leak discipline — an effect that registers and never unregisters ----
+// The agent-time half of the memory ceiling. It runs for EVERY budget shape (a leak is a
+// perf defect whatever vintage the budget file is), so these fixtures use the cheap
+// synthetic budget and never spawn a subject.
+
+const LEAK_BUDGET = { cells: 100, runs: 3, medianBudgetMs: 100000 }
+
+/** A component whose effect registers `body` and returns `cleanup` (null = returns nothing). */
+function effectFile(body, cleanup) {
+  return `import { useEffect } from 'react'
+export function Widget() {
+  useEffect(() => {
+    const onResize = () => undefined
+    ${body}
+    ${cleanup === null ? '' : `return () => { ${cleanup} }`}
+  }, [])
+  return null
+}
+`
+}
+
+test('leak discipline: an effect that adds a listener and returns NO cleanup reds', () => {
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(dir, 'apps/desktop/src/Widget.tsx', effectFile("window.addEventListener('resize', onResize)", null))
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('apps/desktop/src/Widget.tsx:3'), r.out)
+  assert.ok(r.out.includes('never calls removeEventListener'), r.out)
+  assert.ok(r.out.includes('Leak discipline'), r.out)
+})
+
+test('leak discipline: a cleanup that cleans NOTHING still reds (returning a function is not enough)', () => {
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(
+    dir,
+    'apps/desktop/src/Widget.tsx',
+    effectFile("window.addEventListener('resize', onResize)", '/* nothing */'),
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('never calls removeEventListener'), r.out)
+})
+
+test('leak discipline: a teardown named only in a COMMENT does not satisfy the check (no fail-open)', () => {
+  // The styleguide gate shipped exactly this bug once — a token named in a comment counted.
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(
+    dir,
+    'apps/desktop/src/Widget.tsx',
+    effectFile(
+      "window.addEventListener('resize', onResize)",
+      '// TODO: call removeEventListener here one day',
+    ),
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('never calls removeEventListener'), r.out)
+})
+
+test('leak discipline: a correct cleanup passes', () => {
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(
+    dir,
+    'apps/desktop/src/Widget.tsx',
+    effectFile(
+      "window.addEventListener('resize', onResize)",
+      "window.removeEventListener('resize', onResize)",
+    ),
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 0, r.out)
+  assert.ok(!r.out.includes('Leak discipline'), r.out)
+})
+
+test('leak discipline: setInterval/rAF/Observer/subscribe each have their own paired teardown', () => {
+  /** @type {[string, string, string][]} */
+  const cases = [
+    ['const t = setInterval(onResize, 100)', 'clearInterval', 'clearInterval(t)'],
+    ['const h = requestAnimationFrame(onResize)', 'cancelAnimationFrame', 'cancelAnimationFrame(h)'],
+    ['const ob = new ResizeObserver(onResize)', '.disconnect()', 'ob.disconnect()'],
+    ['const sub = source.subscribe(onResize)', '.unsubscribe()', 'sub.unsubscribe()'],
+  ]
+  for (const [register, expected, teardown] of cases) {
+    const red = fixture({ budget: LEAK_BUDGET })
+    plantFile(red, 'apps/desktop/src/Widget.tsx', effectFile(register, null))
+    const bad = runGate(red)
+    assert.equal(bad.code, 1, `${register} must red\n${bad.out}`)
+    assert.ok(bad.out.includes(expected), `${register} must name ${expected}\n${bad.out}`)
+
+    const green = fixture({ budget: LEAK_BUDGET })
+    plantFile(green, 'apps/desktop/src/Widget.tsx', effectFile(register, teardown))
+    const good = runGate(green)
+    assert.equal(good.code, 0, `${register} + ${teardown} must pass\n${good.out}`)
+  }
+})
+
+test('leak discipline: test files are not scanned (a test may register without cleanup)', () => {
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(
+    dir,
+    'apps/desktop/src/Widget.test.tsx',
+    effectFile("window.addEventListener('resize', onResize)", null),
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 0, r.out)
+})
+
+test('leak discipline: effectCleanupAllow mutes a reviewed file, and a stale entry FAILS CLOSED', () => {
+  const file = 'apps/desktop/src/Widget.tsx'
+  const allowed = fixture({
+    budget: { ...LEAK_BUDGET, effectCleanupAllow: [{ file, reason: 'registered for the app lifetime' }] },
+  })
+  plantFile(allowed, file, effectFile("window.addEventListener('resize', onResize)", null))
+  const muted = runGate(allowed)
+  assert.equal(muted.code, 0, muted.out)
+
+  // Stale: the allowlist names a file that no longer exists.
+  const stale = fixture({
+    budget: { ...LEAK_BUDGET, effectCleanupAllow: [{ file, reason: 'gone' }] },
+  })
+  const r = runGate(stale)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('stale exemption'), r.out)
+
+  // Malformed: a reason-less entry must never open the gate.
+  const malformed = fixture({ budget: { ...LEAK_BUDGET, effectCleanupAllow: [{ file }] } })
+  plantFile(malformed, file, effectFile("window.addEventListener('resize', onResize)", null))
+  const m = runGate(malformed)
+  assert.equal(m.code, 1, m.out)
+  assert.ok(m.out.includes('effectCleanupAllow entry must be'), m.out)
+})
+
+test('leak discipline: a pre-0.1.6 baseVersion downgrades a leak to a ramp NOTE (green)', () => {
+  const dir = fixture({ budget: LEAK_BUDGET })
+  plantFile(dir, 'apps/desktop/src/Widget.tsx', effectFile("window.addEventListener('resize', onResize)", null))
+  mkdirSync(join(dir, '.harness'), { recursive: true })
+  writeFileSync(
+    join(dir, '.harness/manifest.json'),
+    JSON.stringify({ harnessVersion: '0.1.6', baseVersion: '0.1.4' }),
+  )
+  const r = runGate(dir)
+  assert.equal(r.code, 0, r.out)
+  assert.ok(r.out.includes('NOTE — (ramp)'), r.out)
+  assert.ok(r.out.includes('never calls removeEventListener'), r.out)
+})

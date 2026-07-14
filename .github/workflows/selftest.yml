@@ -354,6 +354,38 @@ jobs:
           grep -E 'long task|latency' perf-canary.log | tail -n 5 || true
           git checkout -q -- apps/desktop/src/main.tsx
           echo 'canary OK: perf lane went red under the injected busy loop'
+      # The MEMORY half of the perf lane (v0.1.6). The signal is a live count of listeners
+      # on window/document — the targets that outlive every component — sampled after a
+      # forced GC across a navigate-and-back loop through the app's own router. Calibrated:
+      # a correct tree grows by 0, one un-removed listener per mount grows by 16 over 8
+      # cycles. (CDP's own JSEventListeners/Nodes/JSHeapUsedSize counters were tried first
+      # and DID NOT MOVE on this exact injection — see e2e/memory.spec.ts. That is why they
+      # are not what this asserts, and why this canary exists: a leak check nobody has ever
+      # seen go red is indistinguishable from no leak check at all.)
+      - name: 'Memory-lane canary: an effect that registers a listener and never removes it must RED the lane'
+        if: matrix.node == 22
+        working-directory: .selftest/boot
+        env:
+          HARNESS_PERF_LANE: '1'
+        run: |
+          # A screen-level effect (HomeScreen mounts and unmounts on every cycle) that
+          # subscribes to window and returns no cleanup — the canonical React leak.
+          node -e '
+            const fs = require("node:fs");
+            const f = "apps/desktop/src/screens/HomeScreen.tsx";
+            let s = fs.readFileSync(f, "utf8");
+            s = s.replace(/(export function HomeScreen\(\)[^{]*\{\n)/,
+              "$1  useEffect(() => {\n    const onKey = () => undefined\n    window.addEventListener('keydown', onKey)\n  }, [])\n");
+            fs.writeFileSync(f, s);
+          '
+          if pnpm exec playwright test --project perf --workers 1 > memory-canary.log 2>&1; then
+            tail -n 50 memory-canary.log
+            echo '::error::MEMORY CANARY: the lane PASSED while every HomeScreen mount leaked a window listener — the memory ceiling cannot fail'
+            exit 1
+          fi
+          grep -E 'LISTENER LEAK|window:keydown' memory-canary.log | tail -n 5 || true
+          git checkout -q -- apps/desktop/src/screens/HomeScreen.tsx
+          echo 'canary OK: memory lane went red under the injected listener leak'
       - name: "Canary 8: replace a route's EmptyState with a bare-word div, or its Skeleton with a silent spinner, or a route panel wider than the 640px min window, or remove the :focus-visible outline → the e2e lane (states/reflow/a11y quality checks, all iterating ROUTES) must FAIL"
         if: matrix.node == 22
         working-directory: .selftest/boot
@@ -404,6 +436,37 @@ jobs:
             || { echo '::error::RLS suite did not fresh-apply migrations against the live database'; exit 1; }
           grep -q '\[rls\] OK' rls.log \
             || { echo '::error::RLS suite did not complete green'; exit 1; }
+      # Canary 9 (v0.1.6): the DAL plan probe. Until 0.1.6 the plan probe EXPLAINed one
+      # HAND-WRITTEN statement — `SELECT * FROM notes` — and asserted only "not a Seq Scan".
+      # It was green for five releases while the query the app ACTUALLY issues (a keyset
+      # seek with an ORDER BY) sorted the owner's entire partition on every page and demoted
+      # the row-value cursor from an Index Cond to a Filter. Deleting the composite keyset
+      # index returns the schema to exactly that state, so this proves the probe now sees
+      # what it could not see then — and, critically, that it is looking at the DAL's real
+      # SQL rather than at a statement nobody runs.
+      - name: 'Canary 9: drop the keyset index → the DAL plan probe must FAIL (a Sort over the owner partition)'
+        working-directory: .selftest/boot
+        run: |
+          rm packages/schema/drizzle/0002_notes_keyset_idx.sql
+          node -e '
+            const fs = require("node:fs");
+            const p = "packages/schema/drizzle/meta/_journal.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.entries = j.entries.filter((e) => e.tag !== "0002_notes_keyset_idx");
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          '
+          if CI=true node tests/rls/run-rls.mjs > plan-canary.log 2>&1; then
+            tail -n 60 plan-canary.log
+            echo '::error::PLAN CANARY: the RLS suite PASSED with only the (owner_id) index — the DAL plan probe cannot see a whole-partition Sort, which is the exact defect it exists to catch'
+            exit 1
+          fi
+          grep -E "forbidden plan node|Sort|notesDal.list" plan-canary.log | tail -n 6 || true
+          # The bare-policy probe MUST still be green in that log: it is the proof that the
+          # old check structurally could not see this, which is the whole point of the new one.
+          grep -q 'policy shape' plan-canary.log \
+            || { echo '::error::the policy-shape probe did not run — cannot demonstrate what the old check missed'; exit 1; }
+          git checkout -q -- packages/schema/drizzle/
+          echo 'canary OK: the DAL plan probe went red on the v0.1.5 index, while the old policy probe stayed green'
 
   # The product promise: a stock Windows runner bootstraps to a green gate.
   # Runs on EVERY PR — Windows is the ship target, not a nightly afterthought.

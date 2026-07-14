@@ -30,7 +30,11 @@ const inCI = process?.env.CI !== undefined
 // Wall-clock browser timing is the flakiest surface in the repo; it must never
 // enter the deterministic validate chain or the warm ≈5s Stop-hook path.
 const perfLane = process?.env.HARNESS_PERF_LANE === '1'
-const PERF_SPEC = /interaction-latency\.spec\.ts$/
+// Two specs share the perf lane: interaction-latency (wall-clock UX budgets) and memory
+// (the leak ceiling — mount/unmount every route N times and diff the live CDP counters
+// after a forced GC). Both are browser-driven and shared-runner-noisy, and neither may
+// ever enter the validate chain.
+const PERF_SPEC = /(?:interaction-latency|memory)\.spec\.ts$/
 
 // The CI-only INTEGRATION lane (e2e/integration.spec.ts): the one place the two halves
 // of the app meet for real. Every other spec in this file mocks the network with

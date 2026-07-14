@@ -312,7 +312,7 @@ jobs:
   # pre-0.1.5 install has no budget file yet — loud skip, never a false red.
   # ---------------------------------------------------------------------------
   perf-lane:
-    name: perf lane (interaction latency, wall-clock)
+    name: perf lane (interaction latency + memory ceiling, wall-clock)
     runs-on: ubuntu-latest
     env:
       HARNESS_PERF_LANE: '1'
@@ -340,10 +340,14 @@ jobs:
       - name: Install Playwright browser (chromium)
         run: pnpm exec playwright install chromium --with-deps
 
-      - name: Interaction-latency budgets (perf project only, single worker)
+      # Both wall-clock specs live in the `perf` project: interaction-latency (TTI, arrow-key
+      # latency, long tasks) and memory (the leak ceiling — mount/unmount every route N times
+      # and diff the live CDP listener/node/heap counters after a forced GC). Single worker:
+      # these are wall-clock samples and must never share a CPU.
+      - name: Interaction-latency + memory-ceiling budgets (perf project only, single worker)
         run: |
           if [ ! -f tools/interaction-budget.json ]; then
-            echo "::warning::tools/interaction-budget.json absent — interaction-latency lane SKIPPED (pre-0.1.5 install). Adopt it deliberately: npx tauri-postgres-agent-harness update --refresh-seeded tools/interaction-budget.json (the spec + perf project already arrived with update; see docs/harness/gates-catalog.md, CI-only lanes)."
+            echo "::warning::tools/interaction-budget.json absent — perf lane SKIPPED (pre-0.1.5 install). Adopt it deliberately: npx tauri-postgres-agent-harness update --refresh-seeded tools/interaction-budget.json (the specs + perf project already arrived with update; see docs/harness/gates-catalog.md, CI-only lanes)."
             exit 0
           fi
           pnpm exec playwright test --project perf --workers 1

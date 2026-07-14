@@ -91,6 +91,15 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   a leading-column index on the owner column (the policies filter by it on
   every statement — `schema-rls` and the runtime plan probe both enforce it),
   in the same migration. Exemptions = human-reviewed `tools/rls-exempt.json`.
+- **Every DAL method is registered in `tests/rls/dal-shapes.ts`** — and so is every
+  interesting ARGUMENT shape (a first page and a cursor page plan differently). The plan
+  probe drives the REAL DAL through a capturing pg-proxy and `EXPLAIN`s the SQL it emits at
+  scale, redding on any `Seq Scan`, `Sort` or per-row `SubPlan`; an unregistered method is
+  a query nothing measures, and the registry closure reds the turn. **The index must carry
+  the ORDERING, not just the filter**: an index on `(owner_id)` alone leaves a keyset list
+  sorting the owner's entire partition on every page — index `(owner_id, <the ORDER BY
+  columns, in their declared direction>)` so one index serves the policy, the sort and the
+  cursor range (`0002_notes_keyset_idx.sql` is the worked pattern).
 - **Desktop-bundle purity:** `apps/desktop` never imports `postgres`,
   `drizzle-orm`, `pg`, `@hono/*`, `pino`, or anything in `apps/server`. It talks
   to the API via typed contracts from `@app/schema`.
@@ -164,6 +173,15 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   typing swaps wholly to ranked results. Screens contribute contextual
   commands via the `RegisterCommands` prop (matrix is the worked pattern);
   `e2e/palette.spec.ts` locks ranking, recents, and the keyboard-only flow.
+- **Every effect that registers something tears it down.** `addEventListener` →
+  `removeEventListener`, `setInterval` → `clearInterval`, `requestAnimationFrame` →
+  `cancelAnimationFrame`, an Observer → `.disconnect()`, `.subscribe(` → `.unsubscribe()`
+  — in the cleanup the effect RETURNS (`return () => {}` does not count, and the
+  perf-budget gate's leak scan blanks comments first, so a teardown named only in a
+  comment does not either). A leaked listener costs nothing on first mount, which is why
+  nothing else can see it: the render benchmark mounts once and the e2e suite never
+  navigates back. The CI-only memory ceiling (`e2e/memory.spec.ts`) counts live
+  window/document listeners across a mount/unmount loop and reds on growth.
 - **Motion is opt-in**: animations only behind `motion-safe:`, with the global
   `prefers-reduced-motion` backstop in styles.css — e2e asserts the held
   loading skeleton runs ZERO animations under reduced motion.

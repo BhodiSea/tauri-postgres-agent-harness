@@ -56,5 +56,18 @@
       "apps/desktop/src/features/notes/",
       "apps/desktop/src/features/palette/"
     ]
+  },
+  "0.1.6": {
+    "seedOnInitOnly": [
+      "LICENSE",
+      "CITATION.cff",
+      "tools/decision-groups.json",
+      "tools/dto-bounds-allow.json",
+      "tools/duplication-allow.json",
+      "tests/rls/dal-shapes.ts",
+      "apps/desktop/src/lib/",
+      "apps/desktop/src/auth/",
+      "apps/server/src/app.cors.test.ts"
+    ]
   }
 }

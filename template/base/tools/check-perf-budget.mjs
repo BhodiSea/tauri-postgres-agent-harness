@@ -56,9 +56,11 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { walkFiles } from './lib/fs-walk.mjs'
 import { fail, failures, MAX_BUFFER, ok, rampNote, skipOrFail } from './lib/gate.mjs'
+import { blankComments, lineOf, skipBalanced } from './lib/source-text.mjs'
 
 const GATE = 'perf-budget'
 const BUDGET_PATH = 'tools/perf-budget.json'
+const DESKTOP_SRC = 'apps/desktop/src'
 const FEATURES_DIR = 'apps/desktop/src/features'
 const WORKED_SUBJECT = 'apps/desktop/src/features/matrix/perfSubject.ts'
 const DEFAULT_EXPECT = 'role="gridcell"'
@@ -73,6 +75,165 @@ try {
   budget = JSON.parse(readFileSync(BUDGET_PATH, 'utf8'))
 } catch (e) {
   fail(GATE, `${BUDGET_PATH} is not valid JSON (${e.message}) — the budget must be reviewable data`)
+}
+
+// ---- leak discipline (G15) ------------------------------------------------------
+// Runs for EVERY budget shape, before any measurement: a leak is a performance defect
+// whatever vintage the budget file is.
+//
+// Nothing in the harness observed memory before 0.1.6 — not one check, at any layer. An
+// effect that subscribes and never unsubscribes is the canonical React leak: every mount
+// adds a listener, every unmount leaves it, and the cost is invisible in a render
+// benchmark (which mounts once) and invisible in the e2e suite (which never navigates
+// back). It shows up only in a long session, as the thing users call "it gets slow after
+// a while".
+//
+// This is the AGENT-TIME half — a structural scan, deterministic, no browser. The CI half
+// (e2e/memory.spec.ts, perf lane) actually samples the heap across a navigate-and-back
+// loop and catches leaks whose shape this scan cannot see.
+//
+// The rule: an effect that REGISTERS something must TEAR IT DOWN in the cleanup it
+// returns. Pairs are matched by name, and the teardown must appear inside the returned
+// cleanup — not merely somewhere in the effect, or `return () => {}` would satisfy it.
+const LEAK_PAIRS = [
+  {
+    register: /\.addEventListener\s*\(/,
+    teardown: /\.removeEventListener\s*\(/,
+    what: 'addEventListener',
+    fix: 'removeEventListener',
+  },
+  {
+    register: /\bsetInterval\s*\(/,
+    teardown: /\bclearInterval\s*\(/,
+    what: 'setInterval',
+    fix: 'clearInterval',
+  },
+  {
+    register: /\brequestAnimationFrame\s*\(/,
+    teardown: /\bcancelAnimationFrame\s*\(/,
+    what: 'requestAnimationFrame',
+    fix: 'cancelAnimationFrame',
+  },
+  {
+    register: /\bnew\s+(?:Mutation|Resize|Intersection|Performance)Observer\b/,
+    teardown: /\.disconnect\s*\(/,
+    what: 'an Observer',
+    fix: '.disconnect()',
+  },
+  {
+    register: /\.subscribe\s*\(/,
+    teardown: /\.unsubscribe\s*\(|\.close\s*\(|\breturn\s+\w+\s*$/,
+    what: '.subscribe(',
+    fix: ".unsubscribe() (or return the subscription's own teardown)",
+  },
+]
+
+// The cleanup is whatever the effect RETURNS. Find the first top-level `return` inside the
+// effect body and take everything from there to the body's end: a returned arrow, a
+// returned function expression, or a returned identifier (a teardown handed back directly,
+// e.g. `return unsubscribe`) all fall inside that slice.
+function cleanupSliceOf(body) {
+  const at = body.search(/\breturn\b/)
+  return at === -1 ? null : body.slice(at)
+}
+
+/** The `useEffect(() => { … })` bodies in a source file, comments already blanked. */
+function effectBodies(text) {
+  const bodies = []
+  for (const m of text.matchAll(/\buse(?:Effect|LayoutEffect)\s*\(/g)) {
+    const open = text.indexOf('(', m.index)
+    const callEnd = skipBalanced(text, open)
+    const brace = text.indexOf('{', open)
+    if (brace === -1 || brace > callEnd) continue // concise-body effect: nothing to register
+    bodies.push({ body: text.slice(brace, skipBalanced(text, brace)), index: m.index })
+  }
+  return bodies
+}
+
+/** The pairs this effect body REGISTERS but never tears down in the cleanup it RETURNS. */
+function unpairedIn(body) {
+  const cleanup = cleanupSliceOf(body)
+  return LEAK_PAIRS.filter(
+    (pair) => pair.register.test(body) && !(cleanup !== null && pair.teardown.test(cleanup)),
+  )
+}
+
+function leaksInFile(path) {
+  // Comments blanked FIRST: a `removeEventListener` named only in a comment must never
+  // satisfy this check (the styleguide gate shipped exactly that fail-open once).
+  const text = blankComments(readFileSync(path, 'utf8'))
+  const errs = []
+  for (const { body, index } of effectBodies(text)) {
+    for (const pair of unpairedIn(body)) {
+      errs.push(
+        `${path}:${lineOf(text, index)}: this effect registers ${pair.what} but its cleanup never calls ${pair.fix} — every mount adds one and every unmount leaves it behind, so the listener set grows without bound for as long as the app runs. A render benchmark mounts once and an e2e spec never navigates back, so NOTHING else in the chain can see this. FIX: return a cleanup function from the effect that calls ${pair.fix}; or, if this registration genuinely outlives the component by design, add a reviewed {"file": "${path}", "reason": …} entry to ${BUDGET_PATH} effectCleanupAllow[]`,
+      )
+    }
+  }
+  return errs
+}
+
+function scanEffectLeaks(allowFiles) {
+  if (!existsSync(DESKTOP_SRC)) return []
+  const files = walkFiles(DESKTOP_SRC, {
+    excludeDirs: new Set(['node_modules']),
+    filter: (rel) => /\.tsx?$/.test(rel) && !/\.(test|spec)\.tsx?$/.test(rel),
+  })
+  const errs = []
+  for (const rel of files) {
+    const path = `${DESKTOP_SRC}/${rel}`
+    if (!allowFiles.has(path)) errs.push(...leaksInFile(path))
+  }
+  return errs
+}
+
+// Reviewed escape (the rls-exempt pattern): a malformed or stale entry FAILS, never opens.
+const leakAllow = new Set()
+if (budget.effectCleanupAllow !== undefined) {
+  if (!Array.isArray(budget.effectCleanupAllow)) {
+    fail(
+      GATE,
+      `${BUDGET_PATH} "effectCleanupAllow" must be an ARRAY of { "file": path, "reason": non-empty string } entries — got ${JSON.stringify(budget.effectCleanupAllow)}`,
+    )
+  }
+  for (const entry of budget.effectCleanupAllow) {
+    const okShape =
+      entry !== null &&
+      typeof entry === 'object' &&
+      typeof entry.file === 'string' &&
+      entry.file.trim() !== '' &&
+      typeof entry.reason === 'string' &&
+      entry.reason.trim().length > 0
+    if (!okShape) {
+      fail(
+        GATE,
+        `${BUDGET_PATH}: every effectCleanupAllow entry must be { "file": repo-relative path, "reason": non-empty string } — got ${JSON.stringify(entry)}`,
+      )
+    }
+    if (!existsSync(entry.file)) {
+      fail(
+        GATE,
+        `${BUDGET_PATH} effectCleanupAllow names "${entry.file}", which does not exist — stale exemption; remove it (a stale escape is a loaded gun aimed at the next file to take that path)`,
+      )
+    }
+    leakAllow.add(entry.file)
+  }
+}
+
+// Ramped to 0.1.6: an upgraded consumer's existing effects were never held to this bar, so
+// the first pass NOTEs rather than reds. Turn-fatal on a fresh 0.1.6 install.
+const leakErrs = scanEffectLeaks(leakAllow)
+if (
+  leakErrs.length > 0 &&
+  rampNote(GATE, '0.1.6', `${leakErrs.length} effect-cleanup finding(s)`)
+) {
+  for (const e of leakErrs) console.log(`${GATE}: NOTE — (ramp) ${e}`)
+} else {
+  failures(
+    GATE,
+    leakErrs,
+    '  Leak discipline: an effect that registers a listener/timer/observer/subscription must tear it down in the cleanup it returns (see docs/harness/gates-catalog.md "perf-budget").',
+  )
 }
 
 // ---- real-subject measurement (shared by the subjects[] and legacy-subject paths)

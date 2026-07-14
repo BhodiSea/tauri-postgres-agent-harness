@@ -91,6 +91,10 @@ export const SEEDED_FILES = new Set([
   'tools/duplication-allow.json',
   'tools/decision-groups.json',
   'tests/rls/db-context.ts',
+  // The DAL query-shape registry the plan probe drives (0.1.6): it names THIS project's
+  // DAL methods, so only the project can write it. seedOnInitOnly — `update` withholds it
+  // and the probe self-disables with an adoption NOTE rather than ambushing an upgrade.
+  'tests/rls/dal-shapes.ts',
 ])
 
 // The gate config is seeded (projects tune it) but hash-tracked so `doctor`

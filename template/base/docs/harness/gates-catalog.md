@@ -360,11 +360,26 @@ regression cannot — pin from the slower CI lane's median if a clean lane exist
 This gate is deliberately a RELATIVE canary with no browser; the ABSOLUTE UX numbers
 (TTI, input latency, long tasks) live in the CI-only interaction-latency lane below
 ("CI-only lanes") — outside the chain, so its wall-clock noise can never flake a turn.
+**Leak discipline (0.1.6).** Runs for every budget shape, before any measurement — a leak
+is a performance defect whatever vintage the budget file is. Every `useEffect` /
+`useLayoutEffect` body under `apps/desktop/src` that REGISTERS something must TEAR IT DOWN
+in the cleanup it returns: `addEventListener`→`removeEventListener`, `setInterval`→
+`clearInterval`, `requestAnimationFrame`→`cancelAnimationFrame`, a `*Observer`→`.disconnect()`,
+`.subscribe(`→`.unsubscribe()`. The teardown must appear inside the RETURNED cleanup, so
+`return () => {}` does not satisfy it, and comments are blanked before the test, so a
+teardown named only in a comment does not either (the styleguide gate shipped exactly that
+fail-open once). Nothing in the harness observed memory before 0.1.6 — this is the
+agent-time half, and the CI-only memory ceiling below is the other. `effectCleanupAllow:
+[{ file, reason }]` in `perf-budget.json` is the reviewed escape (malformed or stale entries
+FAIL, never open); ramped to `baseVersion >= 0.1.6` so an upgraded consumer's existing
+effects NOTE before they red.
+
 **Anti-vacuity:** the CLI's `expect`-marker assert makes an empty render exit 1;
 slow the cell render 10× → FAIL twice-measured; declare a subject that does not
 exist → FAIL naming it; add a features dir importing `useVirtualWindow` with no
 `perfSubject.ts` → FAIL with the create-FIX line; leave a `perfSubject.ts`
-undeclared → FAIL; malform an `exempt` entry → FAIL.
+undeclared → FAIL; malform an `exempt` entry → FAIL; register a listener in an effect
+with no cleanup (or a cleanup that cleans nothing) → FAIL naming the paired teardown.
 
 ### 20. route-manifest — `node tools/check-route-manifest.mjs`
 
@@ -498,19 +513,47 @@ Seeded positive control (a deny-all database must NOT pass), zero-row cross-user
 SELECT/UPDATE/DELETE, SQLSTATE 42501 on INSERT smuggling, pooled-connection GUC-leak
 detector (pool max=1), and the pg_catalog gate (FORCE RLS flags, per-op policies,
 leading-column owner indexes, initPlan-shaped predicates from `pg_policies`, patched
-pgvector, non-BYPASSRLS role). The plan-regression probe
-(`tests/rls/plan-regression.test.ts`) then bulk-seeds 10k rows across 1k synthetic
-owners as the migrator with FORCE lifted for one transaction (FORCE binds the owner
-too; ANALYZE needs the owner), pins stats, and asserts via plain
-`EXPLAIN (FORMAT JSON)` as `app_api`
-that each target is reached through its owner index with a once-per-statement
-InitPlan — no Seq Scan, no per-row SubPlan. Full doctrine: README "RLS testing
-doctrine".
-**Anti-vacuity:** three distinct injections — (a) drop one policy in a new migration →
+pgvector, non-BYPASSRLS role).
+
+The plan-regression probe (`tests/rls/plan-regression.test.ts`) then bulk-seeds
+`PROBE_ROWS` rows across `PROBE_OWNERS` synthetic owners as the migrator with FORCE lifted
+for one transaction (FORCE binds the owner too; ANALYZE needs the owner), pins stats, and
+runs plain `EXPLAIN (FORMAT JSON)` as `app_api` — it PLANS, it never EXECUTES. **Two
+probes:**
+
+- **Policy shape** (0.1.4): EXPLAIN a bare `SELECT * FROM <table>` and assert the policy
+  alone reaches the table by index with a once-per-statement InitPlan — no Seq Scan, no
+  per-row SubPlan.
+- **DAL shapes** (0.1.6): EXPLAIN every query the DAL **actually issues**. The probe does
+  not write SQL: it calls the real DAL through a capturing drizzle pg-proxy and EXPLAINs the
+  bytes the DAL emitted, so a registry of query text can never drift from the code. Reds on
+  any `Seq Scan`, `Sort`, `Incremental Sort` or per-row `SubPlan`. `tests/rls/dal-shapes.ts`
+  is the registry (seeded + `seedOnInitOnly` — it names YOUR DAL methods, so `update` cannot
+  write it; absent, the probe self-disables with an adoption NOTE). It is **closed**: a DAL
+  method with no shape reds, a shape naming a dead method reds, a shape whose `run()` emits
+  no SQL reds, and a stale plan-node allowance reds.
+
+  *Why it exists.* The policy-shape probe was green for five releases while `notesDal.list()`
+  — the only list query the app has — planned a top-N sort over the owner's ENTIRE partition
+  (100 010 rows read to return a 51-row page, 1 032 buffers) with the keyset cursor demoted
+  from an Index Cond to a `Filter`. Nothing was wrong with it; it was EXPLAINing a statement
+  nobody runs. Fixed by `0002_notes_keyset_idx.sql`: the index must carry the **ordering**,
+  not just the filter.
+
+  *Seed scale is part of the proof.* `PROBE_OWNERS` must be large enough that the policy qual
+  (an unknown Param, estimated at `1/n_distinct`) is selective; and **rows-per-owner must
+  exceed the page size**, or a page IS the owner's whole data, sorting is free, and "no Sort"
+  would be a false assertion. At the old 10 rows/owner the defect was invisible by
+  construction. 25k rows / 100 owners = 250 per owner, past the measured PG16 crossover.
+
+Full doctrine: README "RLS testing doctrine".
+**Anti-vacuity:** four distinct injections — (a) drop one policy in a new migration →
 catalog gate + isolation matrix FAIL; (b) break `withUser` to skip `set_config` → the
 positive control fails (nothing visible), proving the suite cannot green vacuously;
 (c) change `set_config(..., true)` to `false` in a scratch copy → the GUC-leak test
-fails.
+fails; (d) delete `0002_notes_keyset_idx.sql` (back to the v0.1.5 schema) → the DAL plan
+probe FAILs on a `Sort` while the policy-shape probe stays GREEN, which is the proof the
+old check was structurally blind to it.
 
 ### unit — `pnpm exec vitest run --coverage --silent`
 
@@ -614,6 +657,48 @@ into the scaffold and asserts the lane REDS (long-task count + arrow median), th
 that the clean scaffold stays green. This canary lives in the harness selftest, not
 `tests/canary/injections.json` — the registry is scoped to chain/Stop-hook steps by
 construction.
+
+### memory ceiling (perf lane, 0.1.6) — same project, `e2e/memory.spec.ts`
+
+Before 0.1.6 the harness observed memory **nowhere** — not one check, at any layer. An
+effect that subscribes and never unsubscribes costs nothing on first mount, so the render
+benchmark (which mounts once) sees a flat line and the e2e suite (which never navigates
+back) sees a passing app. So this lane mounts and unmounts every screen repeatedly —
+`memory.loops` cycles through the ROUTES manifest **via the app's own in-page router**, not
+`page.goto` (a document load destroys the JS context and with it every leak, so a probe
+built on `goto` reads zero on a leaking app — a guaranteed false pass) — forces a GC, and
+diffs the live counters against the steady state measured after warmup.
+
+**What it asserts, and what it deliberately does not.** The obvious instrument is CDP
+`Performance.getMetrics`. It was built first and then CALIBRATED against a deliberately
+leaked window listener — and it failed: over 8 cycles `JSEventListeners` read 189→189 clean
+and 190→190 leaking (never moved), `Nodes` grew **identically** in both, and `JSHeapUsedSize`
+grew *more on the clean app*. All three would have shipped green on a blatant leak. **A check
+that cannot tell the defect from its absence is not a weak check, it is a fake one**, so they
+are not asserted. What is asserted:
+
+- **`listenerGrowth`** — live listeners on `window` and `document`, counted by instrumenting
+  `EventTarget.prototype` before any app code runs (add → +1, remove → −1, per event type).
+  Those two targets outlive every component, so a listener left on them is a true leak that
+  nothing will ever collect. Listeners on ephemeral targets (an `AbortSignal`, a detached
+  node) are deliberately NOT counted — the GC reclaims those without an explicit
+  `removeEventListener`, and counting raw add/remove *calls* reports them as leaks forever
+  (measured: +1/cycle of pure false positive on the clean app). The signal is sharp: clean
+  8 → 8 (**+0**), one un-removed listener per mount 14 → 30 (**+16**). The failure names the
+  leaking event type.
+- **`heapGrowthKb`** — a deliberately COARSE backstop for retention that holds no listener at
+  all (an ever-growing cache). `vite dev` itself drifts hundreds of kB per run, so it catches
+  megabyte-scale retention and nothing subtler. It does not pretend otherwise.
+
+Its agent-time counterpart is the **leak-discipline** scan in `perf-budget` (gate 19), which
+catches the shapes that are visible statically; this lane catches the ones that are not.
+**Honest gap:** detached-DOM accounting (a real heap-snapshot walk) is not implemented — a
+subtree retained with no listener and under the heap budget is still invisible.
+**Anti-vacuity:** the spec fails if the census records zero listeners after warmup (the
+instrumentation did not take); the harness selftest injects a listener-registering effect
+with no cleanup into `HomeScreen` and asserts the lane REDS, then that the clean scaffold
+stays green. A missing `memory` block self-disables with an adoption NOTE (the budget file is
+seeded); a malformed one FAILS.
 
 ### integration (desktop ↔ server) — `HARNESS_INTEGRATION_LANE=1 pnpm exec playwright test --project integration`
 

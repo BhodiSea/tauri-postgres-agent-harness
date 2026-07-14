@@ -59,6 +59,23 @@ function snapshotTabStop(): TabStop | null {
   const text = el.textContent.trim()
   const label = el.getAttribute('aria-label') ?? el.getAttribute('aria-labelledby') ?? ''
   const title = el.getAttribute('title') ?? ''
+  // A `<label for="…">` is the FIRST and most standard way to name a form control, and it is
+  // the one this check used to miss entirely. An <input> is a void element, so its textContent
+  // is ALWAYS '' — the old computation (text || aria-label || title) could therefore never see
+  // a correctly labelled input, and reddened on the harness's own Field primitive, which wires
+  // exactly this relationship. The bug pushed toward the WRONG fix, too: the only way to
+  // satisfy it was to bolt a redundant aria-label onto a control that already had a visible,
+  // clickable label — which is a real a11y regression (aria-label OVERRIDES the visible text,
+  // so what a screen reader announces silently drifts from what a sighted user reads).
+  // HTMLInputElement/Select/TextArea/Button expose `.labels`; anything else has no such list.
+  const labels = (el as Partial<HTMLInputElement>).labels
+  const labelText =
+    labels === undefined || labels === null
+      ? ''
+      : Array.from(labels)
+          .map((each) => each.textContent.trim())
+          .join(' ')
+          .trim()
   let landmark = 'outside'
   for (const [selector, role] of [
     ['header', 'banner'],
@@ -74,7 +91,7 @@ function snapshotTabStop(): TabStop | null {
   return {
     landmark,
     visible: rect.width > 0 && rect.height > 0,
-    labeled: text.length > 0 || label.length > 0 || title.length > 0,
+    labeled: text.length > 0 || label.length > 0 || title.length > 0 || labelText.length > 0,
     descriptor: `${el.tagName.toLowerCase()}${el.id === '' ? '' : `#${el.id}`}`,
     revisit,
   }

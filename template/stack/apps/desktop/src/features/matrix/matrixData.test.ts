@@ -1,6 +1,7 @@
 import type { Note } from '@app/schema'
 import { describe, expect, it } from 'vitest'
-import { formatCell, MATRIX_COLUMNS, makeSyntheticRows, notesToMatrixRows } from './matrixData'
+import { formatCellValue } from '../../i18n'
+import { MATRIX_COLUMNS, makeSyntheticRows, notesToMatrixRows } from './matrixData'
 
 const NOTE: Note = {
   id: 'n1',
@@ -36,8 +37,11 @@ describe('matrixData', () => {
     expect(row?.values[3]).toBe(3) // word count of "a b c"
   })
 
-  it('formatCell keeps fractions to 2dp and integers plain', () => {
-    expect(formatCell(0.5)).toBe('0.50')
-    expect(formatCell(42)).toBe('42')
+  // formatCell() is gone: it did `v.toFixed(2)`, which HARDCODES '.' as the decimal mark, so a
+  // German reader saw "0.75" where they write "0,75". The rule survives in formatCellValue —
+  // the values below are its `en` rendering, and under `de` the same call yields "0,50".
+  it('formatCellValue keeps fractions to 2dp and integers plain', () => {
+    expect(formatCellValue(0.5)).toBe('0.50')
+    expect(formatCellValue(42)).toBe('42')
   })
 })

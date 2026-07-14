@@ -3,7 +3,8 @@ import { Button } from '../../components/Button'
 import { EmptyState } from '../../components/EmptyState'
 import { Skeleton } from '../../components/Skeleton'
 import { useToast } from '../../components/Toast'
-import { apiFetch, UnauthenticatedError } from '../../lib/api-client'
+import { formatDate, formatRelativeTime, useI18n } from '../../i18n'
+import { apiFetch } from '../../lib/api-client'
 import { cn } from '../../lib/utils'
 import { ROUTES } from '../../routes'
 import { NoteComposer } from './NoteComposer'
@@ -25,18 +26,19 @@ import { type ListFetcher, type ListQueryState, useListQuery } from './useListQu
 // Zod parse at the fetch boundary — the desktop trusts contracts, not wire
 // bytes. Keyset pagination: the scaffold panel renders the FIRST page; the matrix
 // screen (features/matrix/useKeysetQuery) shows the paged variant. apiFetch carries
-// the bearer token and throws the envelope's own message, which useListQuery renders
-// as the error state.
+// the bearer token and throws the envelope's own message, which useListQuery carries
+// as `state.message` and NotesBody renders as the error state's SECONDARY technical
+// line — the PRIMARY copy is always t('notes.error.title') from the catalog.
 const fetchNotes: ListFetcher<Note> = async (signal) => {
   try {
     const response = await apiFetch('/api/notes', { signal })
     return NotesPage.parse(await response.json()).items
   } catch (cause) {
-    // A signed-out session is not a server fault — say what it is, and what to do.
-    // Everything else keeps the envelope's own message.
-    if (cause instanceof UnauthenticatedError) {
-      throw new Error('Not signed in — reconnect to load your notes.')
-    }
+    // No special-casing here any more. This used to rethrow UnauthenticatedError as a
+    // hand-written English sentence — the one error in the app that got a human explanation,
+    // and only on this screen. translateError() now maps the envelope's `code` to catalog
+    // copy for EVERY surface, so a signed-out session reads the same (translated) way in the
+    // matrix, in a toast, and here. One mapping, not one per call site.
     throw cause
   }
 }
@@ -48,6 +50,7 @@ const [HOME] = ROUTES
 // themes) — the provisional look is the dashed edge + muted ink, never an
 // opacity fade that could dip under AA mid-flight.
 function NoteRowItem({ row }: { readonly row: ComposerRow }) {
+  const { t } = useI18n()
   return (
     <li
       data-note-id={row.id}
@@ -57,7 +60,26 @@ function NoteRowItem({ row }: { readonly row: ComposerRow }) {
         row.pending && 'border-dashed text-ink-muted',
       )}
     >
-      {row.title}
+      {/* The title is its OWN element, not a bare text node in the <li>. Once the row grew a
+          timestamp, the <li>'s text content became "Note 1Created 3 minutes ago" — and every
+          exact-text assertion in the e2e suite (and any screen reader reading the row as one
+          run) saw the two glued together. */}
+      <span className="block">{row.title}</span>
+      {/* The creation time, phrased the way the locale phrases it ("3 minutes ago", "hace 3
+          minutos", "منذ ٣ دقائق") — Intl.RelativeTimeFormat, not a hand-rolled "N ago" that
+          would be English grammar wearing a translation. A pending row has no timestamp yet
+          (the server assigns it), so it shows none rather than a guess that will change. */}
+      {row.createdAt !== null && (
+        <time
+          dateTime={row.createdAt}
+          // Relative time is what a human wants to READ ("3 minutes ago"); the exact instant is
+          // what they occasionally need to KNOW. Both go through Intl, so both are the locale's.
+          title={formatDate(row.createdAt, { dateStyle: 'long', timeStyle: 'short' })}
+          className="mt-0.5 block text-xs text-ink-muted"
+        >
+          {t('notes.createdAt', { when: formatRelativeTime(row.createdAt) })}
+        </time>
+      )}
     </li>
   )
 }
@@ -72,6 +94,7 @@ function NotesBody({
   /** Optimistic rows from useCreateNote, rendered ahead of the fetched page. */
   readonly overlay: readonly ComposerRow[]
 }) {
+  const { t } = useI18n()
   if (state.status === 'loading') {
     return <Skeleton data-testid={HOME.states.loading} lines={3} className="mt-3" />
   }
@@ -85,10 +108,28 @@ function NotesBody({
         // redundant channel, never the only one.
         className="mt-3 rounded-md border border-danger bg-canvas p-3"
       >
-        <p className="text-sm">Could not load notes.</p>
-        <p className="mt-1 font-mono text-xs text-ink-muted">{state.message}</p>
+        {/* THREE registers, and the distinction is the point.
+              1. WHAT failed — catalog copy, always the same sentence for this surface.
+              2. WHY — also catalog copy, but SELECTED BY THE ENVELOPE'S `code`: "You are not
+                 signed in." reads very differently from "Something went wrong on the server.",
+                 and the client can only say either because the server's error contract carries
+                 a stable code. Until 0.1.6 this line did not exist and register 3 was the
+                 primary sentence.
+              3. The raw failure text — an envelope message, a TypeError, an offline socket.
+                 Untranslatable by nature (it is whatever the failure said), so it stays quiet
+                 and monospaced, next to the request id. It is kept, not hidden: it is what
+                 turns "it failed" into a bug someone can trace. */}
+        <p className="text-sm">{t('notes.error.title')}</p>
+        <p className="mt-1 text-sm text-ink">{state.error.message}</p>
+        {state.error.detail !== null && state.error.detail !== '' && (
+          <p className="mt-1 font-mono text-xs text-ink-muted">
+            {state.error.detail}
+            {state.error.requestId !== null &&
+              ` — ${t('error.reference', { id: state.error.requestId })}`}
+          </p>
+        )}
         <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
-          Retry
+          {t('common.retry')}
         </Button>
       </div>
     )
@@ -101,9 +142,9 @@ function NotesBody({
       <EmptyState
         data-testid={HOME.states.empty}
         className="mt-3"
-        title="No notes yet"
-        description="The first note you create will appear here."
-        cta={{ label: 'Reload', onClick: onRetry }}
+        title={t('notes.empty.title')}
+        description={t('notes.empty.description')}
+        cta={{ label: t('common.reload'), onClick: onRetry }}
       />
     )
   }
@@ -113,7 +154,10 @@ function NotesBody({
         <NoteRowItem key={row.id} row={row} />
       ))}
       {items.map((note) => (
-        <NoteRowItem key={note.id} row={{ id: note.id, title: note.title, pending: false }} />
+        <NoteRowItem
+          key={note.id}
+          row={{ id: note.id, title: note.title, pending: false, createdAt: note.createdAt }}
+        />
       ))}
     </ul>
   )
@@ -121,6 +165,7 @@ function NotesBody({
 
 export function NotesPanel() {
   const { state, reload } = useListQuery(fetchNotes)
+  const { t } = useI18n()
   const toast = useToast()
   // Write failures surface as envelope-message toasts — same seam as the
   // matrix screen's failed loadMore.
@@ -138,10 +183,10 @@ export function NotesPanel() {
     >
       <div className="flex items-center justify-between gap-4">
         <h2 id="notes-heading" className="text-base font-medium">
-          Notes
+          {t('notes.heading')}
         </h2>
         <Button variant="outline" size="sm" onClick={reload}>
-          Reload
+          {t('common.reload')}
         </Button>
       </div>
       {/* Composer above the list: the optimistic row lands at the list head,

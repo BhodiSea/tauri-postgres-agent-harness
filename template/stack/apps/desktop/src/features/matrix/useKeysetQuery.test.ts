@@ -65,7 +65,11 @@ describe('useKeysetQuery', () => {
     await waitFor(() => {
       expect(result.current.state.status).toBe('error')
     })
-    expect(result.current.state.message).toContain('500')
+    // The failure now arrives as a UserFacingError: `.message` is TRANSLATED copy chosen by
+    // the envelope's `code` (here the body has no valid envelope, so the client falls back to
+    // the status), and `.detail` keeps the raw text a support engineer needs.
+    expect(result.current.state.error?.message).toContain('500')
+    expect(result.current.state.error?.detail).toContain('500')
   })
 
   it('loadMore appends the next page and forwards the cursor', async () => {

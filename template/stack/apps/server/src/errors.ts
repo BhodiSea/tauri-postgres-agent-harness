@@ -61,6 +61,10 @@ const HTTP_EXCEPTION_CODES: Partial<Record<number, { code: ApiErrorCode; status:
   400: { code: 'bad_request', status: 400 },
   401: { code: 'unauthorized', status: 401 },
   404: { code: 'not_found', status: 404 },
+  // 409 is in ErrorStatus and the closed ApiErrorCode enum, and skew.ts RETURNS it
+  // rather than throwing — so this entry was missing and a `throw new HTTPException(409)`
+  // collapsed to 500/internal. The map must cover every status the enum declares.
+  409: { code: 'version_skew', status: 409 },
   413: { code: 'payload_too_large', status: 413 },
 }
 

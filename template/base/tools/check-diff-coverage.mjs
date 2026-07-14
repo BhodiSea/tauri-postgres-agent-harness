@@ -20,11 +20,11 @@
 // (the unit step writes it immediately before this gate; absence means the
 // chain was reordered or the artifact deleted — never pass).
 // SOURCE: docs/harness/README.md (coverage floors; tamper evidence) [corpus: harness/doctrine]
-import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { toPosix } from './lib/fs-walk.mjs'
 import { fail, failures, ok, skipOrFail } from './lib/gate.mjs'
+import { changedFiles, firstLine } from './lib/git-diff.mjs'
 
 const GATE = 'diff-coverage'
 const CONFIG = 'vitest.config.ts'
@@ -157,43 +157,6 @@ export function evaluateDiffCoverage({
 
 // ---- CLI wrapper (git plumbing) — only when executed directly ------------------
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const git = (args) =>
-    execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-  const firstLine = (e) => (e.stderr?.toString() ?? e.message).trim().split('\n')[0]
-
-  const collectChangedFiles = () => {
-    if (process.env.CI === 'true' && process.env.GITHUB_BASE_REF) {
-      const baseRef = `origin/${process.env.GITHUB_BASE_REF}`
-      let mergeBase
-      try {
-        mergeBase = git(['merge-base', baseRef, 'HEAD']).trim()
-      } catch (e) {
-        fail(
-          GATE,
-          `git merge-base ${baseRef} HEAD failed (${firstLine(e)}) — the PR diff cannot be computed. In CI this usually means a shallow checkout: set fetch-depth: 0.`,
-        )
-      }
-      return git(['diff', '--name-only', '--diff-filter=d', mergeBase, 'HEAD'])
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-    }
-    // Local/agent-time: everything a commit-and-push would carry that HEAD does
-    // not — worktree edits, staged-only edits, and untracked files. Deletions
-    // are filtered (a removed file has no coverage to demand).
-    const out = new Set()
-    for (const args of [
-      ['diff', '--name-only', '--diff-filter=d', 'HEAD'],
-      ['diff', '--name-only', '--diff-filter=d', '--cached'],
-      ['ls-files', '--others', '--exclude-standard'],
-    ]) {
-      for (const line of git(args).split('\n')) {
-        if (line.trim()) out.add(line.trim())
-      }
-    }
-    return [...out]
-  }
-
   if (!existsSync(CONFIG)) {
     fail(
       GATE,
@@ -232,18 +195,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     )
   }
 
-  let changedFiles
+  let changed
   try {
-    changedFiles = collectChangedFiles()
+    changed = changedFiles()
   } catch (e) {
     skipOrFail(
       GATE,
-      `cannot enumerate changed files (${firstLine(e)}) — this gate needs a git baseline (git init + an initial commit)`,
+      `cannot enumerate changed files (${firstLine(e)}) — this gate needs a git baseline (git init + an initial commit). In CI a shallow checkout is the usual cause: set fetch-depth: 0.`,
     )
   }
 
   const { findings, checked } = evaluateDiffCoverage({
-    changedFiles,
+    changedFiles: changed,
     coverageJson,
     floors,
     excludes,

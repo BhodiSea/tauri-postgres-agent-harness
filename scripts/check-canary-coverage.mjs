@@ -56,6 +56,52 @@ for (const [name, proofs] of Object.entries(registry.steps ?? {})) {
   }
 }
 
+// 2b. CI-LANE closure. The determinism bar counts a BLOCKING CI LANE as enforcement — that
+//     is the whole reason the interaction-latency, memory, integration and mutation lanes
+//     may live outside the Stop chain. But a lane that cannot be proven to go red is
+//     decoration exactly like a gate that cannot, and until 0.1.6 nothing required a lane to
+//     have a red-proof at all: the closure above only ever saw VALIDATE ∪ STOP steps. So
+//     every JOB in the shipped quality-gate workflow must carry a proof here — including the
+//     explicit, reasoned declaration that a job runs nothing but already-proven steps.
+const QG = join(ROOT, 'template/base/github/workflows/quality-gate.yml')
+const qgText = readFileSync(QG, 'utf8')
+const jobsAt = qgText.indexOf('\njobs:')
+const jobIds =
+  jobsAt === -1
+    ? []
+    : [...qgText.slice(jobsAt).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1])
+if (jobIds.length === 0) {
+  errs.push(`${QG} exposes no parseable jobs — the CI-lane closure cannot fail open`)
+}
+const lanes = registry.lanes ?? {}
+for (const job of jobIds) {
+  const proofs = lanes[job]
+  if (!Array.isArray(proofs) || proofs.length === 0) {
+    errs.push(`quality-gate.yml job '${job}' has NO red-proof in tests/canary/injections.json#lanes — a blocking CI lane counts as enforcement, so a lane that cannot go red is decoration. Add a proof, or declare {"kind":"steps"} with a note if the job only runs steps the step registry already proves.`)
+  }
+}
+for (const id of Object.keys(lanes)) {
+  if (!jobIds.includes(id)) {
+    errs.push(`lanes registry covers '${id}' but quality-gate.yml has no such job — stale entry`)
+  }
+}
+for (const [id, proofs] of Object.entries(lanes)) {
+  for (const proof of proofs ?? []) {
+    if (proof.kind === 'steps') continue // runs only steps the step registry already proves
+    if (proof.kind === 'fixture' || proof.kind === 'runner') {
+      if (!existsSync(join(ROOT, proof.ref))) {
+        errs.push(`lane '${id}': ${proof.kind} proof ${proof.ref} does not exist`)
+      }
+    } else if (proof.kind === 'selftest') {
+      if (!selftest.includes(proof.ref)) {
+        errs.push(`lane '${id}': selftest proof step "${proof.ref}" not found in .github/workflows/selftest.yml`)
+      }
+    } else {
+      errs.push(`lane '${id}': unknown proof kind ${JSON.stringify(proof.kind)}`)
+    }
+  }
+}
+
 // 3. Hook-rule closure: every guard rule id has a behavioral canary. The rule
 //    tables are pure data (no side effects) — import them directly and assert
 //    each id appears as a quoted string literal in the hook-contract test (where

@@ -25,10 +25,15 @@ const SHIPPED_ALLOWLIST = readFileSync(
 // The scaffold's feature directories: notes + matrix are route-referenced, the rest allowlisted.
 const SCAFFOLD_FEATURES = ['connection', 'matrix', 'notes', 'palette', 'shortcuts']
 
-function fixture({ routes = SHIPPED_ROUTES, allowlist = SHIPPED_ALLOWLIST, features = SCAFFOLD_FEATURES } = {}) {
+function fixture({ routes = SHIPPED_ROUTES, allowlist = SHIPPED_ALLOWLIST, features = SCAFFOLD_FEATURES, catalog = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-routegate-'))
   mkdirSync(join(dir, 'apps/desktop/src/features'), { recursive: true })
   mkdirSync(join(dir, 'tools'), { recursive: true })
+  // The locale seam, when this project has it: the gate checks a route's labelKey RESOLVES.
+  if (catalog !== null) {
+    mkdirSync(join(dir, 'apps/desktop/src/i18n'), { recursive: true })
+    writeFileSync(join(dir, 'apps/desktop/src/i18n/catalog.ts'), catalog)
+  }
   if (routes !== null) writeFileSync(join(dir, 'apps/desktop/src/routes.ts'), routes)
   if (allowlist !== null) writeFileSync(join(dir, 'tools/route-allowlist.json'), allowlist)
   for (const name of features) {
@@ -101,7 +106,7 @@ test('RED: a ROUTES entry missing `states` (or one state key) fails naming the e
   assert.ok(noError.out.includes('states.error missing or empty'), noError.out)
 })
 
-test('RED: entries missing id/label/path/features are each named', () => {
+test('RED: entries missing id/labelKey/path/features are each named', () => {
   const r = runGate(
     fixture({
       routes:
@@ -117,7 +122,7 @@ test('RED: entries missing id/label/path/features are each named', () => {
   )
   assert.equal(r.code, 1, r.out)
   assert.ok(r.out.includes('missing `id`'), r.out)
-  assert.ok(r.out.includes('missing `label`'), r.out)
+  assert.ok(r.out.includes('missing `labelKey`'), r.out)
   assert.ok(r.out.includes('missing `path`'), r.out)
   assert.ok(r.out.includes('missing `features`'), r.out)
 })
@@ -191,4 +196,54 @@ test('RED: a state test id duplicated within one entry reds (within-entry distin
   assert.equal(r.code, 1, r.out)
   assert.ok(r.out.includes('home: states.empty test id "home-loading"'), r.out)
   assert.ok(r.out.includes('same entry'), r.out)
+})
+
+// ---- v0.1.6 (G22): a route's NAME is copy, so the manifest carries a message key ----
+
+test('RED: a labelKey that is not in the catalog reds — the nav would render the key itself', () => {
+  const r = runGate(
+    fixture({
+      routes:
+        "export const ROUTES = [\n  {\n    id: 'home',\n    labelKey: 'route.hoem',\n    path: '/',\n    features: ['notes'],\n    states: { loading: 'x', empty: 'y', error: 'z' },\n  },\n] as const\n",
+      features: SCAFFOLD_FEATURES,
+      allowlist: JSON.stringify({
+        comment: 'x',
+        allow: ['connection', 'palette', 'shortcuts', 'matrix'].map((name) => ({ name, reason: 'widget' })),
+      }),
+      catalog: "export const en = {\n  'route.home': 'Home',\n} as const\n",
+    }),
+  )
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("labelKey 'route.hoem' is not a key"), r.out)
+})
+
+test('GREEN: a labelKey that resolves in the catalog passes', () => {
+  const r = runGate(
+    fixture({
+      routes:
+        "export const ROUTES = [\n  {\n    id: 'home',\n    labelKey: 'route.home',\n    path: '/',\n    features: ['notes'],\n    states: { loading: 'x', empty: 'y', error: 'z' },\n  },\n] as const\n",
+      features: SCAFFOLD_FEATURES,
+      allowlist: JSON.stringify({
+        comment: 'x',
+        allow: ['connection', 'palette', 'shortcuts', 'matrix'].map((name) => ({ name, reason: 'widget' })),
+      }),
+      catalog: "export const en = {\n  'route.home': 'Home',\n} as const\n",
+    }),
+  )
+  assert.equal(r.code, 0, r.out)
+})
+
+test('GREEN: a project WITHOUT the locale seam keeps the older `label:` form (not forced onto i18n)', () => {
+  const r = runGate(
+    fixture({
+      routes:
+        "export const ROUTES = [\n  {\n    id: 'home',\n    label: 'Home',\n    path: '/',\n    features: ['notes'],\n    states: { loading: 'x', empty: 'y', error: 'z' },\n  },\n] as const\n",
+      features: SCAFFOLD_FEATURES,
+      allowlist: JSON.stringify({
+        comment: 'x',
+        allow: ['connection', 'palette', 'shortcuts', 'matrix'].map((name) => ({ name, reason: 'widget' })),
+      }),
+    }),
+  )
+  assert.equal(r.code, 0, r.out)
 })

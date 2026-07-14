@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
+import { useI18n } from '../i18n'
 import { cn } from '../lib/utils'
 import { Button } from './Button'
 
@@ -54,6 +55,10 @@ export function useToast(): ToastApi {
 // second status role is a strict-mode collision. A bare polite live region is an
 // equally-announced status surface. Motion: none — no non-motion-safe animation.
 export function ToastProvider({ children }: { readonly children: ReactNode }) {
+  // The toast MESSAGE is caller-supplied and already translated at its call site
+  // (it is arbitrary runtime copy, so it cannot be a catalog key here); the
+  // dismiss control's accessible name is ours, and comes from the catalog.
+  const { t } = useI18n()
   const [toasts, setToasts] = useState<readonly ToastItem[]>([])
   const nextId = useRef(0)
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
@@ -110,7 +115,7 @@ export function ToastProvider({ children }: { readonly children: ReactNode }) {
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Dismiss notification"
+              aria-label={t('common.dismiss')}
               onClick={() => {
                 dismiss(toast.id)
               }}

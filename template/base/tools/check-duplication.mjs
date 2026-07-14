@@ -133,6 +133,34 @@ const hashWindow = (tokens, start) => {
   return createHash('sha1').update(s).digest('hex')
 }
 
+// A clone must be duplicated CODE, not a repeating DATA LITERAL — and the difference is not
+// cosmetic, it is the difference between a true finding and a gate nobody can keep green.
+//
+// The tokenizer normalizes every string to `S` and every number to `N` (deliberately: a paste
+// that swapped only a constant must still match). But that means a pure data table —
+// `'nav.primary': 'Primary',` ninety-one times in a message catalog, a colour map, a lookup
+// object — tokenizes to `S : S ,` repeating forever. EVERY window matches every other window,
+// and the detector reports the table as duplicating itself. It did exactly that to the i18n
+// catalog the moment it existed.
+//
+// Structure, not size, is what separates the two: real code names things. It has identifiers,
+// keywords, operators. A data table has literals and punctuation and almost nothing else. So a
+// run only counts as a clone if it contains enough DISTINCT non-literal tokens to be code.
+// Eight is comfortably below any function worth extracting (`const`, a name, `=`, `(`, `)`,
+// `{`, `return`, `}` is already eight) and far above any key/value table, which has two or
+// three (`S`, `N`, `:`, `,`, and the braces).
+const CODE_TOKEN_MIN = 8
+const LITERAL = new Set(['S', 'N', ':', ',', '{', '}', '[', ']', '(', ')', ';'])
+
+function looksLikeData(tokens, start, len) {
+  const distinct = new Set()
+  for (let k = 0; k < len; k += 1) {
+    const value = tokens[start + k].value
+    if (!LITERAL.has(value)) distinct.add(value)
+  }
+  return distinct.size < CODE_TOKEN_MIN
+}
+
 // windowHash -> first place it was seen. A later window matching it is a clone tail; we
 // extend token-by-token to the maximal matching run and record the region once.
 const firstSeen = new Map()
@@ -173,7 +201,8 @@ for (const file of files) {
         )
         .digest('hex')
         .slice(0, 12)
-      if (Math.max(aEnd - aStart, bEnd - bStart) + 1 >= MIN_LINES && !allow.has(fp)) {
+      const bigEnough = Math.max(aEnd - aStart, bEnd - bStart) + 1 >= MIN_LINES
+      if (bigEnough && !looksLikeData(tokens, i, len) && !allow.has(fp)) {
         clones.push({
           fp,
           tokens: len,

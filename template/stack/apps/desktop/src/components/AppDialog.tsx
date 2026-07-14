@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react'
+import { useI18n } from '../i18n'
 import { Button } from './Button'
 
 interface AppDialogProps {
@@ -15,6 +16,7 @@ interface AppDialogProps {
 // content without pretending to trap focus.
 // SOURCE: WAI-ARIA APG dialog (modal) pattern — native dialog element [corpus: wcag/character-key-shortcuts]
 export function AppDialog({ title, open, onClose, children }: AppDialogProps) {
+  const { t } = useI18n()
   const ref = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export function AppDialog({ title, open, onClose, children }: AppDialogProps) {
       <div className="flex items-center justify-between border-b border-edge px-4 py-3">
         <h2 className="text-sm font-semibold">{title}</h2>
         <Button variant="outline" size="sm" onClick={onClose}>
-          Esc
+          {t('common.close')}
         </Button>
       </div>
       <div className="p-4">{children}</div>

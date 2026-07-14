@@ -122,3 +122,34 @@ test('duplication: a 0.1.6 baseVersion makes the same clone turn-fatal', () => {
   )
   assert.equal(r.code, 1, r.out)
 })
+
+// ---- v0.1.6: a repeating DATA LITERAL is not a code clone ----
+// The tokenizer normalizes strings to `S` (deliberately — a paste that swapped a constant must
+// still match), which means a key/value table tokenizes to `S : S ,` forever and every window
+// matches every other. The detector reported the i18n message catalog as duplicating itself the
+// moment the catalog existed. Structure, not size, separates the two: code names things.
+
+const CATALOG = (n) =>
+  `export const en = {\n${Array.from({ length: n }, (_, i) => `  'some.key.${String(i)}': 'Some user-facing copy number ${String(i)}',`).join('\n')}\n} as const\n`
+
+test('duplication: a long key/value data table is NOT a clone of itself', () => {
+  const r = runReal({ 'apps/desktop/src/catalog.ts': CATALOG(120) })
+  assert.equal(r.code, 0, r.out)
+})
+
+test('duplication: two data tables in DIFFERENT files are not clones of each other either', () => {
+  const r = runReal({
+    'apps/desktop/src/a.ts': CATALOG(80),
+    'apps/desktop/src/b.ts': CATALOG(80),
+  })
+  assert.equal(r.code, 0, r.out)
+})
+
+test('duplication: real pasted CODE still reds — the data filter did not blunt the detector', () => {
+  const r = runReal({
+    'apps/desktop/src/a.ts': BLOCK('summariseAlpha'),
+    'apps/desktop/src/b.ts': BLOCK('summariseBeta'),
+  })
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('clone'), r.out)
+})

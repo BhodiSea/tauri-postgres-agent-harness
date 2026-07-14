@@ -19,10 +19,19 @@ const SECRET_KEY_PATTERN =
 
 // Shape-based scrubbers for free text (messages, stacks, string values).
 const TEXT_REDACTIONS: readonly (readonly [RegExp, string])[] = [
-  // Credentialed connection strings: keep the scheme, drop the userinfo.
-  [/\b(postgres(?:ql)?|mysql|redis|amqp):\/\/[^@\s'"]+@/gi, '$1://[redacted]@'],
-  // Authorization header material and JWT-shaped blobs.
-  [/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted]'],
+  // Credentialed connection strings: keep the scheme, drop the userinfo. The scheme is
+  // matched GENERICALLY, not from an allow-list — an allow-list of (postgres|mysql|redis|amqp)
+  // silently leaked every scheme it forgot: `mongodb://admin:hunter2@localhost` and
+  // `https://svc:hunter2@internal-api/health` passed through with the password INTACT, and
+  // `amqps://` did not match `amqp` either. In a redaction boundary the default must be
+  // "scrub", never "scrub the ones I listed". The userinfo class excludes `/` so a path
+  // containing an @ (`http://host/a@b`) is not mistaken for credentials.
+  [/\b([a-z][a-z0-9+.-]*):\/\/[^@/\s'"]+@/gi, '$1://[redacted]@'],
+  // Authorization header material and JWT-shaped blobs. CASE-INSENSITIVE: `authorization:
+  // bearer abc123opaque` is the shape a lowercase-header logger actually emits, and without
+  // /i an opaque (non-JWT) lowercase token leaked in full — the /eyJ/ rule below only saves
+  // the JWT-shaped ones.
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]'],
   [/\beyJ[\w-]+\.[\w-]+\.[\w-]+\b/g, '[redacted-jwt]'],
   // E-mail addresses (usernames are PII in an on-prem deployment).
   [/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[redacted-email]'],

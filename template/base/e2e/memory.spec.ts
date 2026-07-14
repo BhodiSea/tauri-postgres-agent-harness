@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { type CDPSession, expect, type Page, test } from '@playwright/test'
+import { en } from '../apps/desktop/src/i18n/catalog'
 import { ROUTES } from '../apps/desktop/src/routes'
 import { installMockIpc, makeNoteRows, stubDataRequests, stubHealthz } from './mock-ipc'
 
@@ -205,15 +206,15 @@ async function sampleAfterGc(page: Page, cdp: CDPSession): Promise<Sample> {
 // clicks (the shell's pushState router intercepts them). The document persists across the whole
 // loop; only the screens mount and unmount. That is exactly the lifecycle a leak lives in.
 async function navigateCycle(page: Page): Promise<void> {
-  const nav = page.getByRole('navigation', { name: 'Primary' })
+  const nav = page.getByRole('navigation', { name: en['nav.primary'] })
   for (const route of ROUTES) {
-    await nav.getByRole('link', { name: route.label, exact: true }).click()
+    await nav.getByRole('link', { name: en[route.labelKey], exact: true }).click()
     // Wait for the screen to actually mount. A cycle that moves on before the component's
     // effects have run would never register the listeners we are hunting, and the whole probe
     // would be a vacuous pass.
     await expect(page.locator('main')).not.toBeEmpty()
   }
-  await nav.getByRole('link', { name: ROUTES[0].label, exact: true }).click()
+  await nav.getByRole('link', { name: en[ROUTES[0].labelKey], exact: true }).click()
   await expect(page.locator('main')).not.toBeEmpty()
 }
 

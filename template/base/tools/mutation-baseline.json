@@ -1,0 +1,68 @@
+{
+  "//": "Surviving mutants this project has ACCEPTED. Every entry needs a reason — a survivor is a place your tests would not notice the code breaking, so accepting one is a deliberate, reviewed act (the gate FAILS on an empty reason). Regenerate with `node tools/check-mutation-ratchet.mjs --write` (or `pnpm mutation:baseline`); identity is position-independent, so line shifts never invalidate an entry, but changing the guarded code does — which is exactly when a human should look again. This file is write-guard-protected and hashed by gate-integrity. EVERY entry below is a mutant no test CAN kill, and each reason says why: they are redundant guards that TypeScript needs, or Node APIs that treat an empty string exactly like the value it replaced. If you are adding an entry because a test is merely hard to write, you are using this file wrong.",
+  "survivors": [
+    {
+      "id": "4ed85cad43ce",
+      "file": "apps/server/src/app.ts",
+      "mutator": "ConditionalExpression",
+      "original": "token === ''",
+      "replacement": "false",
+      "snippet": "if (token === undefined || token === '') {",
+      "reason": "UNREACHABLE over HTTP. The Fetch spec normalizes header values by stripping leading/trailing whitespace, so `Authorization: \"Bearer \"` ARRIVES as \"Bearer\" — which fails `startsWith('Bearer ')`, so the token is `undefined`, never the empty string. Verified: new Request(url, {headers: {authorization: 'Bearer '}}).headers.get('authorization') === 'Bearer'. No HTTP request can produce token === '', so no test can distinguish this branch. The guard stays as defence-in-depth for a non-HTTP caller (this is an auth path; simplifying it until a mutation tool is happy would be the wrong trade)."
+    },
+    {
+      "id": "ff64033d34e2",
+      "file": "apps/server/src/app.ts",
+      "mutator": "StringLiteral",
+      "original": "''",
+      "replacement": "\"Stryker was here!\"",
+      "snippet": "if (token === undefined || token === '') {",
+      "reason": "Same unreachable guard as 4ed85cad43ce: the compared-against literal in a branch no HTTP request can reach, because Fetch strips the trailing whitespace that would be needed to produce an empty token."
+    },
+    {
+      "id": "4379e6eb24a7",
+      "file": "apps/server/src/auth/verify.ts",
+      "mutator": "StringLiteral",
+      "original": "'utf8'",
+      "replacement": "\"\"",
+      "snippet": "raw = readFileSync(jwksPath, 'utf8')",
+      "reason": "Node treats an EMPTY encoding as utf8. `assertEncoding` short-circuits on a falsy value (`if (encoding && !Buffer.isEncoding(encoding)) throw`), so readFileSync does not throw — it returns a Buffer, and `JSON.parse(buffer)` coerces it via toString(), which defaults to utf8. Byte-identical output for every input; nothing observable can distinguish the two."
+    },
+    {
+      "id": "cea87b9c357c",
+      "file": "apps/server/src/dal/cursor.ts",
+      "mutator": "StringLiteral",
+      "original": "'utf8'",
+      "replacement": "\"\"",
+      "snippet": "return Buffer.from(JSON.stringify(key), 'utf8').toString('base64url')",
+      "reason": "Same Node behaviour as 4379e6eb24a7, on the encode side: `Buffer.from(string, encoding)` routes through fromString(), which does `if (typeof encoding !== 'string' || encoding.length === 0) { ops = encodingOps.utf8 }` — an empty encoding IS the utf8 path. Confirmed byte-identical on a multi-byte payload."
+    },
+    {
+      "id": "eb5966489999",
+      "file": "apps/server/src/dal/cursor.ts",
+      "mutator": "Regex",
+      "original": "/^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}(?::?\\d{2})?)?$/",
+      "replacement": "/\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}(?::?\\d{2})?)?$/",
+      "snippet": "const TIMESTAMP_RE = /^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}(?::?\\d{2})?)?$/",
+      "reason": "Dropping the LEADING ^ anchor is redundant with isRealTimestamp's second half. That function reconstructs the canonical instant POSITIONALLY (value.slice(0, 10) + 'T' + value.slice(11, 19)), so any prefix shifts every field and the round-trip comparison fails regardless of what the regex matched. The anchor stays because it is the primary, legible guard — relying on the slice arithmetic to reject leading junk would be subtle and fragile. Note the TRAILING $ anchor is NOT equivalent and is pinned by a test: without it `2024-01-01 12:00:00 (x)` reached the driver as a ::timestamptz cast error."
+    },
+    {
+      "id": "3008de8b0162",
+      "file": "apps/server/src/dal/notes.ts",
+      "mutator": "ConditionalExpression",
+      "original": "last !== undefined",
+      "replacement": "true",
+      "snippet": "rows.length > limit && last !== undefined",
+      "reason": "Unreachable by construction, and TypeScript needs it anyway. `limit` is clamped to >= 1 (Math.max(..., 1)), so whenever `rows.length > limit` is true, `items = rows.slice(0, limit)` holds at least one element and `items.at(-1)` is always defined — the right operand is IMPLIED by the left and can never change the result. It stays because it is what narrows `Note | undefined` to `Note` for the encodeNotesCursor call below."
+    },
+    {
+      "id": "b23a3e992ec1",
+      "file": "apps/server/src/middleware/skew.ts",
+      "mutator": "ConditionalExpression",
+      "original": "typeof handler === 'function'",
+      "replacement": "true",
+      "snippet": "return typeof handler === 'function' && guards.has(handler)",
+      "reason": "WeakSet.prototype.has RETURNS FALSE for a non-weakly-holdable value — it does not throw — and the `guards` set only ever receives functions, so the typeof check cannot change the result for any input. It stays because it is the type guard that narrows `unknown` to `object` for the WeakSet.has call; removing it would be a lint/type error, not a simplification."
+    }
+  ]
+}

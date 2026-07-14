@@ -30,16 +30,43 @@ const JwksFileDto = z.object({
   keys: z.array(z.looseObject({ kty: z.string() })),
 })
 
+type AuthMode = 'stub' | 'entra'
+
+/**
+ * Env lookup that treats a SET-BUT-EMPTY variable as ABSENT.
+ *
+ * A bare `API_AUDIENCE=` line in a .env file yields `''`, and `??` is nullish-only —
+ * so a plain `env['API_AUDIENCE'] ?? STUB_AUDIENCE` would hand jose `audience: ''`.
+ * jose guards its claim check with `if (audience && ...)`, so an empty string SKIPS
+ * audience validation entirely and every token verifies whatever its `aud`. Empty is
+ * unset, everywhere, or the fallback silently becomes a bypass.
+ * SOURCE: MS Entra ID access-token validation — aud must be pinned, never optional [corpus: entra/jwt-verify]
+ */
+function envValue(env: Env, name: string): string | undefined {
+  const value = env[name]
+  // No `value === undefined ||` disjunct: when the var is unset the else-branch already
+  // yields `undefined`. Empty is the only case that needs mapping.
+  return value === '' ? undefined : value
+}
+
+/** The single place AUTH_MODE is read and validated — both entry points share it. */
+function authMode(env: Env): AuthMode {
+  const mode = envValue(env, 'AUTH_MODE') ?? 'stub'
+  if (mode !== 'stub' && mode !== 'entra') {
+    throw new Error(`unknown AUTH_MODE: ${mode} (expected "stub" or "entra")`)
+  }
+  return mode
+}
+
 /**
  * Boot-time guard, called from src/index.ts before the server binds a port.
  * The stub verifier trusts locally minted keys, so reaching it in production
  * would be an authentication bypass.
  */
 export function assertAuthBootSafety(env: Env): void {
-  const mode = env['AUTH_MODE'] ?? 'stub'
   // SOURCE: harness doctrine — a stub verifier reachable in production is an auth
   // bypass; fail the boot loudly instead of logging a warning [corpus: harness/doctrine]
-  if (env['NODE_ENV'] === 'production' && mode !== 'entra') {
+  if (env['NODE_ENV'] === 'production' && authMode(env) !== 'entra') {
     throw new Error(
       'FATAL: AUTH_MODE=stub is forbidden when NODE_ENV=production — set AUTH_MODE=entra and configure ENTRA_TENANT_ID + API_AUDIENCE',
     )
@@ -47,8 +74,8 @@ export function assertAuthBootSafety(env: Env): void {
 }
 
 function requireEnv(env: Env, name: string): string {
-  const value = env[name]
-  if (value === undefined || value === '') {
+  const value = envValue(env, name)
+  if (value === undefined) {
     throw new Error(`AUTH_MODE=entra requires ${name} to be set`)
   }
   return value
@@ -84,15 +111,12 @@ function buildVerifier(getKey: JwksKeyGetter, issuer: string, audience: string):
  * - `entra`: remote JWKS from the tenant discovery endpoint.
  */
 export function createTokenVerifier(env: Env): TokenVerifier {
-  const mode = env['AUTH_MODE'] ?? 'stub'
-  if (mode !== 'stub' && mode !== 'entra') {
-    throw new Error(`unknown AUTH_MODE: ${mode} (expected "stub" or "entra")`)
-  }
+  const mode = authMode(env)
 
   if (mode === 'entra') {
     const tenantId = requireEnv(env, 'ENTRA_TENANT_ID')
-    const audience = env['API_AUDIENCE'] ?? env['ENTRA_CLIENT_ID']
-    if (audience === undefined || audience === '') {
+    const audience = envValue(env, 'API_AUDIENCE') ?? envValue(env, 'ENTRA_CLIENT_ID')
+    if (audience === undefined) {
       throw new Error('AUTH_MODE=entra requires API_AUDIENCE (or ENTRA_CLIENT_ID) to be set')
     }
     // SOURCE: Entra v2.0 tokens — issuer is https://login.microsoftonline.com/{tenant}/v2.0
@@ -104,7 +128,7 @@ export function createTokenVerifier(env: Env): TokenVerifier {
     return buildVerifier(getKey, `https://login.microsoftonline.com/${tenantId}/v2.0`, audience)
   }
 
-  const jwksPath = env['DEV_JWKS_PATH'] ?? '.dev-auth/jwks.json'
+  const jwksPath = envValue(env, 'DEV_JWKS_PATH') ?? '.dev-auth/jwks.json'
   let localJwks: JwksKeyGetter | undefined
   const getKey: JwksKeyGetter = (protectedHeader, token) => {
     if (localJwks === undefined) {
@@ -123,5 +147,5 @@ export function createTokenVerifier(env: Env): TokenVerifier {
     }
     return localJwks(protectedHeader, token)
   }
-  return buildVerifier(getKey, STUB_ISSUER, env['API_AUDIENCE'] ?? STUB_AUDIENCE)
+  return buildVerifier(getKey, STUB_ISSUER, envValue(env, 'API_AUDIENCE') ?? STUB_AUDIENCE)
 }

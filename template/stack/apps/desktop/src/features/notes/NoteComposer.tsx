@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { Input } from '../../components/Input'
+import { useI18n } from '../../i18n'
 import { cn } from '../../lib/utils'
 import type { CreateNoteStatus, SubmitOutcome } from './useCreateNote'
 
@@ -9,8 +10,10 @@ import type { CreateNoteStatus, SubmitOutcome } from './useCreateNote'
 // useCreateNote's state (NotesPanel owns the hook so the optimistic rows land
 // in ITS list). Everything renders through primitives: Field wires the aria
 // contract, Input + Button carry the tokens. While the POST is in flight the
-// submit affordance disables, relabels to "Adding…" (visible under reduced
-// motion), and pulses only behind motion-safe:.
+// submit affordance disables, relabels to t('notes.composer.pending') — "Adding…"
+// in English, visible under reduced motion — and pulses only behind motion-safe:.
+// The relabel is the accessible name, so it must stay catalog copy: a screen
+// reader announces the pending state by reading it.
 
 interface NoteComposerProps {
   readonly status: CreateNoteStatus
@@ -21,6 +24,7 @@ interface NoteComposerProps {
 
 export function NoteComposer({ status, fieldError, onSubmit }: NoteComposerProps) {
   const [title, setTitle] = useState('')
+  const { t } = useI18n()
   const pending = status === 'pending'
 
   const submit = async (): Promise<void> => {
@@ -39,13 +43,13 @@ export function NoteComposer({ status, fieldError, onSubmit }: NoteComposerProps
         void submit()
       }}
     >
-      <Field label="Add a note" error={fieldError ?? undefined}>
+      <Field label={t('notes.composer.label')} error={fieldError ?? undefined}>
         {(control) => (
           <div className="flex items-center gap-2">
             <Input
               {...control}
               value={title}
-              placeholder="Note title"
+              placeholder={t('notes.composer.placeholder')}
               disabled={pending}
               onChange={(event) => {
                 setTitle(event.target.value)
@@ -56,7 +60,7 @@ export function NoteComposer({ status, fieldError, onSubmit }: NoteComposerProps
               disabled={pending}
               className={cn('shrink-0', pending && 'motion-safe:animate-pulse')}
             >
-              {pending ? 'Adding…' : 'Add note'}
+              {pending ? t('notes.composer.pending') : t('notes.composer.submit')}
             </Button>
           </div>
         )}

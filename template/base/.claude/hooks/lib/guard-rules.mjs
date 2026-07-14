@@ -20,7 +20,7 @@ const PROT_DIRS = String.raw`(?:\.[\\/])?(?:tools|\.claude|\.harness|\.github[\\
 // the max-strict compiler surface every other type gate rests on, and while the Edit/Write
 // path was guarded, `sed -i 's/"strict": true/"strict": false/' tsconfig.base.json` was
 // caught by NOTHING — not this guard, not gate-integrity, not `tsc -b`, not CI.
-const PROT_FILES = String.raw`(?:\.[\\/])?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|tsconfig(?:\.base)?\.json|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
+const PROT_FILES = String.raw`(?:\.[\\/])?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|stryker\.config\.mjs|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|tsconfig(?:\.base)?\.json|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
 const PROT = `(?:${PROT_DIRS}|${PROT_FILES})`
 
 const SHELL_WRITE_MSG =
@@ -220,6 +220,8 @@ export const WRITE_PROTECTED = [
   { id: 'route-allowlist', re: /^tools\/route-allowlist\.json$/ }, // exempting a features dir from ROUTES is a human decision
   { id: 'dto-bounds-allow', re: /^tools\/dto-bounds-allow\.json$/ }, // exempting a wire string from the .max() bound is a human decision
   { id: 'duplication-allow', re: /^tools\/duplication-allow\.json$/ }, // accepting a code clone is a human decision
+  { id: 'i18n-allow', re: /^tools\/i18n-allow\.json$/ }, // letting a string bypass the catalog is a human decision
+  { id: 'test-quality-allow', re: /^tools\/test-quality-allow\.json$/ }, // letting a disabled or assertion-free test stand is a human decision
   { id: 'rls-runner', re: /^tests\/rls\/run-rls\.mjs$/ }, // the RLS runner the Stop hook invokes directly
   { id: 'migration-apply-runner', re: /^tests\/migrations\/migration-apply\.mjs$/ },
   { id: 'lefthook', re: /^lefthook\.yml$/ },

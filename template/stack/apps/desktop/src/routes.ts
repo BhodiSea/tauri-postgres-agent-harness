@@ -1,13 +1,21 @@
 // The canonical route manifest. EVERY user-reachable screen registers here: a
-// stable id, a human label, how the SPA reaches it, the feature directories it
-// renders, and the data-testid each canonical data state (loading/empty/error)
-// exposes. The route-manifest gate (tools/check-route-manifest.mjs) closes the
+// stable id, the catalog KEY its label lives under, how the SPA reaches it, the
+// feature directories it renders, and the data-testid each canonical data state
+// (loading/empty/error) exposes. The route-manifest gate
+// (tools/check-route-manifest.mjs) closes the
 // loop — a directory under src/features/ that no entry references (and that is
 // not allowlisted in tools/route-allowlist.json) fails validate — and the e2e
 // suites (e2e/states.spec.ts, e2e/a11y.spec.ts's focus walk, e2e/reflow.spec.ts)
 // ITERATE this array, so a screen missing an entry is a screen that ships untested,
 // and a screen WITH an entry is automatically held to the state-quality, per-route
 // focus-visibility, and minimum-window reflow bars the day it registers.
+//
+// The label is a MESSAGE KEY, not prose: a route's name is the most visible copy in
+// the app (nav link, palette entry) and it is translatable like everything else —
+// callers render it with `t(route.labelKey)`, so adding a locale renames every route
+// with no change here.
+
+import type { MessageKey } from './i18n'
 
 interface RouteStates {
   /** data-testid visible while the screen's primary query is in flight. */
@@ -21,8 +29,9 @@ interface RouteStates {
 interface RouteEntry {
   /** Stable machine id — lowercase, used in test titles and state test ids. */
   readonly id: string
-  /** Human-readable label for palette entries and failure output. */
-  readonly label: string
+  /** Catalog key for the human label shown in nav links, palette entries and failure
+   *  output. A KEY, not prose — resolve it with `t(route.labelKey)`. */
+  readonly labelKey: MessageKey
   /** How to reach the screen in the SPA: history path relative to the app origin. */
   readonly path: string
   /** Directories under src/features/ this screen renders (closure-checked). */
@@ -35,7 +44,7 @@ interface RouteEntry {
 export const ROUTES = [
   {
     id: 'home',
-    label: 'Home',
+    labelKey: 'route.home',
     path: '/',
     features: ['notes'],
     states: {
@@ -46,7 +55,7 @@ export const ROUTES = [
   },
   {
     id: 'matrix',
-    label: 'Matrix',
+    labelKey: 'route.matrix',
     path: '/matrix',
     features: ['matrix'],
     states: {

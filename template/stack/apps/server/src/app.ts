@@ -48,6 +48,13 @@ function readPackageVersion(): string {
 // z.guid() matches the postgres uuid type (any 8-4-4-4-12 hex, no RFC variant check).
 const NoteParamsDto = z.object({ id: z.guid() })
 
+// Stryker disable all — OpenAPI route DECLARATIONS, not behaviour. Everything between
+// here and the matching `restore` is the route table handed to zod-openapi: descriptions,
+// content/schema objects, security arrays. Drift here is caught byte-for-byte by the
+// `contracts` gate (tools/check-contract-drift.mjs regenerates openapi.json and diffs it)
+// and by the spec-walk in app.errors.test.ts; a mutation test pinning a description string
+// would be test-theatre. The handlers, the middleware and every line of real LOGIC stay
+// OUTSIDE this region.
 const errorResponse = (description: string) => ({
   content: { 'application/json': { schema: ApiError } },
   description,
@@ -139,6 +146,7 @@ const deleteNoteRoute = createRoute({
     404: errorResponse('No such note visible to this user'),
   },
 })
+// Stryker restore all
 
 // The desktop is a CROSS-ORIGIN client. The webview serves the app from a Tauri scheme —
 // `tauri://localhost` on macOS/Linux, `http://tauri.localhost` on Windows — and from the
@@ -209,7 +217,12 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
     '*',
     cors({
       origin: [...corsOrigins],
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      // EVERY method the route table declares. DELETE was missing while `deleteNoteRoute`
+      // was live: Hono's cors() does not validate the REQUESTED method, it just advertises
+      // this list — so the preflight answered 204 without DELETE, the browser refused to
+      // send the real request, and deleting a note was impossible from the packaged app.
+      // The server stayed green throughout, because curl never preflights.
+      allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       // Exactly what the desktop sends: the bearer token and the skew middleware's
       // version header. Neither is CORS-safelisted, so both must be named here.
       allowHeaders: ['authorization', 'content-type', 'x-client-version'],
@@ -220,11 +233,15 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
     }),
   )
 
+  // Stryker disable all — DECLARATION: the securityScheme component the route table's
+  // `security: [{ Bearer: [] }]` refers to. It emits spec, not behaviour (the real guard is
+  // requireAuth below, which IS mutation-tested); the `contracts` gate diffs it byte-for-byte.
   app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
     type: 'http',
     scheme: 'bearer',
     bearerFormat: 'JWT',
   })
+  // Stryker restore all
 
   app.openapi(healthRoute, (c) => c.json({ ok: true as const, version }, 200))
 
@@ -311,6 +328,10 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
     }),
   )
 
+  // Stryker disable all — DECLARATION: the OpenAPI document header (title/description/
+  // openapi version). Same control as the route table above — the `contracts` gate
+  // regen-diffs openapi.json, and app.errors.test.ts walks the served document; pinning
+  // `info.title` with a mutation test would be test-theatre.
   app.doc31('/openapi.json', {
     openapi: '3.1.0',
     info: {
@@ -320,6 +341,7 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
         'Notes API — the demo vertical slice. Regenerate openapi.json via `pnpm --filter server openapi:emit`.',
     },
   })
+  // Stryker restore all
 
   return app
 }

@@ -1,5 +1,6 @@
 import { HealthResponse } from '@app/schema'
 import { useEffect, useState } from 'react'
+import { useI18n } from '../../i18n'
 import { apiFetch } from '../../lib/api-client'
 import { cn } from '../../lib/utils'
 
@@ -22,6 +23,7 @@ type ProbeState =
   | { readonly status: 'degraded' }
 
 export function ConnectionStatus() {
+  const { t } = useI18n()
   const [state, setState] = useState<ProbeState>({ status: 'connecting' })
 
   useEffect(() => {
@@ -78,12 +80,15 @@ export function ConnectionStatus() {
           state.status === 'degraded' && 'bg-danger',
         )}
       />
+      {/* The version rides in as an interpolation param rather than a JSX sibling: a
+          locale is free to move it ("v{version} — API connected"), which a hardcoded
+          `(v{state.version})` suffix would have forbidden. */}
       {state.status === 'ok' ? (
-        <span className="text-ink">API connected (v{state.version})</span>
+        <span className="text-ink">{t('connection.connected', { version: state.version })}</span>
       ) : state.status === 'connecting' ? (
-        <span className="text-ink-muted">Connecting to API…</span>
+        <span className="text-ink-muted">{t('connection.connecting')}</span>
       ) : (
-        <span className="text-ink-muted">API unreachable — retrying</span>
+        <span className="text-ink-muted">{t('connection.unreachable')}</span>
       )}
     </p>
   )

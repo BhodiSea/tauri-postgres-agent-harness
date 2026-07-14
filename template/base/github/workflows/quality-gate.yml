@@ -131,6 +131,71 @@ jobs:
       - name: Duplication (token clones across apps/*/src + packages/*/src)
         run: node tools/check-duplication.mjs
 
+      # Assertion PRESENCE (the cheap half): no `.only` (it silently disables the whole
+      # suite), no disabled tests, no test body without an assertion. The lane below is what
+      # actually proves a test would NOTICE a break.
+      - name: Test quality (assertions present, nothing focused or disabled)
+        run: node tools/check-test-quality.mjs
+
+  # ---------------------------------------------------------------------------
+  # MUTATION — the assertion-QUALITY gate, and the only check here that asks the
+  # question coverage cannot: change the code, does a test go red?
+  #
+  # Blocking, and CI-only: a run is minutes, and the Stop chain's warm-validate budget
+  # is ~6s. Scoped to the CRITICAL files THIS PR touched (tools/mutation-scope.mjs) —
+  # auth, the DAL, the error envelope, the route wiring, and the desktop's auth/transport
+  # seam — so the cost is proportional to the change and a docs-only PR pays nothing.
+  # The nightly full run over the whole critical surface lives in mutation.yml.
+  #
+  # The gate is the SET-based ratchet, never a score threshold: a NEW surviving mutant
+  # reds; an accepted one is a reviewed, reasoned entry in tools/mutation-baseline.json.
+  # ---------------------------------------------------------------------------
+  mutation:
+    name: mutation (critical files in this diff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # Full history: the scoper diffs against the PR base's merge-base. A shallow
+          # clone makes that ref unresolvable — and mutation-scope.mjs FAILS CLOSED there
+          # rather than printing an empty list, which would look exactly like "this PR
+          # touched nothing critical" and pass forever.
+          fetch-depth: 0
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Which critical files does this change touch?
+        id: scope
+        run: echo "files=$(node tools/mutation-scope.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Mutate them (StrykerJS)
+        if: steps.scope.outputs.files != ''
+        run: pnpm exec stryker run stryker.config.mjs --mutate "${{ steps.scope.outputs.files }}"
+
+      # The gate. A survivor the baseline does not accept reds the PR.
+      - name: Mutation ratchet (survivors vs the committed baseline)
+        if: steps.scope.outputs.files != ''
+        run: node tools/check-mutation-ratchet.mjs
+
+      - name: No critical files in this diff — nothing to mutate
+        if: steps.scope.outputs.files == ''
+        run: echo 'This change touches no file on the critical surface (see tools/lib/mutation-critical.mjs).'
+
   # ---------------------------------------------------------------------------
   # Runtime RLS — the headline isolation gate against REAL Postgres 16 + pgvector
   # (same digest-pinned image as docker-compose.yml). run-rls.mjs fresh-applies all

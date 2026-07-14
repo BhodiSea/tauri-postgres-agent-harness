@@ -10,6 +10,7 @@
         "tests/migrations/*.mjs",
         "eslint.config.mjs",
         "playwright.config.ts",
+        "stryker.config.mjs",
         "e2e/**/*.spec.ts"
       ],
       "project": ["tools/**/*.mjs", "tests/**/*.{mjs,ts}", "e2e/**/*.ts", "*.{mjs,ts}"],

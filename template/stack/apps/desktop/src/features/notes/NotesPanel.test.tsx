@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/Toast'
+import { en } from '../../i18n/catalog'
 import { ROUTES } from '../../routes'
 import { NotesPanel } from './NotesPanel'
 
@@ -106,7 +107,7 @@ describe('NotesPanel optimistic create', () => {
     expect(screen.getByText('First note')).toBeDefined() // the fetched page is intact
   })
 
-  it('rolls the row back on a 500 envelope and toasts the envelope message', async () => {
+  it('rolls the row back on a 500 envelope and toasts TRANSLATED copy, not the raw message', async () => {
     stubNetwork({
       list: () => Promise.resolve(jsonResponse(page([EXISTING]))),
       create: () =>
@@ -120,8 +121,11 @@ describe('NotesPanel optimistic create', () => {
     fireEvent.change(screen.getByLabelText('Add a note'), { target: { value: 'Doomed note' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }))
 
-    // The envelope's human message surfaces through the toast live region…
-    expect(await screen.findByText('note storage exploded')).toBeDefined()
+    // The toast live region carries catalog copy chosen by the envelope's `code`. The server's
+    // own English message is a log diagnostic — it used to BE the toast, and a user was left
+    // reading "note storage exploded".
+    expect(await screen.findByText(en['error.api.internal'])).toBeDefined()
+    expect(screen.queryByText('note storage exploded')).toBeNull()
     // …and the temp row is GONE (rollback), while the draft survives for retry.
     expect(screen.queryByText('Doomed note')).toBeNull()
     expect(screen.getByLabelText<HTMLInputElement>('Add a note').value).toBe('Doomed note')

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page, test } from '@playwright/test'
+import { en } from '../apps/desktop/src/i18n/catalog'
 import {
   installMockIpc,
   makeNoteRows,
@@ -142,7 +143,11 @@ test('optimistic insert: the pending row renders BEFORE the POST resolves, then 
   // disabled in-flight submit control.
   const pendingRow = page.locator('li[data-pending="true"]')
   await expect(pendingRow).toBeVisible()
-  await expect(pendingRow).toHaveText(NEW_TITLE)
+  // The row's title is its own element: a reconciled row also carries a <time> with the
+  // server's creation instant, and an optimistic one deliberately does NOT (the client does
+  // not know when the note was created — the server assigns that).
+  await expect(pendingRow.locator('span').first()).toHaveText(NEW_TITLE)
+  await expect(pendingRow.locator('time')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Adding…' })).toBeDisabled()
 
   release()
@@ -151,7 +156,9 @@ test('optimistic insert: the pending row renders BEFORE the POST resolves, then 
   // drops, the composer re-arms, and the draft clears.
   const serverRow = page.locator(`li[data-note-id="${SERVER_NOTE_ID}"]`)
   await expect(serverRow).toBeVisible()
-  await expect(serverRow).toHaveText(NEW_TITLE)
+  await expect(serverRow.locator('span').first()).toHaveText(NEW_TITLE)
+  // Reconciliation brought the server's timestamp with it — the row now says when it was made.
+  await expect(serverRow.locator('time')).toHaveCount(1)
   await expect(page.locator('li[data-pending="true"]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add note' })).toBeEnabled()
   await expect(page.getByLabel('Add a note')).toHaveValue('')
@@ -188,8 +195,12 @@ for (const theme of ['dark', 'light'] as const) {
     await input.fill(NEW_TITLE)
     await page.getByRole('button', { name: 'Add note' }).click()
 
-    // The toast carries the ENVELOPE's human message, not a generic string.
-    await expect(page.getByText(ENVELOPE_MESSAGE)).toBeVisible()
+    // The toast carries TRANSLATED copy, chosen by the envelope's stable `code`. It used to
+    // carry the server's raw English message, so a user watching their note fail to save was
+    // handed "note storage exploded" — a log line, in a language the app does not choose.
+    const failureCopy = en['error.api.internal']
+    await expect(page.getByText(failureCopy)).toBeVisible()
+    await expect(page.getByText(ENVELOPE_MESSAGE)).toHaveCount(0)
 
     // …and it LOOKS like a failure. A lost write used to render in exactly the same
     // pixels as "Theme: dark" — same border, same ink — so the only channel telling a
@@ -197,7 +208,7 @@ for (const theme of ['dark', 'light'] as const) {
     // is now announced assertively (role=alert) and painted with the danger token; the
     // computed colour is compared against the neutral chrome around it, so the assertion
     // holds in BOTH themes without hard-coding either theme's values.
-    const failureToast = page.getByRole('alert').filter({ hasText: ENVELOPE_MESSAGE })
+    const failureToast = page.getByRole('alert').filter({ hasText: failureCopy })
     await expect(failureToast).toBeVisible()
     const [toastBorder, neutralBorder] = await Promise.all([
       failureToast.evaluate((node) => getComputedStyle(node).borderLeftColor),

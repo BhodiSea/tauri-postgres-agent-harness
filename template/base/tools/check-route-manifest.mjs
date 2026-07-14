@@ -20,6 +20,15 @@ const GATE = 'route-manifest'
 const ROUTES_FILE = 'apps/desktop/src/routes.ts'
 const FEATURES_DIR = 'apps/desktop/src/features'
 const ALLOWLIST = 'tools/route-allowlist.json'
+const CATALOG_FILE = 'apps/desktop/src/i18n/catalog.ts'
+
+// The message keys a route's labelKey may name. `null` when the locale seam is not installed —
+// a project that has not adopted i18n keeps the older `label:` form and is not forced onto it.
+const catalogKeys = existsSync(CATALOG_FILE)
+  ? new Set(
+      [...readFileSync(CATALOG_FILE, 'utf8').matchAll(/^\s*'([^']+)'\s*:/gm)].map((m) => m[1]),
+    )
+  : null
 const STATE_KEYS = ['loading', 'empty', 'error']
 // A canonical SPA route path: root `/`, or `/`-led lowercase kebab segments with
 // no trailing slash, whitespace, query (`?`), or hash (`#`) — the router matches
@@ -139,8 +148,26 @@ entries.forEach((entry, i) => {
   }
   if (id !== undefined) ids.add(id)
 
-  if (entry.match(/\blabel:\s*['"]([^'"]+)['"]/) === null) {
-    errs.push(`${name}: missing \`label\` (human-readable string literal)`)
+  // A route's name is its most visible copy — it is in the nav on every screen and in the
+  // command palette. So the manifest carries a message KEY, not the prose: `labelKey:
+  // 'route.home'`. A `label: 'Home'` here would be a hardcoded English string in the one file
+  // every screen must register in, which is the last place it should be possible.
+  //
+  // The key must RESOLVE. A manifest that names 'route.hoem' would render the key itself in the
+  // nav bar — visible, but only to whoever looked. Checked against the catalog when the locale
+  // seam is installed; when it is not (a project that has not adopted i18n), the older `label`
+  // form is still accepted, so this gate does not force the seam on anyone.
+  const labelKey = entry.match(/\blabelKey:\s*['"]([^'"]+)['"]/)?.[1]
+  if (labelKey === undefined) {
+    if (entry.match(/\blabel:\s*['"]([^'"]+)['"]/) === null) {
+      errs.push(
+        `${name}: missing \`labelKey\` (a message key in ${CATALOG_FILE}, e.g. labelKey: 'route.home'). A route's name is copy: it renders in the nav on every screen and in the command palette, so it belongs in the catalog, not in the manifest.`,
+      )
+    }
+  } else if (catalogKeys !== null && !catalogKeys.has(labelKey)) {
+    errs.push(
+      `${name}: labelKey '${labelKey}' is not a key in ${CATALOG_FILE} — the nav would render the key itself. Add the message, or fix the key.`,
+    )
   }
 
   const pathMatch = entry.match(/\bpath:\s*['"]([^'"]*)['"]/)

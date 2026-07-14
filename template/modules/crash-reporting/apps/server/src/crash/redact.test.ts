@@ -6,6 +6,21 @@ import { type CrashEvent, redactCrashEvent, redactText } from './redact.js'
 // BEFORE any crash transport exists. Extend the fixtures with every PII shape
 // your deployment handles (student identifiers, tenant names, …): a redaction
 // test that only covers generic shapes undertests YOUR data.
+//
+// These tests are also the module's mutation-testing contract: the crash module
+// ships mutable source into a consumer whose mutation lane is BLOCKING, so every
+// alternative of the secret-key regex, every flag/anchor of the text scrubbers,
+// and every branch of the value walker is pinned here. Production code is only
+// ever called from inside an `it(...)` body — never a `beforeAll` — because a
+// mutant that throws in a hook shows up as SKIPPED (which Stryker scores as
+// SURVIVED) instead of FAILED.
+
+// Runs one context entry through the real pipeline and hands back the redacted
+// value for that key. Plain function, called from inside tests only.
+function redactedValue(key: string, value: unknown): unknown {
+  const { context } = redactCrashEvent({ message: 'boot', context: { [key]: value } })
+  return context?.[key]
+}
 
 describe('redactText', () => {
   it('strips userinfo from credentialed connection strings', () => {
@@ -35,6 +50,228 @@ describe('redactText', () => {
   it('leaves ordinary diagnostics untouched', () => {
     const message = 'ECONNREFUSED 127.0.0.1:5432 after 3000ms (attempt 2)'
     expect(redactText(message)).toBe(message)
+  })
+})
+
+// A redaction boundary must scrub by DEFAULT, not scrub-what-it-listed. The scheme pattern
+// used to be an allow-list — (postgres|mysql|redis|amqp) — and every scheme it forgot leaked
+// the password in full. These rows are one per scheme the old allow-list missed.
+describe('redactText: credentialed URLs of ANY scheme', () => {
+  // Exactly the schemes the old allow-list FORGOT. (postgres/mysql/redis/amqp were already
+  // covered above; the repo's own hygiene scanner rejects a postgres:// URL with a
+  // non-sanctioned password in source, which is why they are not repeated here.)
+  it.each([
+    ['mongodb', 'mongodb://admin:hunter2@localhost:27017/app'],
+    ['https', 'https://svc:hunter2@internal-api/health'],
+    ['amqps', 'amqps://svc:hunter2@broker:5671'],
+    ['ftp', 'ftp://anon:hunter2@files.internal'],
+    ['mongodb+srv', 'mongodb+srv://admin:hunter2@cluster0/app'],
+  ])('scrubs the userinfo from a %s:// URL', (scheme, url) => {
+    const out = redactText(`connect ${url} failed`)
+    expect(out).not.toContain('hunter2')
+    expect(out).toContain(`${scheme}://[redacted]@`)
+  })
+
+  it('does not mistake an @ in a PATH for credentials', () => {
+    const message = 'GET http://registry.internal/pkg/@scope/name failed'
+    expect(redactText(message)).toBe(message)
+  })
+})
+
+describe('redactText: bearer tokens are matched case-INSENSITIVELY', () => {
+  // `authorization: bearer abc123opaque` is what a lowercase-header logger emits. Without the
+  // /i flag an OPAQUE (non-JWT) lowercase token leaked in full — the JWT rule only rescues
+  // the eyJ-shaped ones, so this row is the one that actually proves the flag.
+  it.each(['Bearer', 'bearer', 'BEARER', 'BeArEr'])('redacts a %s-cased token', (word) => {
+    const out = redactText(`authorization: ${word} abc123opaque-not-a-jwt`)
+    expect(out).not.toContain('abc123opaque')
+    expect(out).toContain('Bearer [redacted]')
+  })
+
+  it('redacts across MULTIPLE spaces — `\\s+`, not `\\s`', () => {
+    // A pretty-printed header dump emits `Bearer   <token>`. With a single `\s` the class
+    // would fail to reach the token and it would leak in full.
+    const out = redactText('authorization: Bearer   abc123opaque-not-a-jwt')
+    expect(out).not.toContain('abc123opaque')
+    expect(out).toContain('Bearer [redacted]')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SECRET_KEY_PATTERN — every alternative, the /i flag, and the optional
+// separator in api[-_]?key. One row per alternative, so dropping any single
+// alternative from the pattern reds exactly one row.
+// ---------------------------------------------------------------------------
+
+describe('secret-key pattern', () => {
+  const SECRET_KEYS: readonly string[] = [
+    // one row per alternative in the pattern, in source order
+    'password',
+    'passwd',
+    'secret',
+    'token',
+    'authorization',
+    'cookie',
+    'apikey', // api[-_]?key with the separator absent
+    'api-key', // …with a hyphen
+    'api_key', // …with an underscore
+    'credential',
+    'dsn',
+  ]
+
+  it.each(SECRET_KEYS)('drops the value under secret-shaped key "%s"', (key) => {
+    expect(redactedValue(key, 'hunter2-super-secret')).toBe('[redacted]')
+  })
+
+  it.each(SECRET_KEYS)('never lets the value under "%s" reach the wire', (key) => {
+    const event: CrashEvent = { message: 'boot', context: { [key]: 'hunter2-super-secret' } }
+    expect(JSON.stringify(redactCrashEvent(event))).not.toContain('hunter2-super-secret')
+  })
+
+  // The /i flag: same alternatives, shouted or camel-cased.
+  const CASE_VARIANT_KEYS: readonly string[] = [
+    'PASSWORD',
+    'PASSWD',
+    'Secret',
+    'X-Auth-TOKEN',
+    'Authorization',
+    'Cookie',
+    'ApiKey',
+    'Api-Key',
+    'API_KEY',
+    'Credential',
+    'DSN',
+  ]
+
+  it.each(CASE_VARIANT_KEYS)('matches key "%s" case-insensitively (the /i flag)', (key) => {
+    expect(redactedValue(key, 'hunter2-super-secret')).toBe('[redacted]')
+  })
+
+  // Substring matching: the pattern is unanchored, so a secret alternative
+  // anywhere inside a longer key still drops the value.
+  it.each([
+    'sessionToken',
+    'db_password',
+    'SENTRY_DSN',
+    'setCookieHeader',
+  ])('matches secret alternatives embedded in longer key "%s"', (key) => {
+    expect(redactedValue(key, 'hunter2-super-secret')).toBe('[redacted]')
+  })
+
+  // The other direction — without these, a pattern mutated to match everything
+  // would still pass. Values are chosen so redactText() is a no-op on them.
+  it.each([
+    'username',
+    'count',
+    'hostname',
+    'attempt',
+    'stage',
+    'requestId',
+  ])('leaves the value under non-secret key "%s" alone', (key) => {
+    expect(redactedValue(key, 'keep-me')).toBe('keep-me')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The Bearer scrubber: /\bBearer\s+[A-Za-z0-9._~+/=-]+/g → 'Bearer [redacted]'
+// Anchor (\b), separator (\s+), character class, quantifier (+) and flag (g)
+// each get an assertion that fails if that piece is mutated away.
+// ---------------------------------------------------------------------------
+
+describe('redactText: bearer tokens', () => {
+  it('consumes the whole token, including every punctuation char in the class', () => {
+    // Every member of [A-Za-z0-9._~+/=-] appears in this token; if any one of
+    // them were dropped from the class the tail would survive the replacement.
+    expect(redactText('Bearer eyJhbGciOi.J9.abc-_~+/=')).toBe('Bearer [redacted]')
+  })
+
+  it.each([
+    { label: 'dot', char: '.' },
+    { label: 'underscore', char: '_' },
+    { label: 'tilde', char: '~' },
+    { label: 'plus', char: '+' },
+    { label: 'slash', char: '/' },
+    { label: 'equals', char: '=' },
+    { label: 'hyphen', char: '-' },
+  ])('consumes a $label ("$char") inside the token so no fragment leaks', ({ char }) => {
+    expect(redactText(`Bearer abc${char}def`)).toBe('Bearer [redacted]')
+  })
+
+  it('redacts EVERY bearer token in the string, not just the first (the /g flag)', () => {
+    expect(redactText('h1 Bearer tok-one then h2 Bearer tok-two end')).toBe(
+      'h1 Bearer [redacted] then h2 Bearer [redacted] end',
+    )
+  })
+
+  it('requires a word boundary before Bearer, so "NotBearer" is not a bearer header', () => {
+    // \b means the pattern only fires at a word start: with the boundary removed
+    // this becomes 'NotBearer [redacted]'.
+    expect(redactText('NotBearer xyz')).toBe('NotBearer xyz')
+  })
+
+  it('requires whitespace between the scheme and the token', () => {
+    // \s+ (not \s*): 'Bearerabc' is one word, not a header.
+    expect(redactText('Bearerabc')).toBe('Bearerabc')
+  })
+
+  it('leaves a bare "Bearer" with no token material alone', () => {
+    // The token quantifier is + (not *): there is nothing to redact here.
+    expect(redactText('Bearer !')).toBe('Bearer !')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Array values. The secret-key check runs FIRST, so the array branch is only
+// reachable under a non-secret key; both facts are pinned below.
+// ---------------------------------------------------------------------------
+
+describe('redactCrashEvent: array values', () => {
+  it('redacts every element of an array under a non-secret key, in place', () => {
+    expect(redactedValue('notes', ['ping alice@example.com', 'ping bob@example.com'])).toEqual([
+      'ping [redacted-email]',
+      'ping [redacted-email]',
+    ])
+  })
+
+  it('returns an array, not an index-keyed object', () => {
+    // Without the Array.isArray branch an array falls through to the object
+    // branch and comes back as { '0': …, '1': … }.
+    const out = redactedValue('notes', ['ping alice@example.com', 'plain'])
+    expect(Array.isArray(out)).toBe(true)
+    expect(out).toHaveLength(2)
+  })
+
+  it('passes an array under a non-secret key through unchanged when nothing matches', () => {
+    expect(redactedValue('attempts', [1, 2, 3])).toEqual([1, 2, 3])
+    expect(redactedValue('tags', ['alpha', 'beta'])).toEqual(['alpha', 'beta'])
+  })
+
+  it('recurses into nested arrays', () => {
+    expect(redactedValue('rows', [['alice@example.com'], ['plain', ['deep@example.com']]])).toEqual(
+      [['[redacted-email]'], ['plain', ['[redacted-email]']]],
+    )
+  })
+
+  it('recurses into objects inside arrays, re-applying the key rule per element', () => {
+    expect(
+      redactedValue('users', [
+        { email: 'alice@example.com', token: 't-1' },
+        { email: 'bob@example.com', token: 't-2' },
+      ]),
+    ).toEqual([
+      { email: '[redacted-email]', token: '[redacted]' },
+      { email: '[redacted-email]', token: '[redacted]' },
+    ])
+  })
+
+  it('drops an array under a SECRET key wholesale — the key rule wins before the array branch', () => {
+    // Actual behaviour: the value is replaced by the '[redacted]' STRING; the
+    // elements are never visited, so nothing array-shaped survives.
+    expect(redactedValue('apiKeys', ['k-1', 'k-2'])).toBe('[redacted]')
+    expect(redactedValue('access_token', [['deep-1'], ['deep-2']])).toBe('[redacted]')
+
+    const event: CrashEvent = { message: 'boot', context: { apiKeys: ['k-1', 'k-2'] } }
+    expect(JSON.stringify(redactCrashEvent(event))).not.toContain('k-1')
   })
 })
 

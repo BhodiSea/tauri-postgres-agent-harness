@@ -54,11 +54,11 @@ function makeCommands(onRun: (id: string) => void): readonly Command[] {
     },
   })
   return [
-    command('nav.home', 'Go to Home', 'Navigation', { subtitle: '/' }),
-    command('nav.matrix', 'Go to Matrix', 'Navigation', { subtitle: '/matrix' }),
-    command('theme.light', 'Use light theme', 'Theme'),
-    command('theme.dark', 'Use dark theme', 'Theme'),
-    command('shortcuts.show', 'Show keyboard shortcuts', 'View', { keys: 'mod+/' }),
+    command('nav.home', 'Go to Home', 'navigation', { subtitle: '/' }),
+    command('nav.matrix', 'Go to Matrix', 'navigation', { subtitle: '/matrix' }),
+    command('theme.light', 'Use light theme', 'theme'),
+    command('theme.dark', 'Use dark theme', 'theme'),
+    command('shortcuts.show', 'Show keyboard shortcuts', 'view', { keys: 'mod+/' }),
   ]
 }
 

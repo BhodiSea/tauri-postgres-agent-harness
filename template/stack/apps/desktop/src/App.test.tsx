@@ -175,10 +175,10 @@ describe('theme toggle', () => {
     render(<App />)
     const toggle = screen.getByTestId('theme-toggle')
     const before = toggle.getAttribute('aria-label')
-    expect(before).toMatch(/Switch to (light|dark|system) theme/)
+    expect(before).toMatch(/Switch to the (light|dark|automatic) theme/)
     fireEvent.click(toggle)
     // The switch is confirmed via the polite toast live region.
-    expect(await screen.findByText(/^Theme: (light|dark|system)$/)).toBeDefined()
+    expect(await screen.findByText(/^Theme: (light|dark|auto)$/)).toBeDefined()
     // The label now names the NEW next state (the cycle advanced).
     expect(screen.getByTestId('theme-toggle').getAttribute('aria-label')).not.toBe(before)
   })

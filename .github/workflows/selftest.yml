@@ -409,6 +409,51 @@ jobs:
           fi
           grep -E 'title AND a description|EmptyState' e2e-canary.log | tail -n 5 || true
           git checkout -q -- apps/desktop/src/features/notes/NotesPanel.tsx
+      # Canary 10 (v0.1.6). The i18n guarantee has TWO halves, and this proves BOTH — by proving
+      # that neither alone would do.
+      #
+      # The static gate (tools/check-i18n.mjs) is a text scan. It catches a literal in JSX, in a
+      # user-facing attribute, in the object literals that hold copy. It CANNOT catch a string the
+      # code assembles at runtime — that is not a weakness to be patched, it is what a text scan
+      # IS, and pretending otherwise would be the fake-control failure this whole release exists
+      # to eliminate.
+      #
+      # So the injection below is exactly the string the static gate cannot see, and the assertion
+      # is two-sided: the gate must stay GREEN (proving the blind spot is real, not hypothetical)
+      # and the e2e pseudo-locale lane must go RED naming the string. Under `en-XA` every catalog
+      # message comes back mangled, so plain English on screen is BY CONSTRUCTION copy that never
+      # went through the catalog. If the gate ever starts catching this, the second assertion here
+      # fails and someone gets to delete a lane — which would be good news, and should be noticed.
+      - name: 'Canary 10: a user-facing string assembled at RUNTIME → the static i18n gate is BLIND, and the e2e pseudo-locale lane must FAIL'
+        if: matrix.node == 22
+        working-directory: .selftest/boot
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const f = "apps/desktop/src/screens/HomeScreen.tsx";
+            let s = fs.readFileSync(f, "utf8");
+            s = s.replace("{t('home.title')}", "{['Ready', 'to', 'build'].join(' ')}");
+            fs.writeFileSync(f, s);
+          '
+          grep -q "join(' ')" apps/desktop/src/screens/HomeScreen.tsx \
+            || { echo '::error::the canary injection did not apply — HomeScreen no longer renders t(home.title)'; exit 1; }
+
+          # HALF ONE: the static gate must stay GREEN. This is the blind spot, asserted.
+          if ! node tools/check-i18n.mjs > i18n-static.log 2>&1; then
+            cat i18n-static.log
+            echo '::error::the static i18n gate CAUGHT a runtime-assembled string. Good — but the e2e assertion below is now testing the wrong thing; re-scope this canary.'
+            exit 1
+          fi
+
+          # HALF TWO: the behavioural lane must go RED, and must NAME the string.
+          if env -u GITHUB_BASE_REF pnpm exec playwright test --project chromium e2e/i18n.spec.ts > i18n-e2e.log 2>&1; then
+            tail -n 40 i18n-e2e.log
+            echo '::error::I18N CANARY: the pseudo-locale lane PASSED with a hardcoded English string on screen — nothing in the harness can see a string that bypasses the catalog'
+            exit 1
+          fi
+          grep -E 'survived pseudo-localization|Ready to build' i18n-e2e.log | tail -n 5 || true
+          git checkout -q -- apps/desktop/src/screens/HomeScreen.tsx
+          echo 'canary OK: the static gate is blind to a runtime-assembled string (as designed) and the pseudo-locale lane caught it'
           echo 'canary OK: e2e lane went red on a below-tier empty state'
       - name: RLS runner FAILS CLOSED without a database (CI=true)
         working-directory: .selftest/boot
@@ -467,6 +512,97 @@ jobs:
             || { echo '::error::the policy-shape probe did not run — cannot demonstrate what the old check missed'; exit 1; }
           git checkout -q -- packages/schema/drizzle/
           echo 'canary OK: the DAL plan probe went red on the v0.1.5 index, while the old policy probe stayed green'
+
+  # ---------------------------------------------------------------------------
+  # canary-mutation (v0.1.6). THE proof for G09, and the one that has to be run
+  # end-to-end rather than argued: coverage measures EXECUTION, mutation measures
+  # VERIFICATION, and the gap between them is where the v0.1.5 exemplar hid a JWT
+  # algorithm allowlist that could be emptied with every test still passing.
+  #
+  # The injection is the everyday case, not a contrived one: an agent adds ONE new
+  # branch to a file that is already 99% mutation-covered, and writes no test for it.
+  # The assertion is deliberately two-sided — it is not enough that the mutation lane
+  # reds; EVERY OTHER CONTROL IN THE HARNESS MUST STAY GREEN, or the canary proves
+  # nothing about what this lane uniquely adds:
+  #   • the unit suite still passes (the branch is executed by existing tests);
+  #   • the per-file coverage floors still pass (one branch cannot drag a 99%-covered
+  #     file under the 40% branch floor);
+  #   • test-quality still passes (every test still contains an assertion).
+  # Only the ratchet reds. That is the whole thesis of the gate, checked.
+  # ---------------------------------------------------------------------------
+  canary-mutation:
+    name: 'canary: an untested branch must red the mutation lane — and nothing else'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Bootstrap a fresh project
+        run: |
+          node installer/cli.mjs init --dir "$GITHUB_WORKSPACE/.selftest/mut" --yes \
+            --set PROJECT_NAME="Selftest Mutation" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+      - name: Install
+        working-directory: .selftest/mut
+        run: |
+          corepack enable
+          pnpm install --no-frozen-lockfile
+
+      # Baseline: the shipped exemplar must be green before we can claim an injection reds it.
+      - name: 'Baseline: the shipped critical surface is within its committed baseline'
+        working-directory: .selftest/mut
+        run: |
+          pnpm exec stryker run stryker.config.mjs
+          node tools/check-mutation-ratchet.mjs
+
+      - name: 'Canary 11: add ONE untested branch to a 99%-covered file → the mutation lane must FAIL while every other gate stays GREEN'
+        working-directory: .selftest/mut
+        run: |
+          python3 - <<'PY'
+          p = 'apps/server/src/auth/verify.ts'
+          s = open(p).read()
+          s = s.replace(
+              "function buildVerifier(getKey: JwksKeyGetter, issuer: string, audience: string): TokenVerifier {",
+              "function buildVerifier(getKey: JwksKeyGetter, issuer: string, audience: string, env: Env = {}): TokenVerifier {", 1)
+          s = s.replace(
+              "    const { payload } = await jwtVerify(token, getKey, {",
+              "    const skew = env['AUTH_CLOCK_SKEW']\n    const tolerance = skew === undefined ? 300 : Number(skew)\n    const { payload } = await jwtVerify(token, getKey, {", 1)
+          s = s.replace("      clockTolerance: 300,", "      clockTolerance: tolerance,", 1)
+          open(p, 'w').write(s)
+          PY
+          grep -q 'AUTH_CLOCK_SKEW' apps/server/src/auth/verify.ts \
+            || { echo '::error::the canary injection did not apply — the source moved; fix the patch, do not delete the canary'; exit 1; }
+
+          # (1) Every OTHER control must stay green — otherwise this proves nothing about
+          #     what mutation testing uniquely adds over them.
+          pnpm exec vitest run --coverage --silent \
+            || { echo '::error::MUTATION CANARY: the unit suite reddened. The injection must be executed-but-unverified, not broken — the canary is not demonstrating the coverage/verification gap'; exit 1; }
+          node tools/check-diff-coverage.mjs \
+            || { echo '::error::MUTATION CANARY: diff-coverage reddened; the injection was supposed to slip THROUGH the per-file floors'; exit 1; }
+          node tools/check-test-quality.mjs \
+            || { echo '::error::MUTATION CANARY: test-quality reddened; the injection adds no test, it does not remove an assertion'; exit 1; }
+
+          # (2) …and the mutation lane must catch what all of them missed.
+          rm -rf reports/mutation .stryker-tmp
+          pnpm exec stryker run stryker.config.mjs --mutate apps/server/src/auth/verify.ts
+          if node tools/check-mutation-ratchet.mjs > ratchet.log 2>&1; then
+            cat ratchet.log
+            echo '::error::MUTATION CANARY: an untested branch survived the ratchet. The lane cannot fail, so it is decoration — coverage already told us this code RAN; only mutation can tell us no test would NOTICE it breaking'
+            exit 1
+          fi
+          grep -q 'new surviving mutant' ratchet.log \
+            || { cat ratchet.log; echo '::error::the ratchet failed for the WRONG reason (not a new survivor)'; exit 1; }
+          grep -E 'AUTH_CLOCK_SKEW|new surviving mutant|change:' ratchet.log | head -n 8
+          git checkout -q -- apps/server/src/auth/verify.ts
+          echo 'canary OK: unit + diff-coverage + test-quality all stayed GREEN; only the mutation ratchet caught it'
 
   # ---------------------------------------------------------------------------
   # EVERY MODULE'S CODE ACTUALLY COMPILES AND PASSES.

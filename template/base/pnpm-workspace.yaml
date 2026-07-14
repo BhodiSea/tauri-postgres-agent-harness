@@ -36,6 +36,12 @@ catalog:
   '@testing-library/jest-dom': ^6.9.1
   '@testing-library/user-event': ^14.6.1
   fast-check: ^4.9.0
+  # Mutation testing (CI-only lane; the behavioural net over the critical surface).
+  # Exact pins: the runner peer-pins core, and the SET-based ratchet compares mutant
+  # identities across runs — a minor bump that renames or adds a mutator would read as
+  # "new survivors" and red the lane for no reason. Renovate proposes bumps deliberately.
+  '@stryker-mutator/core': 9.6.1
+  '@stryker-mutator/vitest-runner': 9.6.1
   # ---- server -----------------------------------------------------------------
   hono: ^4.12.28
   '@hono/node-server': ^2.0.8

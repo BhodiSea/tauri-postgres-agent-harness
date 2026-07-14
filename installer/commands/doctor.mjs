@@ -88,17 +88,19 @@ export async function doctor(opts) {
     const cfg = await import(pathToFileURL(join(targetDir, 'tools/harness.config.mjs')).href)
     if (!Array.isArray(cfg.VALIDATE_STEPS) || cfg.VALIDATE_STEPS.length === 0) errors.push('tools/harness.config.mjs exports no VALIDATE_STEPS')
     if (!Array.isArray(cfg.STOP_HOOK_STEPS) || cfg.STOP_HOOK_STEPS.length === 0) errors.push('tools/harness.config.mjs exports no STOP_HOOK_STEPS')
-    // Every default gate introduced at or before this install's version must
-    // be present locally — otherwise CI (--min-floor) runs steps the Stop hook
-    // never does, and the FLOOR ↔ VALIDATE_STEPS lockstep is silently broken.
-    if (Array.isArray(cfg.VALIDATE_STEPS)) {
-      const present = new Set(cfg.VALIDATE_STEPS.map(([name]) => name))
-      for (const step of requiredConfigSteps(readTemplateMigrations(), manifest.harnessVersion)) {
-        if (!present.has(step.name)) {
-          errors.push(
-            `tools/harness.config.mjs is missing the '${step.name}' gate required since v${step.since ?? manifest.harnessVersion} — add ['${step.name}', '${step.cmd}'] to VALIDATE_STEPS (or re-run \`update\`)`,
-          )
-        }
+    // Every default gate introduced at or before this install's version must be present
+    // locally — otherwise CI (--min-floor) runs steps the Stop hook never does, and the
+    // FLOOR <-> VALIDATE_STEPS lockstep is silently broken. A step declares which array it
+    // belongs to: the floor chain (VALIDATE_STEPS) or the non-floor turn-fatal chain
+    // (STOP_HOOK_STEPS, where duplication / i18n / test-quality live).
+    for (const step of requiredConfigSteps(readTemplateMigrations(), manifest.harnessVersion)) {
+      const arrayName = step.array ?? 'VALIDATE_STEPS'
+      const steps = cfg[arrayName]
+      if (!Array.isArray(steps)) continue
+      if (!steps.some(([name]) => name === step.name)) {
+        errors.push(
+          `tools/harness.config.mjs is missing the '${step.name}' gate required since v${step.since ?? manifest.harnessVersion} — add ['${step.name}', '${step.cmd}'] to ${arrayName} (or re-run \`update\`)`,
+        )
       }
     }
   } catch (err) {

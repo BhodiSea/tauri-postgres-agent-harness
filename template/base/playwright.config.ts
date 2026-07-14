@@ -112,7 +112,9 @@ export default defineConfig({
       // lane needs no running server and un-stubbed requests fail loudly.
       // The integration lane is the exception: a REAL server listens, and the CI job
       // passes its origin through, so the bundle talks to it instead of a stub.
-      VITE_API_ORIGIN: process?.env.VITE_API_ORIGIN ?? 'http://127.0.0.1:8787',
+      // `||`, not `??`: an exported-but-EMPTY VITE_API_ORIGIN survives `??` and would be
+      // forwarded to Vite as '', turning every request into a same-origin relative path.
+      VITE_API_ORIGIN: process?.env.VITE_API_ORIGIN || 'http://127.0.0.1:8787',
     },
   },
 })

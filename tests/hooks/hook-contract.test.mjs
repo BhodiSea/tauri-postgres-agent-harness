@@ -249,6 +249,8 @@ const RULE_CANARIES = {
   'route-allowlist': [pathDeny('tools/route-allowlist.json')],
   'dto-bounds-allow': [pathDeny('tools/dto-bounds-allow.json')],
   'duplication-allow': [pathDeny('tools/duplication-allow.json')],
+  'i18n-allow': [pathDeny('tools/i18n-allow.json')],
+  'test-quality-allow': [pathDeny('tools/test-quality-allow.json')],
   'decision-groups': [pathDeny('tools/decision-groups.json')],
   'rls-runner': [pathDeny('tests/rls/run-rls.mjs')],
   'migration-apply-runner': [pathDeny('tests/migrations/migration-apply.mjs')],

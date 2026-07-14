@@ -23,7 +23,6 @@ export const MODULES = [
   'ci-windows-e2e',
   'ci-macos',
   'ci-provenance',
-  'mutation',
   'gate-a11y-deep',
   'crash-reporting',
   'ops-backup',
@@ -37,6 +36,7 @@ export const MODULES = [
 export const RETIRED_MODULES = new Map([
   ['gate-styleguide', 'promoted into the default gate chain in the 0.1.3 release — run `update`; the styleguide gate now ships in tools/ by default'],
   ['gate-perf-budget', 'promoted into the default gate chain in the 0.1.3 release — run `update`; the perf-budget gate now ships in tools/ by default'],
+  ['mutation', 'promoted into the default install in the 0.1.6 release — run `update`; StrykerJS, the set-based ratchet and the blocking CI lanes now ship by default (the per-PR lane lives in quality-gate.yml, the nightly full run in mutation.yml). Seed the baseline with `pnpm mutation:baseline`'],
 ])
 
 export const TIERS = {
@@ -90,6 +90,14 @@ export const SEEDED_FILES = new Set([
   'tools/dto-bounds-allow.json',
   'tools/duplication-allow.json',
   'tools/decision-groups.json',
+  'tools/i18n-allow.json',
+  // The accepted-survivor list for the mutation lane, and the reviewed escapes for the
+  // assertion gate. Both are project-owned JUDGEMENTS ("this mutant is genuinely
+  // equivalent", "this test is deliberately pending") — write-guard-protected against
+  // agents, hashed by gate-integrity, and seedOnInitOnly so `update` never plants one
+  // project's judgements into another's repo.
+  'tools/mutation-baseline.json',
+  'tools/test-quality-allow.json',
   'tests/rls/db-context.ts',
   // The DAL query-shape registry the plan probe drives (0.1.6): it names THIS project's
   // DAL methods, so only the project can write it. seedOnInitOnly — `update` withholds it

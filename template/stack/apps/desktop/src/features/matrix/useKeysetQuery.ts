@@ -1,5 +1,6 @@
 import { type Note, NotesPage } from '@app/schema'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { translateError, type UserFacingError } from '../../i18n/errors'
 import { apiFetch } from '../../lib/api-client'
 
 // Keyset pagination over the server's { items, nextCursor } contract — the paged
@@ -16,8 +17,10 @@ interface KeysetState {
   readonly rows: readonly Note[]
   /** Cursor for the next page, or null when the list is exhausted. */
   readonly cursor: string | null
-  /** Initial-load failure message (status === 'error'). */
-  readonly message: string
+  // Initial-load failure (status === 'error'). `.message` is TRANSLATED copy chosen by the
+  // envelope's stable `code`; `.detail` is the raw text, untranslatable by nature. Rendering
+  // them as the same thing was the pre-0.1.6 behaviour, and the raw one was the headline.
+  readonly error: UserFacingError | null
   readonly loadingMore: boolean
   /** A loadMore just failed — the data is intact, offer an inline retry. */
   readonly loadMoreFailed: boolean
@@ -27,13 +30,9 @@ const INITIAL: KeysetState = {
   status: 'loading',
   rows: [],
   cursor: null,
-  message: '',
+  error: null,
   loadingMore: false,
   loadMoreFailed: false,
-}
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
 }
 
 async function fetchPage(
@@ -73,7 +72,7 @@ export function useKeysetQuery(onLoadMoreError: (message: string) => void): Keys
           status: page.items.length === 0 ? 'empty' : 'ready',
           rows: page.items,
           cursor: page.nextCursor,
-          message: '',
+          error: null,
           loadingMore: false,
           loadMoreFailed: false,
         })
@@ -84,7 +83,7 @@ export function useKeysetQuery(onLoadMoreError: (message: string) => void): Keys
           status: 'error',
           rows: [],
           cursor: null,
-          message: errorMessage(cause),
+          error: translateError(cause),
           loadingMore: false,
           loadMoreFailed: false,
         })
@@ -122,7 +121,7 @@ export function useKeysetQuery(onLoadMoreError: (message: string) => void): Keys
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return
         setState((current) => ({ ...current, loadingMore: false, loadMoreFailed: true }))
-        onLoadMoreError(errorMessage(cause))
+        onLoadMoreError(translateError(cause).message)
       })
   }
 

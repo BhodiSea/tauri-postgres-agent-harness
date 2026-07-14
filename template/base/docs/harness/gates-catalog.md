@@ -610,7 +610,165 @@ stays accepted after it moves lines.
 sites + fingerprint; `tests/gates/check-duplication.test.mjs` pins the red, the DRY green,
 the allowlist mute, the malformed-allow fail-closed, and the ramp NOTE ↔ turn-fatal split.
 
+### i18n — `node tools/check-i18n.mjs`
+
+The locale seam is real, and nothing bypasses it (G22, v0.1.6). Before 0.1.6 the desktop app
+contained **zero `Intl.`, zero `dir=`, a hardcoded `<html lang="en">`, and ~70 English literals
+across 20 components** — not because anyone decided against localization, but because nothing
+ever asked. Prose in AGENTS.md is advisory; the screen an agent adds next week gets English
+literals too, and every gate stays green. Single-locale English is a floor you can only hold by
+checking it.
+
+**The seam** (`apps/desktop/src/i18n/`, seeded + `seedOnInitOnly`): a typed catalog whose keys
+are a union — so an unknown key is a *compile* error and a locale missing a message is a
+*compile* error, not a silent English fallback shipped to someone who does not read English.
+Plurals select through `Intl.PluralRules` (the old `"{n} rows"` said "1 rows"); numbers, dates
+and relative times go through `Intl.NumberFormat` / `DateTimeFormat` / `RelativeTimeFormat`.
+`initLocale()` stamps `lang` **and `dir`** before the first paint, next to `initTheme()`. It is
+a module-level store, not a React context, because `t()` must work outside a tree —
+`matrixData.ts` labels its columns and `perfSubject.ts` renders the whole grid through
+`renderToString` with no provider.
+
+**The gate — three checks.** (1) No hardcoded user-facing string: JSX text, user-facing
+attributes (`aria-label`/`title`/`placeholder`/`label`/`alt`), and the object literals that hold
+copy — the ROUTES manifest's route names, the shortcut registry's descriptions, palette command
+titles, matrix column headers. (2) `Intl` / `toLocale*` / `.toFixed(` only inside `src/i18n/`;
+`.toFixed(2)` hardcodes `.` as the decimal mark, which is how the matrix shipped `0.75` to a
+German reader who writes `0,75` — *from a function called `formatCell`*. (3) No dead catalog key
+(dynamic keys resolve by static prefix). A **Stop-chain step, NOT a floor member**; ramped to
+`baseVersion >= 0.1.6`; self-disables with the adoption command when the seam is not installed,
+so it cannot ambush a project that never opted in. `tools/i18n-allow.json` is the reviewed
+escape (write-guard-protected, gate-integrity-hashed; malformed or stale entries FAIL).
+
+**Its limit, stated plainly.** This is a text scan, not a compiler. A string assembled at runtime
+(`['Ready','to','build'].join(' ')`), built from fragments, or returned by a helper is invisible
+to it **by construction** — and the CI-only e2e lane below is not a nicety, it is the other half
+of the guarantee.
+**Anti-vacuity:** `tests/gates/check-i18n.test.mjs` pins the red for each detector, the
+machine-facing negatives (a path, a token, a TS generic, an arrow function), the Intl boundary,
+the dead key, the dynamic-prefix resolution, the allowlist mute, the malformed/stale fail-closed,
+the self-disable, and the ramp NOTE ↔ turn-fatal split. Harness selftest Canary 10 injects the
+runtime-assembled string, asserts the gate stays **green** (the blind spot, proven real) and the
+pseudo-locale lane goes **red** naming it.
+
+### test-quality — `node tools/check-test-quality.mjs`
+
+The floors all measure **execution**. `vitest --coverage` counts lines a test touched and
+`diff-coverage` counts them per changed file; neither can see that the test body has no
+`expect`. And test bodies are content-check-exempt in the write-guard (`pretool-write-guard.mjs`
+lets an agent write them freely — that is what makes them writable at all), so until 0.1.6
+nothing looked at them.
+
+Three findings, and the first is the sharp one:
+
+1. **`.only` — fatal, no escape.** One committed `.only` silently disables **every other test
+   in the run** while the suite still reports green and the coverage thresholds still pass
+   (they are computed over what ran). No reason makes that acceptable in a commit, so there is
+   no allowlist entry that can mute it.
+2. **A declared test that never runs** — a `.skip`/`.todo`/`.failing` MODIFIER, or `xit`/
+   `xdescribe`. Reviewable via `tools/test-quality-allow.json`.
+3. **A test body with no assertion call at all** — it executes code and reports success no
+   matter what that code does.
+
+**The distinction that matters.** Playwright's `test.skip(condition, reason)` is a RUNTIME
+conditional skip, and this harness's own data-driven specs use it constantly ("skip unless the
+app registers a matrix route"). It is not the same construct as the modifier
+`test.skip('name', fn)`, which declares a dead test. A naive `.skip` ban would red the shipped
+e2e suite; the discriminator is whether the first argument is a string TITLE.
+
+Exemptions are keyed by `<file>::<test title>` — the title, not a line number — so an entry
+survives reformatting and a moved test. A reason is mandatory; a stale entry (its file belongs
+to an opt-in module this tier does not install) is ignored, not an error. Ramped to 0.1.6.
+
+**This gate is GAMEABLE ALONE and that is understood.** `expect(true).toBe(true)` clears it.
+It is the cheap, ~50 ms half that can live in the Stop chain and stop an agent ENDING A TURN
+with an assertion-free test. What proves a test would *notice* a break is the mutation lane
+below, and that is why both exist.
+**Anti-vacuity:** `tests/gates/check-test-quality.test.mjs` pins each red, both sides of the
+Playwright-skip distinction, the `it.each` second-call body, an assertion hidden in a comment,
+the mandatory-reason fail-closed, and the ramp NOTE ↔ turn-fatal split.
+
 ## CI-only lanes (outside the chain and the Stop hook)
+
+### mutation — `pnpm mutation` (nightly, full) · per-PR in `quality-gate.yml`
+
+**The only check in the harness that asks the question coverage cannot: change the code, does a
+test go red?**
+
+This is not an abstract worry. Measured on the v0.1.5 exemplar, with all 22 gates green, the
+coverage floors passing and 45 e2e tests passing, the critical set scored **66.3%** — and among
+the survivors were the JWT **algorithm allowlist** (`algorithms: ['ES256','RS256']` could be
+emptied of the algorithm Entra actually signs with, and nothing failed), the error envelope's
+**1024-char truncation bound** (delete the `.slice` and unbounded reflected input goes back on
+the wire), the claim that decides the **RLS identity** (`oid ?? sub`), and 22 NoCoverage mutants
+covering the **entire `AUTH_MODE=entra` production path**, which no test executed at all.
+
+**Set-based, never score-based.** A mutation SCORE threshold lets quality churn silently (kill
+three mutants here, birth three survivors there — same score, worse net), and an unmeasured
+threshold is either vacuous or a permanent red light. The pre-promotion module shipped
+`thresholds: { break: 80 }` with `continue-on-error: true` and a note to remove the flag "once a
+measured run confirms 80%". That measurement was never taken; when it finally was, the exemplar
+scored 66%. The gate here is `tools/check-mutation-ratchet.mjs`: the exact SET of surviving
+mutants, compared against a committed, human-reasoned baseline.
+
+- a survivor NOT in `tools/mutation-baseline.json` → **FAIL**, naming the file, the mutator and
+  the exact edit the machine made;
+- a baseline survivor the tests have since learned to kill → NOTE (tighten with `--write`);
+- a baseline entry with an **empty reason** → **FAIL**. Accepting a survivor is a reviewed human
+  act: the file is write-guard-protected and gate-integrity-hashed, and `--write` deliberately
+  records new entries with `reason: ""` so the gate stays red until a human writes down why.
+
+**Scope** (`tools/lib/mutation-critical.mjs`, shared by the config and the diff scoper so they
+cannot disagree): `apps/server/src/**` + `apps/desktop/src/{auth,lib}/**` — the authorization and
+transport boundary. It is DIRECTORY-shaped on purpose, so it closes over work an agent adds: a
+new `apps/server/src/dal/comments.ts` is mutated the day it lands. Carve-outs are the boot path
+and the live-DB surface (no unit test can honestly reach them; the RLS suite owns those).
+React rendering is out — its net is the e2e lane, and JSX mutants are mostly equivalent noise.
+The OpenAPI route DECLARATIONS in `app.ts` are excluded in-source with
+`// Stryker disable all` … `// Stryker restore all`: a route `description` string is owned by the
+`contracts` regen-diff, not by a test.
+
+**Two lanes, both blocking.** Per-PR (`quality-gate.yml`): `tools/mutation-scope.mjs` computes
+the critical files the PR touched and hands them to `--mutate`, so the cost is proportional to
+the change and a docs-only PR pays nothing. Nightly (`mutation.yml`): the whole critical surface,
+plus `cargo-mutants` over the Rust host. **Never in the Stop chain** — a run is ~40 s on the full
+surface and the warm-validate budget is ~6 s.
+
+**Two things worth knowing before you read a report:**
+
+- *StrykerJS has no diff scoping.* `--in-diff` is a **cargo-mutants** flag; Stryker's
+  `--incremental` is a RESULT CACHE, not a diff scope, and depending on it in CI means depending
+  on a cache that misses. So the scope is computed explicitly (above), which also keeps the
+  report's file set exactly equal to the set the ratchet compares.
+- *Stryker + vitest reports FALSE survivors for mutants covered only from a `beforeAll` hook.*
+  Measured: of 62 reported survivors on the v0.1.5 exemplar, **7 were phantoms** — hand-applying
+  them reds the suite. When a mutant makes `beforeAll` throw, vitest reports "1 file failed, N
+  tests **skipped**" — zero tests *failed* — and Stryker, which decides "killed" by looking for a
+  failing test, sees none. `static=true` does **not** predict this (10 real survivors were also
+  static, so `ignoreStatic` would throw away real findings). **Write tests that call production
+  code inside `it(...)` bodies, not only from `beforeAll`** — and the fix the gate would advise
+  anyway (a direct unit test) converts a phantom into a genuine kill.
+
+**Survivor identity is POSITION-INDEPENDENT** — `(file, mutator, the original source span, the
+replacement, an occurrence index)`, not `file:line:column`. Line/column keying is what made the
+pre-promotion baseline worthless: insert one line at the top of a file and every entry below it
+becomes a "new" survivor. The compare is also scoped to the files the report actually mutated,
+without which the diff-scoped lane would report every unmutated file's survivors as "killed" and
+`--write` would silently erase them. Both are pinned in
+`tests/gates/check-mutation-ratchet.test.mjs`.
+
+**Anti-vacuity (selftest `canary-mutation`):** add ONE untested branch to a well-covered file
+(an `AUTH_CLOCK_SKEW` override in `auth/verify.ts`, at 99%) and the lane REDS with 2 new
+survivors — while the unit suite still passes 34/34 and the per-file coverage floors still pass,
+because one new branch cannot drag a 99%-covered file under the 40% branch floor. Every other
+control in the harness stays green. That gap is the reason this lane exists.
+
+**Where the exemplar stands:** 98.7% on the critical surface (529 killed, 0 NoCoverage, 7
+survivors — every one a mutant no test *can* kill, each with its reason recorded in the
+baseline: two Node APIs that treat an empty encoding exactly like `'utf8'`, two redundant guards
+TypeScript needs to narrow a type, a regex anchor made redundant by a positional reconstruction,
+and an empty-token branch that is unreachable because the Fetch spec strips trailing whitespace
+from header values).
 
 ### interaction-latency (perf lane) — `HARNESS_PERF_LANE=1 pnpm exec playwright test --project perf`
 
@@ -699,6 +857,28 @@ instrumentation did not take); the harness selftest injects a listener-registeri
 with no cleanup into `HomeScreen` and asserts the lane REDS, then that the clean scaffold
 stays green. A missing `memory` block self-disables with an adoption NOTE (the budget file is
 seeded); a malformed one FAILS.
+
+### i18n pseudo-locale + RTL sweep — `e2e/i18n.spec.ts` (agent-time e2e lane)
+
+The behavioural half of the i18n gate, and the reason both halves exist. It rests on one idea:
+
+> Under the `en-XA` pseudo-locale **every catalog string comes back visibly mangled**
+> (`⟦Ŕéáðý·ţö·ƀüíļð·····⟧`). So any plain-English text still on screen is, **by construction**, a
+> string that never went through the catalog.
+
+The assertion is therefore the exact inverse of "does it look translated": take the `en` source
+strings and prove **none** of them survives verbatim in the DOM, per route. Hardcode "Add a note"
+anywhere and this reds, naming the string — no matter how the component got it there. The
+pseudo-locales are **derived from the catalog** (`src/i18n/pseudo.ts`), so they are complete by
+construction and cannot rot; a hand-written fixture locale would silently fall back to English for
+any new key, which is precisely the failure it would exist to catch. `en-XA` also **expands text
+~30%**, the cost of a real European translation, so a layout that clips German clips here.
+
+`ar-XB` is the app's only **RTL** coverage: `dir="rtl"` through the real layout, no horizontal
+document scroll, axe clean. The app had never rendered right-to-left.
+**Anti-vacuity:** the sweep fails if the pseudo rendering of the route's own nav label is *not* on
+screen (the locale never applied → the sweep would pass by having nothing to find), and it asserts
+the catalog yields enough long fragments to be worth searching for.
 
 ### integration (desktop ↔ server) — `HARNESS_INTEGRATION_LANE=1 pnpm exec playwright test --project integration`
 

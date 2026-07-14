@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AppDialog } from '../../components/AppDialog'
 import { Input } from '../../components/Input'
+import { type MessageKey, useI18n } from '../../i18n'
 import { cn } from '../../lib/utils'
 import { rankCommands } from './fuzzyScore'
 import { pushRecent, readRecents } from './recents'
@@ -8,7 +9,16 @@ import { pushRecent, readRecents } from './recents'
 // The typed group union: adding a command with a new section is a deliberate
 // one-line extension HERE, and omitting `group` on any command is a compile
 // error — no command can ship outside the sectioned rendering.
-type CommandGroup = 'Navigation' | 'Theme' | 'View' | 'Matrix'
+//
+// These are machine IDS, not copy. They used to BE the visible section headers
+// ('Navigation' | 'Theme' | ...), which quietly made the type system and the UI
+// copy the same thing: renaming a section header was a TYPE change rippling
+// through every command definition, and translating one was impossible — the
+// header could only ever read in the language its union member was spelled in.
+// Splitting them fixes both ends. The id is what the code commits to; the copy
+// lives in the catalog under `palette.group.<id>` and is free to change, be
+// translated, or be pseudo-localized without touching a single command.
+type CommandGroup = 'navigation' | 'theme' | 'view' | 'matrix'
 
 export interface Command {
   readonly id: string
@@ -41,10 +51,22 @@ interface CommandPaletteProps {
   readonly commands: readonly Command[]
 }
 
-const RECENTS_SECTION = 'Recents'
+// The pinned-recents section id. Not a CommandGroup: no command declares itself
+// 'recents' — the section is synthesized from storage below.
+const RECENTS_SECTION = 'recents'
+
+/** Every id a rendered section can carry: a command's home group, or the pinned recents. */
+type PaletteSectionId = CommandGroup | typeof RECENTS_SECTION
+
+/** The catalog key for a section header. The template literal is deliberate: the
+ *  i18n gate resolves dynamically-built keys by their static prefix, so every
+ *  `palette.group.*` message is provably reachable from this one expression. */
+function groupLabelKey(id: PaletteSectionId): MessageKey {
+  return `palette.group.${id}`
+}
 
 interface PaletteSection {
-  readonly name: string
+  readonly id: PaletteSectionId
   readonly commands: readonly Command[]
   /** Flat option index of this section's first command — ranking (and the
    *  ArrowUp/Down keyboard model) runs ACROSS sections, not per section. */
@@ -53,15 +75,17 @@ interface PaletteSection {
 
 /** Bucket a (ranked or registration-ordered) list into sections, preserving
  *  order: a group's position is its best (earliest) member's position. */
-function groupSections(commands: readonly Command[]): { name: string; commands: Command[] }[] {
-  const sections: { name: string; commands: Command[] }[] = []
-  const byName = new Map<string, Command[]>()
+function groupSections(
+  commands: readonly Command[],
+): { id: PaletteSectionId; commands: Command[] }[] {
+  const sections: { id: PaletteSectionId; commands: Command[] }[] = []
+  const byId = new Map<PaletteSectionId, Command[]>()
   for (const command of commands) {
-    const bucket = byName.get(command.group)
+    const bucket = byId.get(command.group)
     if (bucket === undefined) {
       const fresh = [command]
-      byName.set(command.group, fresh)
-      sections.push({ name: command.group, commands: fresh })
+      byId.set(command.group, fresh)
+      sections.push({ id: command.group, commands: fresh })
     } else {
       bucket.push(command)
     }
@@ -69,11 +93,13 @@ function groupSections(commands: readonly Command[]): { name: string; commands: 
   return sections
 }
 
-function withOffsets(sections: readonly { name: string; commands: Command[] }[]): PaletteSection[] {
+function withOffsets(
+  sections: readonly { id: PaletteSectionId; commands: Command[] }[],
+): PaletteSection[] {
   const out: PaletteSection[] = []
   let offset = 0
   for (const section of sections) {
-    out.push({ name: section.name, commands: section.commands, offset })
+    out.push({ id: section.id, commands: section.commands, offset })
     offset += section.commands.length
   }
   return out
@@ -101,7 +127,7 @@ function buildSections(
     return command === undefined ? [] : [command]
   })
   if (recents.length === 0) return withOffsets(grouped)
-  return withOffsets([{ name: RECENTS_SECTION, commands: recents }, ...grouped])
+  return withOffsets([{ id: RECENTS_SECTION, commands: recents }, ...grouped])
 }
 
 // Right-aligned hint cell: subtitle then key combo, ink-muted at the app's
@@ -169,6 +195,7 @@ function PaletteOption({ command, id, active, onRun }: PaletteOptionProps) {
 // input owns keyboard interaction.
 // SOURCE: WAI-ARIA APG combobox pattern (listbox popup) [corpus: wcag/character-key-shortcuts]
 export function CommandPalette({ open, onClose, commands }: CommandPaletteProps) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   // Raw persisted ids, read once at mount; every palette-run keeps this in sync
@@ -196,7 +223,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   }
 
   return (
-    <AppDialog title="Command palette" open={open} onClose={handleClose}>
+    <AppDialog title={t('palette.title')} open={open} onClose={handleClose}>
       <Input
         role="combobox"
         aria-expanded={flat.length > 0}
@@ -204,8 +231,8 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
         aria-activedescendant={
           active === undefined ? undefined : `palette-option-${String(activeFlat)}`
         }
-        aria-label="Search commands"
-        placeholder="Type a command…"
+        aria-label={t('palette.search')}
+        placeholder={t('palette.placeholder')}
         data-autofocus
         value={query}
         onChange={(event) => {
@@ -228,21 +255,21 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
       <div
         id="command-palette-options"
         role="listbox"
-        aria-label="Commands"
+        aria-label={t('palette.commands')}
         className="mt-2 flex flex-col"
       >
         {sections.map((section) => (
-          <div key={section.name} role="group" aria-labelledby={`palette-group-${section.name}`}>
+          <div key={section.id} role="group" aria-labelledby={`palette-group-${section.id}`}>
             <div
               role="presentation"
-              id={`palette-group-${section.name}`}
+              id={`palette-group-${section.id}`}
               className="px-3 pt-2 pb-1 text-xs font-medium text-ink-muted"
             >
-              {section.name}
+              {t(groupLabelKey(section.id))}
             </div>
             {section.commands.map((command, index) => (
               <PaletteOption
-                key={`${section.name}:${command.id}`}
+                key={`${section.id}:${command.id}`}
                 command={command}
                 id={`palette-option-${String(section.offset + index)}`}
                 active={section.offset + index === activeFlat}
@@ -261,7 +288,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
             tabIndex={-1}
             className="px-3 py-2 text-sm text-ink-muted"
           >
-            No matching command
+            {t('palette.empty')}
           </div>
         )}
       </div>

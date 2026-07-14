@@ -1,15 +1,44 @@
 {
-  "//": "Per-version upgrade records applied by `update` to already-installed harnesses. Keys are released versions; each entry may carry: removed (stale template paths to delete when sha-unmodified), renamed (old path -> new path), promotedModules (opt-in modules folded into the default harness), configSteps (gate steps injected into the consumer's VALIDATE_STEPS: {name, cmd, after}), configCommandUpdates (from-guarded canonical-command rewrites: {name, from, to}), seedOnInitOnly (NEW seeded exemplar paths a newer template ships as init-time-only starting content — `update` must NOT auto-plant them into an existing install; a trailing '/' matches the whole subtree, no slash matches an exact file; collected across ALL versions, not just pending, and pullable on demand via `update --refresh-seeded <path>`). Entries are applied in version order for manifest.harnessVersion < v <= installer version. See installer/lib/migrations.mjs.",
+  "//": "Per-version upgrade records applied by `update` to already-installed harnesses. Keys are released versions; each entry may carry: removed (stale template paths to delete when sha-unmodified), renamed (old path -> new path), promotedModules (opt-in modules folded into the default harness), configSteps (gate steps injected into the consumer's gate config: {name, cmd, after, array}; array defaults to VALIDATE_STEPS — the 22-gate floor chain — and is 'STOP_HOOK_STEPS' for the non-floor turn-fatal checks. harness.config.mjs is SEEDED, so `update` never overwrites it: this injection is the ONLY way a new step reaches an existing install), configCommandUpdates (from-guarded canonical-command rewrites: {name, from, to}), seedOnInitOnly (NEW seeded exemplar paths a newer template ships as init-time-only starting content — `update` must NOT auto-plant them into an existing install; a trailing '/' matches the whole subtree, no slash matches an exact file; collected across ALL versions, not just pending, and pullable on demand via `update --refresh-seeded <path>`). Entries are applied in version order for manifest.harnessVersion < v <= installer version. See installer/lib/migrations.mjs.",
   "0.1.3": {
-    "removed": ["e2e/a11y-routes.ts"],
-    "promotedModules": ["gate-styleguide", "gate-perf-budget"],
+    "removed": [
+      "e2e/a11y-routes.ts"
+    ],
+    "promotedModules": [
+      "gate-styleguide",
+      "gate-perf-budget"
+    ],
     "configSteps": [
-      { "name": "gate-integrity", "cmd": "node tools/check-gate-integrity.mjs", "after": "format" },
-      { "name": "styleguide", "cmd": "node tools/check-styleguide-manifest.mjs", "after": "rust-check" },
-      { "name": "perf-budget", "cmd": "node tools/check-perf-budget.mjs", "after": "styleguide" },
-      { "name": "route-manifest", "cmd": "node tools/check-route-manifest.mjs", "after": "perf-budget" },
-      { "name": "e2e", "cmd": "node tools/check-e2e.mjs", "after": "route-manifest" },
-      { "name": "docs-sync", "cmd": "node tools/check-docs-sync.mjs", "after": "e2e" }
+      {
+        "name": "gate-integrity",
+        "cmd": "node tools/check-gate-integrity.mjs",
+        "after": "format"
+      },
+      {
+        "name": "styleguide",
+        "cmd": "node tools/check-styleguide-manifest.mjs",
+        "after": "rust-check"
+      },
+      {
+        "name": "perf-budget",
+        "cmd": "node tools/check-perf-budget.mjs",
+        "after": "styleguide"
+      },
+      {
+        "name": "route-manifest",
+        "cmd": "node tools/check-route-manifest.mjs",
+        "after": "perf-budget"
+      },
+      {
+        "name": "e2e",
+        "cmd": "node tools/check-e2e.mjs",
+        "after": "route-manifest"
+      },
+      {
+        "name": "docs-sync",
+        "cmd": "node tools/check-docs-sync.mjs",
+        "after": "e2e"
+      }
     ],
     "configCommandUpdates": [
       {
@@ -58,7 +87,7 @@
     ]
   },
   "0.1.6": {
-    "//": "packages/schema/drizzle/0002_notes_keyset_idx.sql is seedOnInitOnly for a reason that is NOT cosmetic: drizzle/ is a seeded PREFIX, so `update` would otherwise auto-plant a NEW MIGRATION into an existing project's schema — DDL they never wrote, applied to their database on the next db:migrate, with a filename that may collide with their own 0002_*. The harness does not write migrations for you. A fresh install gets the composite keyset index as part of its exemplar; an upgraded install is told to author its own by the DAL plan probe, which reds on the Sort and names the index shape (see tests/rls/plan-regression.test.ts).",
+    "//": "packages/schema/drizzle/0002_notes_keyset_idx.sql is seedOnInitOnly for a reason that is NOT cosmetic: drizzle/ is a seeded PREFIX, so `update` would otherwise auto-plant a NEW MIGRATION into an existing project's schema — DDL they never wrote, applied to their database on the next db:migrate, with a filename that may collide with their own 0002_*. The harness does not write migrations for you. A fresh install gets the composite keyset index as part of its exemplar; an upgraded install is told to author its own by the DAL plan probe, which reds on the Sort and names the index shape (see tests/rls/plan-regression.test.ts). || tools/mutation-baseline.json and tools/test-quality-allow.json are seedOnInitOnly for the same class of reason: both record a PROJECT'S OWN JUDGEMENTS (\"this surviving mutant is genuinely equivalent, and here is why\"; \"this test is deliberately pending\"). Planting the template's judgements into someone else's repo on `update` would silently ACCEPT survivors they never reviewed — the exact opposite of what the ratchet is for. An upgraded install therefore has no baseline, and the ratchet self-disables with an adoption NOTE until they seed their own: `pnpm mutation:baseline`, write a reason for every survivor, commit.",
     "seedOnInitOnly": [
       "LICENSE",
       "CITATION.cff",
@@ -67,9 +96,36 @@
       "tools/dto-bounds-allow.json",
       "tools/duplication-allow.json",
       "tests/rls/dal-shapes.ts",
+      "tools/i18n-allow.json",
+      "apps/desktop/src/i18n/",
       "apps/desktop/src/lib/",
       "apps/desktop/src/auth/",
-      "apps/server/src/app.cors.test.ts"
+      "apps/server/src/app.cors.test.ts",
+      "tools/mutation-baseline.json",
+      "tools/test-quality-allow.json"
+    ],
+    "promotedModules": [
+      "mutation"
+    ],
+    "configSteps": [
+      {
+        "name": "duplication",
+        "cmd": "node tools/check-duplication.mjs",
+        "after": "diff-coverage",
+        "array": "STOP_HOOK_STEPS"
+      },
+      {
+        "name": "i18n",
+        "cmd": "node tools/check-i18n.mjs",
+        "after": "duplication",
+        "array": "STOP_HOOK_STEPS"
+      },
+      {
+        "name": "test-quality",
+        "cmd": "node tools/check-test-quality.mjs",
+        "after": "i18n",
+        "array": "STOP_HOOK_STEPS"
+      }
     ]
   }
 }

@@ -21,7 +21,13 @@ import { ApiError } from '@app/schema'
 // Dev override via Vite env; otherwise the API origin baked into the committed CSP
 // (tauri.conf.json connect-src) at install time. Declared ONCE — a second copy is how a
 // screen ends up talking to the wrong origin.
-const API_ORIGIN: string = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
+//
+// `||`, NOT `??`: a SET-BUT-EMPTY var must fall back too. `??` only catches null/undefined,
+// so a bare `VITE_API_ORIGIN=` line (env.example ships exactly that line) yields '', every
+// request silently becomes a SAME-ORIGIN relative path against the dev server, and the 404s
+// read as a server fault. The same nullish-vs-empty confusion disabled audience validation
+// outright in apps/server/src/auth/verify.ts. Empty means unset.
+const API_ORIGIN: string = import.meta.env.VITE_API_ORIGIN || '{{API_ORIGIN}}'
 
 /** Resolves the bearer token, or null when the session is unauthenticated. */
 type AccessTokenProvider = () => Promise<string | null>

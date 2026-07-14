@@ -26,8 +26,11 @@ export function createSkewMiddleware(serverVersion: string): MiddlewareHandler<A
   const skewGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
     const clientVersion = c.req.header('x-client-version')
     if (clientVersion !== undefined) {
+      // `null !== serverMajor` is already true for an unparseable client version
+      // (serverMajor is a parsed finite number by construction, guarded above), so a
+      // separate `clientMajor === null` disjunct was dead code no input could reach.
       const clientMajor = majorOf(clientVersion)
-      if (clientMajor === null || clientMajor !== serverMajor) {
+      if (clientMajor !== serverMajor) {
         // SOURCE: version-skew doctrine — desktop fleets update slowly; a hard 409 with a
         // stable machine-readable code beats silent contract drift [corpus: harness/doctrine]
         return apiError(c, 409, 'version_skew', 'client major version does not match the server')

@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { en } from '../../i18n/catalog'
 import { type SubmitOutcome, useCreateNote } from './useCreateNote'
 
 // Every reducer transition is driven through the PUBLIC api (submit), never a
@@ -74,7 +75,7 @@ describe('useCreateNote', () => {
     // Reconciled: the SERVER row replaced the temp row (matched by temp id).
     expect(result.current.state.status).toBe('idle')
     expect(result.current.state.rows).toEqual([
-      { id: SERVER_NOTE.id, title: 'Hello', pending: false },
+      { id: SERVER_NOTE.id, title: 'Hello', pending: false, createdAt: SERVER_NOTE.createdAt },
     ])
     expect(result.current.state.rows[0]?.id).not.toBe(tempId)
     expect(onFailure).not.toHaveBeenCalled()
@@ -100,6 +101,7 @@ describe('useCreateNote', () => {
     // Newest first: the pending temp row sits AHEAD of the reconciled row.
     expect(result.current.state.rows.map((row) => row.pending)).toEqual([true, false])
     expect(result.current.state.rows[1]).toEqual({
+      createdAt: SERVER_NOTE.createdAt,
       id: SERVER_NOTE.id,
       title: 'Hello',
       pending: false,
@@ -110,12 +112,12 @@ describe('useCreateNote', () => {
       await expect(outcome).resolves.toBe('settled')
     })
     expect(result.current.state.rows).toEqual([
-      { id: SECOND_NOTE.id, title: 'Second', pending: false },
-      { id: SERVER_NOTE.id, title: 'Hello', pending: false },
+      { id: SECOND_NOTE.id, title: 'Second', pending: false, createdAt: SECOND_NOTE.createdAt },
+      { id: SERVER_NOTE.id, title: 'Hello', pending: false, createdAt: SERVER_NOTE.createdAt },
     ])
   })
 
-  it('rolls ONLY the temp row back on a 500 and surfaces the envelope message', async () => {
+  it('rolls ONLY the temp row back on a 500 and surfaces TRANSLATED copy, not the raw message', async () => {
     const fetchMock = vi
       .fn()
       .mockReturnValueOnce(Promise.resolve(jsonResponse(SERVER_NOTE)))
@@ -138,12 +140,17 @@ describe('useCreateNote', () => {
     // Rollback removed the temp row and ONLY the temp row — never a phantom.
     expect(result.current.state.status).toBe('error')
     expect(result.current.state.rows).toEqual([
-      { id: SERVER_NOTE.id, title: 'Hello', pending: false },
+      { id: SERVER_NOTE.id, title: 'Hello', pending: false, createdAt: SERVER_NOTE.createdAt },
     ])
-    expect(onFailure).toHaveBeenCalledWith('note storage exploded')
+    // The toast says what the envelope's `code` means, in the user's language. The server's own
+    // English message ("note storage exploded") is a diagnostic for the logs and must NOT be the
+    // sentence a user is asked to read — which is exactly what it used to be.
+    const toasted: string = onFailure.mock.calls[0]?.[0] as string
+    expect(toasted).toContain(en['error.api.internal'])
+    expect(toasted).not.toContain('note storage exploded')
   })
 
-  it('rolls back on a network failure with the thrown message', async () => {
+  it('rolls back on a network failure with translated copy (no envelope exists to quote)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.reject(new Error('offline'))),
@@ -156,7 +163,8 @@ describe('useCreateNote', () => {
     })
 
     expect(result.current.state.rows).toEqual([])
-    expect(onFailure).toHaveBeenCalledWith('offline')
+    // No envelope, so no code: the client says the one true thing it knows.
+    expect(onFailure).toHaveBeenCalledWith(en['error.api.offline'])
   })
 
   it('rejects an invalid title at the contract boundary — no fetch, no row', async () => {

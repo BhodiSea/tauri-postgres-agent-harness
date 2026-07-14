@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { hostAccessToken } from './auth/host-token'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { initLocale } from './i18n'
 import { attachConsole, isTauri } from './ipc'
 import { setAccessTokenProvider } from './lib/api-client'
 import { initTheme } from './theme/theme'
@@ -17,6 +18,12 @@ setAccessTokenProvider(hostAccessToken)
 // first React render, so the correct light/dark tokens are live at first paint
 // and no theme flash occurs.
 initTheme()
+
+// Same discipline, one attribute over: resolve the persisted (or negotiated) locale onto
+// <html lang> and <html dir> BEFORE the first render. `dir` is what makes the browser mirror
+// the layout and reorder bidirectional text, so setting it after paint would flash an
+// LTR frame at an RTL reader — the text equivalent of the theme flash above.
+initLocale()
 
 // Forward Rust-side log records into the webview devtools console (dev aid;
 // tauri-plugin-log still writes the host log file regardless).

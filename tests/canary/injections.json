@@ -1,86 +1,402 @@
 {
   "comment": "Falsifiability registry: every step in VALIDATE_STEPS ∪ STOP_HOOK_STEPS must carry at least one mechanical proof that it CAN go red. Proof kinds: 'fixture' (a repo test file that spawns the real gate and asserts exit 1 — ref must exist), 'selftest' (a literal step-name string that must appear in .github/workflows/selftest.yml), 'runner' (the step wraps a vendor tool whose non-zero exit is the red; OUR wiring's failure propagation is proven by the validate-runner tests — ref must exist). scripts/check-canary-coverage.mjs enforces bidirectional closure: an unregistered step OR a stale registry entry reds the PR that caused it. Guard-rule falsifiability is now a PER-RULE closure, not a count: check-canary-coverage.mjs imports the pure-data rule tables from .claude/hooks/lib/guard-rules.mjs (BASH_RULES, WRITE_PROTECTED, WRITE_GLOBAL_CHECKS) and asserts every rule id has a behavioral deny/allow case (a RULE_CANARIES entry) in tests/hooks/hook-contract.test.mjs — a rule added without a canary reds the PR. hookRules below keeps only a human-readable grep-able deny example per surface.",
   "steps": {
-    "format": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "biome ci exits non-zero on any diff" }],
-    "gate-integrity": [{ "kind": "fixture", "ref": "tests/gates/check-gate-integrity.test.mjs" }],
-    "rust-fmt": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
-    "types": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "tsc -b exits non-zero on type errors" }],
-    "lint": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "eslint --max-warnings 0 exits non-zero on any finding" }],
+    "format": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "biome ci exits non-zero on any diff"
+      }
+    ],
+    "gate-integrity": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-gate-integrity.test.mjs"
+      }
+    ],
+    "rust-fmt": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      }
+    ],
+    "types": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "tsc -b exits non-zero on type errors"
+      }
+    ],
+    "lint": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "eslint --max-warnings 0 exits non-zero on any finding"
+      }
+    ],
     "provenance": [
-      { "kind": "selftest", "ref": "Canary 3: strip SOURCE citations from decision sites → provenance must FAIL" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "wrong-group corpus cite on a decision site → provenance red naming site, group, and cited groups; tools/provenance-overrides.json is the reviewed escape; pre-0.1.5 baseVersion manifests downgrade to a ramp NOTE" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "bare-URL SOURCE on a host outside tools/lib/citation-domains.mjs → provenance red naming the host; same pre-0.1.5 ramp NOTE" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "C02 (v0.1.6): every corpus entry must declare `groups` (missing key = hard fail, never ramped); a presence-only (groups: []) entry can no longer wildcard-justify a flagged decision site (was: 25/35 shipped entries were universal justifiers)" },
-      { "kind": "fixture", "ref": "tests/gates/check-sources.test.mjs", "note": "G27 (v0.1.6): a consumer decision-group in tools/decision-groups.json (write-guard-protected) makes its domain constants flagged decision sites, and the coverage lockstep forces a grounding corpus entry; a malformed extension fails closed" }
+      {
+        "kind": "selftest",
+        "ref": "Canary 3: strip SOURCE citations from decision sites → provenance must FAIL"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-sources.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-sources.test.mjs",
+        "note": "wrong-group corpus cite on a decision site → provenance red naming site, group, and cited groups; tools/provenance-overrides.json is the reviewed escape; pre-0.1.5 baseVersion manifests downgrade to a ramp NOTE"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-sources.test.mjs",
+        "note": "bare-URL SOURCE on a host outside tools/lib/citation-domains.mjs → provenance red naming the host; same pre-0.1.5 ramp NOTE"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-sources.test.mjs",
+        "note": "C02 (v0.1.6): every corpus entry must declare `groups` (missing key = hard fail, never ramped); a presence-only (groups: []) entry can no longer wildcard-justify a flagged decision site (was: 25/35 shipped entries were universal justifiers)"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-sources.test.mjs",
+        "note": "G27 (v0.1.6): a consumer decision-group in tools/decision-groups.json (write-guard-protected) makes its domain constants flagged decision sites, and the coverage lockstep forces a grounding corpus entry; a malformed extension fails closed"
+      }
     ],
-    "tauri-policy": [{ "kind": "selftest", "ref": "Canary 1: weaken tauri.conf CSP to null → tauri-policy must FAIL" }],
-    "version-sync": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "tauri-policy": [
+      {
+        "kind": "selftest",
+        "ref": "Canary 1: weaken tauri.conf CSP to null → tauri-policy must FAIL"
+      }
+    ],
+    "version-sync": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      }
+    ],
     "prompts": [
-      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
-      { "kind": "selftest", "ref": "Canary 7: tamper a hash-locked prompt → prompts must FAIL" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 7: tamper a hash-locked prompt → prompts must FAIL"
+      }
     ],
-    "licenses": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "licenses": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      }
+    ],
     "schema-rls": [
-      { "kind": "selftest", "ref": "Canary 4: remove FORCE RLS from the migration → schema-rls must FAIL" },
-      { "kind": "fixture", "ref": "tests/gates/check-rls-manifest.test.mjs" }
+      {
+        "kind": "selftest",
+        "ref": "Canary 4: remove FORCE RLS from the migration → schema-rls must FAIL"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-rls-manifest.test.mjs"
+      }
     ],
-    "migrations": [{ "kind": "selftest", "ref": "Canary 2: edit an existing migration → migrations must FAIL" }],
-    "contracts": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
-    "dead-code": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "knip --strict exits non-zero on unused exports/files" }],
-    "architecture": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "depcruise exits non-zero on rule violations; the DAL-boundary rules were proven firing when added" }],
+    "migrations": [
+      {
+        "kind": "selftest",
+        "ref": "Canary 2: edit an existing migration → migrations must FAIL"
+      }
+    ],
+    "contracts": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      }
+    ],
+    "dead-code": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "knip --strict exits non-zero on unused exports/files"
+      }
+    ],
+    "architecture": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "depcruise exits non-zero on rule violations; the DAL-boundary rules were proven firing when added"
+      }
+    ],
     "build": [
-      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/build-check.test.mjs", "note": "gzip ratchet: a committed tools/perf-baseline.json with a tiny total → build red naming measured vs baseline × ratioCap and the `pnpm perf:baseline` re-baseline ceremony; exactly AT the cap stays green" },
-      { "kind": "fixture", "ref": "tests/gates/build-check.test.mjs", "note": "self-disable + fail-closed: absent baseline → NOTE naming the file and `pnpm perf:baseline` while the absolute byte budgets keep their 0.1.4 behavior; malformed baseline JSON/shape → red, never fail-open" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/build-check.test.mjs",
+        "note": "gzip ratchet: a committed tools/perf-baseline.json with a tiny total → build red naming measured vs baseline × ratioCap and the `pnpm perf:baseline` re-baseline ceremony; exactly AT the cap stays green"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/build-check.test.mjs",
+        "note": "self-disable + fail-closed: absent baseline → NOTE naming the file and `pnpm perf:baseline` while the absolute byte budgets keep their 0.1.4 behavior; malformed baseline JSON/shape → red, never fail-open"
+      }
     ],
-    "rust-check": [{ "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" }],
+    "rust-check": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      }
+    ],
     "styleguide": [
-      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "primitive boundary: a hand-rolled <button className=…> outside the controlPrimitives home → red with the FIX line naming the Button/Input primitive; controlAllow (file + reason) is the reviewed escape and malformed/stale entries fail closed; a manifest without controlPrimitives self-disables with the update --refresh-seeded adoption NOTE" },
-      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "AAA tier: an ink between the AA and AAA boundaries (~6.2:1 on the light canvas) → red printing '(min 7:1)' — the body-text pairs (ink/canvas, ink/surface) enforce 7:1 per-pair while ink-muted/accent stay at the honest 4.5 floor, so the red can only come from the raised min" },
-      { "kind": "fixture", "ref": "tests/gates/check-styleguide-manifest.test.mjs", "note": "status channel (0.1.6): a .tsx announcing role=alert/role=status/aria-invalid with no danger/success token → red naming the file (the failure toast that looked exactly like a confirmation); a token NAMED only inside a comment does not count (comments are stripped — the check must never fail open); a statusSurfaces token absent from tokens[] → red (the utility would compile to nothing); statusSurfaces.allow (file + reason) is the reviewed escape and stale entries fail; a manifest without statusSurfaces self-disables with the update --refresh-seeded adoption NOTE" },
-      { "kind": "selftest", "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-styleguide-manifest.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-styleguide-manifest.test.mjs",
+        "note": "primitive boundary: a hand-rolled <button className=…> outside the controlPrimitives home → red with the FIX line naming the Button/Input primitive; controlAllow (file + reason) is the reviewed escape and malformed/stale entries fail closed; a manifest without controlPrimitives self-disables with the update --refresh-seeded adoption NOTE"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-styleguide-manifest.test.mjs",
+        "note": "AAA tier: an ink between the AA and AAA boundaries (~6.2:1 on the light canvas) → red printing '(min 7:1)' — the body-text pairs (ink/canvas, ink/surface) enforce 7:1 per-pair while ink-muted/accent stay at the honest 4.5 floor, so the red can only come from the raised min"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-styleguide-manifest.test.mjs",
+        "note": "status channel (0.1.6): a .tsx announcing role=alert/role=status/aria-invalid with no danger/success token → red naming the file (the failure toast that looked exactly like a confirmation); a token NAMED only inside a comment does not count (comments are stripped — the check must never fail open); a statusSurfaces token absent from tokens[] → red (the utility would compile to nothing); statusSurfaces.allow (file + reason) is the reviewed escape and stale entries fail; a manifest without statusSurfaces self-disables with the update --refresh-seeded adoption NOTE"
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 5: raw hex + erased palette utility in a TSX → styleguide must FAIL"
+      }
     ],
     "perf-budget": [
-      { "kind": "fixture", "ref": "tests/gates/gate-canary-misc.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "dense-feature closure: a features/* dir importing useVirtualWindow/useRovingGrid with no perfSubject.ts → red with the create-FIX line naming the worked matrix pattern; exempt[] is the reviewed escape and malformed/stale exempt entries fail closed" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "subjects[] closure inverse: an entry pointing at a missing file and an undeclared features/*/perfSubject.ts both red before any measurement; declaring subject AND subjects together is an ambiguity red; legacy single-subject budgets keep 0.1.4 behavior plus a NOTE naming the refresh command" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "G30 (v0.1.6): the subject's marker count must SCALE with declared cells — a degenerate one-row perfSubject still contains role=gridcell and used to 'pass' the budget in ~1ms; it now reds naming rendered-vs-declared (markerScales:false is the reviewed opt-out for a container marker). G13 (v0.1.6): density is a SHAPE, not two import names — aria-rowcount / role=grid / <canvas> in a features/* dir with no perfSubject.ts reds, ramped to baseVersion 0.1.6 so an upgraded consumer's existing grid/canvas screen is a NOTE first; densitySignals[] in perf-budget.json is the reviewable extension point" },
-      { "kind": "fixture", "ref": "tests/gates/check-perf-budget.test.mjs", "note": "G15 leak discipline (v0.1.6), the AGENT-TIME half of the memory ceiling: an effect that registers a listener/interval/rAF/Observer/subscription and does not tear it down in the cleanup it RETURNS reds, naming the paired teardown. Returning `() => {}` does not satisfy it (the teardown must appear inside the returned cleanup), and a teardown named only in a COMMENT does not either — comments are blanked first, because the styleguide gate shipped exactly that fail-open once. Test files are not scanned; effectCleanupAllow (file + reason) in perf-budget.json is the reviewed escape and malformed/stale entries fail closed; ramped to baseVersion 0.1.6 so an upgraded consumer's existing effects are a NOTE first. The CI half (live listener counts across a navigate-and-back loop) is proven by the memory-lane canary in .github/workflows/selftest.yml" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/gate-canary-misc.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs",
+        "note": "dense-feature closure: a features/* dir importing useVirtualWindow/useRovingGrid with no perfSubject.ts → red with the create-FIX line naming the worked matrix pattern; exempt[] is the reviewed escape and malformed/stale exempt entries fail closed"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs",
+        "note": "subjects[] closure inverse: an entry pointing at a missing file and an undeclared features/*/perfSubject.ts both red before any measurement; declaring subject AND subjects together is an ambiguity red; legacy single-subject budgets keep 0.1.4 behavior plus a NOTE naming the refresh command"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs",
+        "note": "G30 (v0.1.6): the subject's marker count must SCALE with declared cells — a degenerate one-row perfSubject still contains role=gridcell and used to 'pass' the budget in ~1ms; it now reds naming rendered-vs-declared (markerScales:false is the reviewed opt-out for a container marker). G13 (v0.1.6): density is a SHAPE, not two import names — aria-rowcount / role=grid / <canvas> in a features/* dir with no perfSubject.ts reds, ramped to baseVersion 0.1.6 so an upgraded consumer's existing grid/canvas screen is a NOTE first; densitySignals[] in perf-budget.json is the reviewable extension point"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs",
+        "note": "G15 leak discipline (v0.1.6), the AGENT-TIME half of the memory ceiling: an effect that registers a listener/interval/rAF/Observer/subscription and does not tear it down in the cleanup it RETURNS reds, naming the paired teardown. Returning `() => {}` does not satisfy it (the teardown must appear inside the returned cleanup), and a teardown named only in a COMMENT does not either — comments are blanked first, because the styleguide gate shipped exactly that fail-open once. Test files are not scanned; effectCleanupAllow (file + reason) in perf-budget.json is the reviewed escape and malformed/stale entries fail closed; ramped to baseVersion 0.1.6 so an upgraded consumer's existing effects are a NOTE first. The CI half (live listener counts across a navigate-and-back loop) is proven by the memory-lane canary in .github/workflows/selftest.yml"
+      }
     ],
     "route-manifest": [
-      { "kind": "fixture", "ref": "tests/gates/check-route-manifest.test.mjs" },
-      { "kind": "selftest", "ref": "Canary 6: unregistered features directory → route-manifest must FAIL" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-route-manifest.test.mjs"
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 6: unregistered features directory → route-manifest must FAIL"
+      }
     ],
     "e2e": [
-      { "kind": "fixture", "ref": "tests/gates/check-e2e.test.mjs" },
-      { "kind": "selftest", "ref": "Canary 8: replace a route's EmptyState with a bare-word div, or its Skeleton with a silent spinner, or a route panel wider than the 640px min window, or remove the :focus-visible outline → the e2e lane (states/reflow/a11y quality checks, all iterating ROUTES) must FAIL" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-e2e.test.mjs"
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 8: replace a route's EmptyState with a bare-word div, or its Skeleton with a silent spinner, or a route panel wider than the 640px min window, or remove the :focus-visible outline → the e2e lane (states/reflow/a11y quality checks, all iterating ROUTES) must FAIL"
+      }
     ],
     "docs-sync": [
-      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs" },
-      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs", "note": "renaming/removing a numbered gates-catalog section reds the catalog-lockstep sub-check; a pre-0.1.5 baseVersion manifest downgrades it to a ramp NOTE" },
-      { "kind": "fixture", "ref": "tests/gates/check-docs-sync.test.mjs", "note": "agent roster: granting a reviewer Write or Bash, dropping its disallowedTools, omitting its tools list, or unparseable frontmatter each red the roster sub-check — reviewers are read-only by construction; deliberately NOT ramped (the roster is harness-owned and refreshes with the gate in the same update)" }
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-docs-sync.test.mjs"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-docs-sync.test.mjs",
+        "note": "renaming/removing a numbered gates-catalog section reds the catalog-lockstep sub-check; a pre-0.1.5 baseVersion manifest downgrades it to a ramp NOTE"
+      },
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-docs-sync.test.mjs",
+        "note": "agent roster: granting a reviewer Write or Bash, dropping its disallowedTools, omitting its tools list, or unparseable frontmatter each red the roster sub-check — reviewers are read-only by construction; deliberately NOT ramped (the roster is harness-owned and refreshes with the gate in the same update)"
+      }
     ],
-    "validate": [{ "kind": "fixture", "ref": "tests/gates/validate-runner.test.mjs" }],
+    "validate": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/validate-runner.test.mjs"
+      }
+    ],
     "rls-isolation": [
-      { "kind": "selftest", "ref": "RLS runner FAILS CLOSED without a database (CI=true)" },
-      { "kind": "selftest", "ref": "Canary 9: drop the keyset index → the DAL plan probe must FAIL (a Sort over the owner partition)", "note": "G06 (v0.1.6): the plan probe no longer EXPLAINs a statement it wrote itself. It drives the REAL DAL through a capturing drizzle pg-proxy and EXPLAINs the SQL the DAL emitted, for every method + argument shape registered in tests/rls/dal-shapes.ts (seeded, seedOnInitOnly — absent, the probe self-disables with an adoption NOTE), and reds on any Seq Scan, Sort, Incremental Sort or per-row SubPlan. The registry is CLOSED: a DAL method with no shape reds, a shape naming a dead method reds, a shape whose run() emits no SQL reds, and a stale plan-node allowance reds. This is what the v0.1.5 probe could not see: it EXPLAINed a bare `SELECT * FROM notes` and asserted only 'not a Seq Scan', staying green for five releases while notesDal.list() sorted the owner's ENTIRE partition on every page (100 010 rows read to return 51) with the keyset cursor demoted from an Index Cond to a Filter. Deleting 0002_notes_keyset_idx.sql restores exactly that schema; the canary asserts the DAL probe reds AND that the old policy-shape probe stays green, which is the proof the old check was structurally blind. The seed scale matters and is part of the proof: at the old 10 rows/owner a 51-row page IS the owner's whole data, so a Sort is the planner's CORRECT choice and 'no Sort' would be a false assertion — the probe now seeds 250 rows/owner, past the measured crossover" }
+      {
+        "kind": "selftest",
+        "ref": "RLS runner FAILS CLOSED without a database (CI=true)"
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 9: drop the keyset index → the DAL plan probe must FAIL (a Sort over the owner partition)",
+        "note": "G06 (v0.1.6): the plan probe no longer EXPLAINs a statement it wrote itself. It drives the REAL DAL through a capturing drizzle pg-proxy and EXPLAINs the SQL the DAL emitted, for every method + argument shape registered in tests/rls/dal-shapes.ts (seeded, seedOnInitOnly — absent, the probe self-disables with an adoption NOTE), and reds on any Seq Scan, Sort, Incremental Sort or per-row SubPlan. The registry is CLOSED: a DAL method with no shape reds, a shape naming a dead method reds, a shape whose run() emits no SQL reds, and a stale plan-node allowance reds. This is what the v0.1.5 probe could not see: it EXPLAINed a bare `SELECT * FROM notes` and asserted only 'not a Seq Scan', staying green for five releases while notesDal.list() sorted the owner's ENTIRE partition on every page (100 010 rows read to return 51) with the keyset cursor demoted from an Index Cond to a Filter. Deleting 0002_notes_keyset_idx.sql restores exactly that schema; the canary asserts the DAL probe reds AND that the old policy-shape probe stays green, which is the proof the old check was structurally blind. The seed scale matters and is part of the proof: at the old 10 rows/owner a 51-row page IS the owner's whole data, so a Sort is the planner's CORRECT choice and 'no Sort' would be a false assertion — the probe now seeds 250 rows/owner, past the measured crossover"
+      }
     ],
-    "unit": [{ "kind": "runner", "ref": "tests/gates/validate-runner.test.mjs", "note": "vitest exits non-zero on failing tests or coverage-threshold misses" }],
-    "diff-coverage": [{ "kind": "fixture", "ref": "tests/gates/check-diff-coverage.test.mjs", "note": "an uncovered new src file (absent from coverage-final.json) and a below-floor changed file both red the Stop chain naming file + metric; missing coverage-final.json fails closed" }],
-    "duplication": [{ "kind": "fixture", "ref": "tests/gates/check-duplication.test.mjs", "note": "a token-clone (>=70 tokens / 6 lines) pasted across apps/*/src or packages/*/src reds naming both sites + a content fingerprint; the reviewed tools/duplication-allow.json mutes an accepted clone by fingerprint and malformed/absent entries fail closed; a pre-0.1.6 baseVersion downgrades a clone to a ramp NOTE (green) so existing copy-paste never ambushes an update, turn-fatal from 0.1.6" }]
+    "unit": [
+      {
+        "kind": "runner",
+        "ref": "tests/gates/validate-runner.test.mjs",
+        "note": "vitest exits non-zero on failing tests or coverage-threshold misses"
+      }
+    ],
+    "diff-coverage": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-diff-coverage.test.mjs",
+        "note": "an uncovered new src file (absent from coverage-final.json) and a below-floor changed file both red the Stop chain naming file + metric; missing coverage-final.json fails closed"
+      }
+    ],
+    "i18n": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-i18n.test.mjs",
+        "note": "G22 (v0.1.6), the STATIC half: a hardcoded user-facing string anywhere under apps/desktop/src — JSX text, a user-facing attribute (aria-label/title/placeholder/label/alt), or the object literals that feed them (the ROUTES manifest's route names, the shortcut registry's descriptions, palette command titles, matrix column headers) — reds naming the string and the catalog key to add. So does `Intl.`/`toLocale*`/`.toFixed(` outside apps/desktop/src/i18n/ (`.toFixed(2)` hardcodes '.' as the decimal mark, which is how the matrix shipped '0.75' to a German reader who writes '0,75'). So does a DEAD catalog key. tools/i18n-allow.json is the reviewed escape and malformed/stale entries fail closed; ramped to baseVersion 0.1.6 so an upgraded consumer's existing English literals are a NOTE first; the whole gate self-disables (with the adoption command) when the seam is not installed, so it cannot ambush a project that never opted in."
+      },
+      {
+        "kind": "selftest",
+        "ref": "Canary 10: a user-facing string assembled at RUNTIME → the static i18n gate is BLIND, and the e2e pseudo-locale lane must FAIL",
+        "note": "G22, the BEHAVIOURAL half — and the reason both halves exist. The static gate is a text scan: a string built at runtime (`['Ready','to','build'].join(' ')`), assembled from fragments, or returned by a helper is invisible to it BY CONSTRUCTION. e2e/i18n.spec.ts closes that: under the derived `en-XA` pseudo-locale every catalog string comes back visibly mangled, so any `en` source string still on screen necessarily never went through the catalog — the sweep takes the catalog's own English and proves none of it survives, per route. The selftest injects exactly the runtime-assembled string the static gate cannot see and asserts the gate stays GREEN while the lane goes RED naming it. The same spec drives `ar-XB`, which is the app's only RTL coverage: dir flips, no horizontal overflow, axe clean."
+      }
+    ],
+    "duplication": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-duplication.test.mjs",
+        "note": "a token-clone (>=70 tokens / 6 lines) pasted across apps/*/src or packages/*/src reds naming both sites + a content fingerprint; the reviewed tools/duplication-allow.json mutes an accepted clone by fingerprint and malformed/absent entries fail closed; a pre-0.1.6 baseVersion downgrades a clone to a ramp NOTE (green) so existing copy-paste never ambushes an update, turn-fatal from 0.1.6"
+      }
+    ],
+    "test-quality": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-test-quality.test.mjs",
+        "note": "G09 (v0.1.6), the AGENT-TIME half of assertion quality. A test body with no assertion call reds naming the test; a committed `.only` reds with NO reviewed escape (it silently disables every other test in the run while the suite still reports green); a `.skip`/`.todo`/`.failing` MODIFIER or an xit/xdescribe reds as a declared test that never runs. Playwright's RUNTIME conditional skip — test.skip(condition, reason), which this harness's own data-driven e2e specs use constantly — is NOT a disabled test and must stay green: the discriminator is whether the first argument is a string TITLE. An assertion inside a comment does not satisfy the gate. tools/test-quality-allow.json mutes a reviewed exemption BY TEST TITLE (position-independent) and a missing reason fails closed. Ramped: a pre-0.1.6 baseVersion downgrades findings to a NOTE, turn-fatal from 0.1.6. This half is deliberately GAMEABLE ALONE (`expect(true).toBe(true)` clears it) — the primary control is the mutation lane below."
+      }
+    ]
   },
   "hookRules": {
     "pretool-bash-guard.mjs": {
       "denyToolCallSites": 1,
-      "denyExamples": ["rm -rf node_modules","git push --force origin main","psql \"$MIGRATOR_DATABASE_URL\" -c \"select 1\""]
+      "denyExamples": [
+        "rm -rf node_modules",
+        "git push --force origin main",
+        "psql \"$MIGRATOR_DATABASE_URL\" -c \"select 1\""
+      ]
     },
     "pretool-write-guard.mjs": {
       "denyToolCallSites": 11,
-      "denyExamples": ["tools/harness.config.mjs","dangerouslySetInnerHTML","tools/route-allowlist.json"]
+      "denyExamples": [
+        "tools/harness.config.mjs",
+        "dangerouslySetInnerHTML",
+        "tools/route-allowlist.json"
+      ]
     }
+  },
+  "lanes": {
+    "static": [
+      {
+        "kind": "steps",
+        "note": "runs `node tools/validate.mjs --min-floor` — every step in it is proven in #steps above."
+      }
+    ],
+    "unit": [
+      {
+        "kind": "steps",
+        "note": "runs vitest --coverage, check-diff-coverage, check-duplication and check-test-quality — all four are proven in #steps above."
+      }
+    ],
+    "mutation": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-mutation-ratchet.test.mjs",
+        "note": "G09 (v0.1.6), the PRIMARY assertion-quality control — the only check in the harness that asks the question coverage cannot: change the code, does a test go red? A surviving mutant the committed baseline does not accept reds the lane, naming the file, the mutator, and the exact edit the machine made. An accepted survivor with an EMPTY reason reds (accepting one is a reviewed human act, not a rubber stamp). A NoCoverage mutant counts as a survivor (no test even RUNS that code). Identity is POSITION-INDEPENDENT, so a line shift never invalidates the baseline but changing the guarded code does; the compare is scoped to the files the report actually mutated, so the diff-scoped PR lane cannot report unmutated files as 'killed' nor erase their entries on --write. An absent baseline self-disables locally (adoption) and FAILS CLOSED in CI."
+      },
+      {
+        "kind": "selftest",
+        "ref": ".github/workflows/selftest.yml",
+        "job": "canary-mutation",
+        "note": "end-to-end, against a real Stryker run on a real scaffold (selftest job `canary-mutation`): add ONE untested branch to a well-covered file (an `AUTH_CLOCK_SKEW` env override in apps/server/src/auth/verify.ts, which sits at 99% mutation score) and the lane must RED with 2 new survivors, naming the exact edit the machine made. This is the whole thesis of the gate, and it is checked, not asserted: with that branch added the unit suite still passes (34/34) and the per-file coverage floors still pass (one new branch cannot drag a 99%-covered file under the 40% branch floor) — so EVERY other control in the harness stays green and only the mutation ratchet reds. The fixture proof above covers the ratchet's arithmetic; this covers the wiring: Stryker, the vitest runner, the diff scoper and the ratchet actually reaching each other."
+      }
+    ],
+    "runtime-rls": [
+      {
+        "kind": "steps",
+        "note": "runs `node tests/rls/run-rls.mjs` — proven under the 'rls-isolation' step above (isolation matrix + the DAL plan probe, incl. selftest Canary 9)."
+      }
+    ],
+    "rust": [
+      {
+        "kind": "steps",
+        "note": "runs the rust-fmt/rust-check gates plus clippy/deny/specta-drift — proven under 'rust-check' above."
+      }
+    ],
+    "e2e-fast": [
+      {
+        "kind": "steps",
+        "note": "runs the playwright specs behind the `e2e` step (mock-IPC lane: axe wcag22aa over every ROUTES entry, focus/reflow/forced-colors, the i18n pseudo-locale + RTL sweep, degraded network) — proven under the 'e2e' step above, whose check-e2e.mjs gate asserts the spec set is neither vacuous nor truncated."
+      }
+    ],
+    "perf-lane": [
+      {
+        "kind": "fixture",
+        "ref": "tests/gates/check-perf-budget.test.mjs",
+        "note": "the budget arithmetic and the effect-cleanup leak scan."
+      },
+      {
+        "kind": "selftest",
+        "ref": ".github/workflows/selftest.yml",
+        "job": "canary-perf-lane",
+        "note": "CI-only wall-clock lane (interaction-latency + memory). Proof: an injected uncancelled listener on a route makes the memory spec RED (live window/document listener count grows across an in-page navigate loop), and a blocking op on a tracked interaction blows the interaction budget. The CDP metrics this lane does NOT use (Nodes/JSEventListeners) were measured to be non-discriminating — see docs/harness/gates-catalog.md."
+      }
+    ],
+    "integration-lane": [
+      {
+        "kind": "selftest",
+        "ref": ".github/workflows/selftest.yml",
+        "job": "canary-integration",
+        "note": "C01: the desktop<->server seam. Strip the Authorization header from apps/desktop/src/lib/api-client.ts and the real create->list->paginate smoke 401s and REDS. This is the lane that proves the flagship exemplar actually runs against its own server, which no gate did before 0.1.6."
+      }
+    ],
+    "changes": [
+      {
+        "kind": "steps",
+        "note": "a paths-filter job: it computes which downstream lanes run and asserts nothing itself. Its failure mode (mis-filtering) is covered by the desktop-windows lane's own gating, not by an injection."
+      }
+    ],
+    "desktop-windows": [
+      {
+        "kind": "steps",
+        "note": "the signed-installer + tauri-driver e2e lane (ci-windows-e2e module). Proven by the module's own e2e specs; the bundle/gzip ratchet inside it is proven by tests/gates/check-perf-budget.test.mjs."
+      }
+    ]
   }
 }

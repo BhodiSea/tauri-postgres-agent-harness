@@ -138,16 +138,22 @@ export function applyFileMigrations({ targetDir, files, modules, report, entries
   }
 }
 
-// Inject one step into the consumer's VALIDATE_STEPS in tools/harness.config.mjs.
-// The config is human-tunable (mode 'config'), so this is line-anchored, not a
-// rewrite: uncomment a matching opt-in line when present, else insert after the
-// `after` step (or before the array close). Returns the new content, or null
-// when the anchors are gone (doctor then reports the missing step — fail loud,
-// never guess at a mangled config).
-/** @param {string} content @param {{ name: string, cmd: string, after?: string }} step */
-export function injectConfigStep(content, { name, cmd, after }) {
+// Inject one step into the consumer's tools/harness.config.mjs — into VALIDATE_STEPS (the
+// 22-gate floor chain) or into STOP_HOOK_STEPS (`array: 'STOP_HOOK_STEPS'`), which is where
+// the non-floor turn-fatal checks live. Both matter: harness.config.mjs is SEEDED (a project
+// tunes it, so `update` must never overwrite it), which means a new Stop-chain step reaches
+// an existing install ONLY through this injection. Without it, an upgraded consumer would get
+// the new checks in CI but never at turn-end — the agent would lose the fast feedback loop
+// that is the whole point of the Stop chain.
+//
+// The config is human-tunable, so this is line-anchored, not a rewrite: uncomment a matching
+// opt-in line when present, else insert after the `after` step (or before the array close).
+// Returns the new content, or null when the anchors are gone (doctor then reports the missing
+// step — fail loud, never guess at a mangled config).
+/** @param {string} content @param {{ name: string, cmd: string, after?: string, array?: string }} step */
+export function injectConfigStep(content, { name, cmd, after, array = 'VALIDATE_STEPS' }) {
   const lines = content.split('\n')
-  const declIdx = lines.findIndex((l) => l.includes('VALIDATE_STEPS') && l.includes('['))
+  const declIdx = lines.findIndex((l) => l.includes(array) && l.includes('['))
   if (declIdx === -1) return null
   let closeIdx = -1
   for (let i = declIdx + 1; i < lines.length; i += 1) {
@@ -204,7 +210,7 @@ export function applyConfigSteps({ targetDir, files, report, entries, dryRun }) 
     const next = injectConfigStep(content, step)
     if (next === null) {
       report.notes.push(
-        `could not add gate step '${step.name}' to ${cfgRel} (VALIDATE_STEPS anchor not found) — add ['${step.name}', '${step.cmd}'] manually; doctor will flag it until then`,
+        `could not add gate step '${step.name}' to ${cfgRel} (${step.array ?? 'VALIDATE_STEPS'} anchor not found) — add ['${step.name}', '${step.cmd}'] manually; doctor will flag it until then`,
       )
       continue
     }

@@ -63,4 +63,17 @@ export const STOP_HOOK_STEPS = [
   // until deliberately graduated. CI enforces it in the `unit` job alongside
   // diff-coverage.
   ['duplication', 'node tools/check-duplication.mjs'],
+  // The locale seam: no hardcoded user-facing string, and locale-sensitive formatting (Intl,
+  // toLocale*, toFixed) only inside apps/desktop/src/i18n/. A Stop-chain step, NOT a floor
+  // member (the 22-gate floor stays frozen) — fast, deterministic, and ramped so a pre-0.1.6
+  // consumer's existing English literals are a NOTE until deliberately graduated. The
+  // behavioural half (a pseudo-locale + RTL sweep over every route) runs in the e2e lane.
+  ['i18n', 'node tools/check-i18n.mjs'],
+  // Assertion PRESENCE — the cheap, fast half of the assertion-quality control. Coverage
+  // counts lines a test EXECUTED; nothing else in this chain notices that the test body has
+  // no `expect`, or that a committed `.only` has silently disabled every other test in the
+  // suite. ~50ms, so it belongs here. What it CANNOT do is prove a test would notice the
+  // code breaking — that is the mutation lane (tools/check-mutation-ratchet.mjs), which runs
+  // in CI because it takes minutes and this chain has a ~6s budget. Ramped to 0.1.6.
+  ['test-quality', 'node tools/check-test-quality.mjs'],
 ]

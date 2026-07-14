@@ -48,12 +48,14 @@ const ESCAPE_LISTS = [
   'tools/route-allowlist.json',
   'tools/dto-bounds-allow.json', // exempting a wire string from the .max() bound
   'tools/duplication-allow.json', // accepting a code clone
+  'tools/i18n-allow.json', // letting a user-facing string bypass the catalog
   'tools/perf-budget.json',
   'tools/interaction-budget.json',
   'tools/bundle-budget.json',
   'tools/perf-baseline.json',
   'tools/styleguide.manifest.json',
-  'tools/mutation-baseline.json',
+  'tools/mutation-baseline.json', // accepting a surviving mutant
+  'tools/test-quality-allow.json', // letting a disabled/assertion-free test stand
 ]
 
 if (!existsSync(MANIFEST)) skipOrFail(GATE, 'no .harness/manifest.json (not an installed harness)')

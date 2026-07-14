@@ -43,8 +43,11 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 - A turn is NOT done until `pnpm validate` is green. The Stop hook re-runs
   validate + `node tests/rls/run-rls.mjs` + `pnpm exec vitest run --silent` +
   `node tools/check-diff-coverage.mjs` + `node tools/check-duplication.mjs`
-  (token clones across `apps/*/src` + `packages/*/src`) and exits 2 until
-  everything passes. Fix root causes; do not stop.
+  (token clones across `apps/*/src` + `packages/*/src`) + `node tools/check-i18n.mjs`
+  (no hardcoded user-facing string; locale-sensitive formatting only in `src/i18n/`)
+  + `node tools/check-test-quality.mjs` (every test asserts something; nothing
+  focused or disabled) and exits 2 until everything passes. Fix root causes; do
+  not stop.
 - **Prove, don't claim.** Show passing gate output; never assert "it works".
 - Do NOT edit a test in the same turn as the fix it covers (reward-hacking).
 - The 22 gates, in order: `format`, `gate-integrity`, `rust-fmt`, `types`,
@@ -142,6 +145,32 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   `vitest run --coverage` against the thresholds in `vitest.config.ts`, then
   `tools/check-diff-coverage.mjs` holds every CHANGED source file to the
   per-file floors there — a feature landing without tests reds the turn.
+- **Coverage is not verification, and the harness measures BOTH.** Coverage
+  proves a test EXECUTED your line. It cannot see that the test asserts nothing,
+  and it cannot see that the assertion is wrong. Two controls close that:
+  - `tools/check-test-quality.mjs` (Stop chain, ~50ms): every `it`/`test` body
+    must contain an assertion call; a committed `.only` is fatal with NO escape
+    (it silently disables every other test in the run while the suite reports
+    green); a `.skip`/`.todo` MODIFIER is a declared test that never runs.
+    Playwright's RUNTIME conditional skip — `test.skip(condition, reason)` — is
+    a different construct and stays green. Reviewed escapes:
+    `tools/test-quality-allow.json` (a reason is mandatory).
+  - **The mutation lane** (CI, blocking): StrykerJS changes your code and asks
+    whether a test goes red. It runs on the CRITICAL surface —
+    `apps/server/src/**`, `apps/desktop/src/{auth,lib}/**`
+    (`tools/lib/mutation-critical.mjs`) — scoped to the files a PR touched, plus
+    a nightly full sweep. The gate is a SET-based ratchet against
+    `tools/mutation-baseline.json`, never a score threshold: a NEW surviving
+    mutant reds. **Accepting a survivor is a reviewed human act** — the file is
+    write-guard-protected and the gate FAILS on an entry with an empty reason.
+    Write the test that kills it; only record a survivor when no behaviour can
+    distinguish it (a redundant guard TypeScript needs, a Node API that treats
+    an empty string exactly like the value it replaced). Run it yourself with
+    `pnpm mutation`.
+  This is not theory. On the v0.1.5 exemplar every gate was green, coverage
+  passed, and the JWT algorithm allowlist, the error-envelope truncation bound,
+  and the whole `AUTH_MODE=entra` path could each be broken without a single
+  test failing.
 - **Styling is tokens-only, in BOTH themes.** The `@theme` in
   `apps/desktop/src/styles.css` (dark = base) + `:root[data-theme='light']` +
   `tools/styleguide.manifest.json` are the ENTIRE design vocabulary: default
@@ -182,6 +211,18 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   nothing else can see it: the render benchmark mounts once and the e2e suite never
   navigates back. The CI-only memory ceiling (`e2e/memory.spec.ts`) counts live
   window/document listeners across a mount/unmount loop and reds on growth.
+- **Every user-facing string is a key in `apps/desktop/src/i18n/catalog.ts`.** No literal in
+  JSX, in `aria-label`/`title`/`placeholder`/`label`/`alt`, or in the object literals that
+  hold copy (route names, shortcut descriptions, palette titles, column headers). Render it
+  with `t('key')` — `const { t } = useI18n()` in a component, the plain `t` export outside
+  one (the store is module-level precisely so `matrixData.ts` and `perfSubject.ts` can use
+  it). Plurals come from `Intl.PluralRules` via a `count` param, never an `if`. `Intl`,
+  `toLocale*` and `.toFixed()` are BANNED outside `src/i18n/` — `.toFixed(2)` hardcodes the
+  `.` decimal mark, so a German reader sees `0.75` where they write `0,75`. Numbers and dates
+  reach the screen through message placeholders and the `format*` helpers. An error's
+  user-facing copy comes from the envelope's stable `code` (`i18n/errors.ts`); the server's
+  raw `message` is a support detail, never the sentence a user is asked to read. Turn-fatal
+  (`i18n` Stop step); the e2e pseudo-locale + RTL sweep catches what the scan cannot.
 - **Motion is opt-in**: animations only behind `motion-safe:`, with the global
   `prefers-reduced-motion` backstop in styles.css — e2e asserts the held
   loading skeleton runs ZERO animations under reduced motion.

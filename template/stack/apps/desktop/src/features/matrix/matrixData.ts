@@ -1,14 +1,28 @@
 import type { Note } from '@app/schema'
+import { type MessageKey, t } from '../../i18n'
 
 // The matrix's data model: dense numeric columns derived from the NoteDto wire
 // type, plus a synthetic generator for load/perf work. All hand-rolled — no
 // chart or data-grid library (lint-banned in this feature).
+//
+// THIS MODULE IS NOT A COMPONENT, and it carries copy (column headers, synthetic
+// row labels). So it reaches the catalog through the PLAIN `t` export from
+// src/i18n — the module-level store — not the useI18n hook, which would need a
+// tree it never has (perfSubject.ts renders the grid through renderToString with
+// no provider anywhere). This is the case i18n/index.ts is a store and not a
+// context in order to serve.
 
 export interface MatrixColumn {
   /** Machine key, also the aria/testing handle. */
   readonly key: string
-  /** Human column header. */
-  readonly label: string
+  /**
+   * Catalog key for the human column header — NOT the header text. The consumer
+   * resolves it with `t()` at RENDER time, and that is the whole point: this
+   * array is a module-level const, evaluated once on import, so a resolved
+   * string here would freeze whichever locale happened to be active at boot and
+   * never follow a locale switch.
+   */
+  readonly labelKey: MessageKey
 }
 
 export interface MatrixRow {
@@ -22,12 +36,12 @@ export interface MatrixRow {
 // The numeric projection of a note. Every column is derivable from a NoteDto so
 // notesToMatrixRows and makeSyntheticRows stay shape-compatible.
 export const MATRIX_COLUMNS: readonly MatrixColumn[] = [
-  { key: 'confidence', label: 'Confidence' },
-  { key: 'title', label: 'Title len' },
-  { key: 'body', label: 'Body len' },
-  { key: 'words', label: 'Words' },
-  { key: 'lines', label: 'Lines' },
-  { key: 'day', label: 'Day' },
+  { key: 'confidence', labelKey: 'matrix.column.confidence' },
+  { key: 'title', labelKey: 'matrix.column.title' },
+  { key: 'body', labelKey: 'matrix.column.body' },
+  { key: 'words', labelKey: 'matrix.column.words' },
+  { key: 'lines', labelKey: 'matrix.column.lines' },
+  { key: 'day', labelKey: 'matrix.column.day' },
 ]
 
 const MS_PER_DAY = 86_400_000
@@ -77,7 +91,9 @@ export function makeSyntheticRows(count: number): readonly MatrixRow[] {
   for (let i = 0; i < count; i += 1) {
     rows.push({
       id: `synthetic-${String(i)}`,
-      label: `Row ${String(i + 1)}`,
+      // Called at render time, so `t` reads the locale that is active NOW — the
+      // id above stays machine-stable, only the human label is translated.
+      label: t('matrix.row', { n: i + 1 }),
       values: [
         rng(),
         Math.floor(rng() * 80) + 1,
@@ -91,7 +107,10 @@ export function makeSyntheticRows(count: number): readonly MatrixRow[] {
   return rows
 }
 
-/** Grid display formatting: fractions to 2dp, everything else as an integer. */
-export function formatCell(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
-}
+// formatCell() used to live here — DELETED, do not bring it back. Its rule
+// ("fractions to 2dp, everything else an integer") survives verbatim in
+// formatCellValue() in src/i18n; what did not survive is how it spelled that
+// rule. `value.toFixed(2)` hardcodes `.` as the decimal mark, so the grid showed
+// "0.75" to a German reader who writes "0,75" — inside a function named
+// formatCell, which is exactly where you would look for that bug and not see it.
+// Cell rendering is now MatrixGrid -> formatCellValue, which asks the locale.

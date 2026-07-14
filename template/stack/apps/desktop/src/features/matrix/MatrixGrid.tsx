@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
-import { formatCell, type MatrixColumn, type MatrixRow } from './matrixData'
+import { formatCellValue, useI18n } from '../../i18n'
+import type { MatrixColumn, MatrixRow } from './matrixData'
 import type { GridPosition } from './useRovingGrid'
 import { computeWindow, ROW_HEIGHT, useScrollTop } from './useVirtualWindow'
 
@@ -40,6 +41,7 @@ export function MatrixGrid({
   viewportHeight,
   onNearEnd,
 }: MatrixGridProps) {
+  const { t } = useI18n()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoHeight, setAutoHeight] = useState(0)
   const scrollTop = useScrollTop(scrollRef)
@@ -101,7 +103,13 @@ export function MatrixGrid({
     <div
       ref={scrollRef}
       role="grid"
-      aria-label="Notes matrix"
+      aria-label={t('matrix.grid')}
+      // NUMERIC ARIA IS MACHINE DATA, NOT COPY. aria-rowcount/-colcount/-rowindex/
+      // -colindex and the data-row/data-col handles are parsed, not read aloud —
+      // they go out as RAW numbers and must never be run through formatNumber().
+      // A locale's grouping separator ("1,001") would make them unparseable and
+      // break the ARIA contract with assistive tech. Only formatCellValue(), on
+      // the cell VALUES below, is localized.
       aria-rowcount={totalRows}
       aria-colcount={totalCols}
       // Roving tabindex: the grid is programmatically focusable (-1) but never a
@@ -123,7 +131,7 @@ export function MatrixGrid({
             aria-colindex={1}
             className="truncate px-3 text-xs font-semibold"
           >
-            Note
+            {t('matrix.column.note')}
           </span>
           {columns.map((column, c) => (
             <span
@@ -132,7 +140,7 @@ export function MatrixGrid({
               aria-colindex={c + 2}
               className="truncate px-3 text-right text-xs font-semibold"
             >
-              {column.label}
+              {t(column.labelKey)}
             </span>
           ))}
         </div>
@@ -174,7 +182,7 @@ export function MatrixGrid({
                       tabIndex={cellActive ? 0 : -1}
                       className={`px-3 text-right text-sm tabular-nums ${cellActive ? 'bg-surface text-ink' : 'text-ink-muted'}`}
                     >
-                      {formatCell(value)}
+                      {formatCellValue(value)}
                     </span>
                   )
                 })}

@@ -468,6 +468,128 @@ jobs:
           git checkout -q -- packages/schema/drizzle/
           echo 'canary OK: the DAL plan probe went red on the v0.1.5 index, while the old policy probe stayed green'
 
+  # ---------------------------------------------------------------------------
+  # EVERY MODULE'S CODE ACTUALLY COMPILES AND PASSES.
+  #
+  # bootstrap-linux scaffolds with the DEFAULT tier, which installs 2 of the 10 modules
+  # (ci-provenance, ci-windows-release — and both are workflow YAML, not code). So until
+  # 0.1.6, EIGHT modules' source had never been typechecked, linted, or executed by the
+  # harness's own CI. Not once. The `--tier strict` path was documented, offered by the
+  # installer, and verified by nothing.
+  #
+  # It shipped exactly the defects you would predict:
+  #   • observability's fake NotesDal still returned `[]` after list() became a keyset page
+  #     ({ items, nextCursor }) — `tsc -b` RED on any install that enabled the module.
+  #   • gate-a11y-deep computed "has an accessible name" from textContent || aria-label ||
+  #     title. An <input> is a void element, so its textContent is ALWAYS '' — the check could
+  #     never pass a correctly labelled input, and reddened on the harness's own Field
+  #     primitive. Worse, the only way to satisfy it was to add a redundant aria-label, which
+  #     OVERRIDES the visible label: the "fix" it pushed you toward was a real a11y regression.
+  #
+  # Both are the same bug: code nobody ran. This job is the fix — it installs EVERY module and
+  # puts the whole surface through the real gate. Deliberately narrower than bootstrap-linux
+  # (no perf lane, no canary sweep, node 22 only): those prove the default scaffold's
+  # BEHAVIOUR, this proves the module surface COMPILES AND PASSES. Adding a module now means
+  # adding it to something that runs.
+  # ---------------------------------------------------------------------------
+  bootstrap-strict:
+    name: strict tier (every module installed) — the whole surface must compile and pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - name: Tauri Linux build deps (pinned webkit/gtk apt list)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Bootstrap a fresh project at --tier strict (ALL modules)
+        run: |
+          node installer/cli.mjs init --dir "$GITHUB_WORKSPACE/.selftest/strict" --yes \
+            --tier strict \
+            --set PROJECT_NAME="Selftest Strict" \
+            --set GITHUB_OWNER=selftest-owner \
+            --set SECURITY_OWNERS=@selftest-owner
+      # ANTI-VACUITY. If `--tier strict` silently planted nothing, every gate below would pass
+      # for the wrong reason and this job would certify an empty surface. Assert each module's
+      # CODE (not its docs) is on disk before anything is allowed to go green.
+      - name: Positive control — every module's code is actually on disk
+        working-directory: .selftest/strict
+        run: |
+          missing=0
+          for f in \
+            apps/server/src/observability/span-routes.test.ts \
+            apps/server/src/crash/redact.ts \
+            packages/eval/src/adapters/live.ts \
+            e2e/a11y-deep.spec.ts \
+            e2e-windows/smoke.e2e.ts \
+            tests/rls/hitl-transition-matrix.test.ts \
+            tools/check-mutation-ratchet.mjs \
+            tools/check-eval-disjoint.mjs \
+            tools/check-notices.mjs ; do
+            if [ ! -f "$f" ]; then echo "::error::strict tier did NOT install $f"; missing=1; fi
+          done
+          [ "$missing" = 0 ] || { echo '::error::--tier strict planted no module code — this job would have certified an empty surface'; exit 1; }
+          echo 'positive control OK: every module surface is present and about to be gated'
+      - name: Git baseline + corepack
+        working-directory: .selftest/strict
+        run: |
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'strict scaffold baseline'
+          corepack enable
+          corepack prepare --activate
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        working-directory: .selftest/strict
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-node22-${{ hashFiles('template/base/pnpm-workspace.yaml', 'template/**/package.json.tmpl') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-node22-
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .selftest/strict/apps/desktop/src-tauri
+          cache-on-failure: true
+      - name: Rust toolchain (installs the scaffold's rust-toolchain.toml pin)
+        working-directory: .selftest/strict
+        run: |
+          rustup toolchain install
+          rustup show
+      - name: pnpm install
+        working-directory: .selftest/strict
+        run: pnpm install --no-frozen-lockfile
+      - name: Playwright chromium (the e2e gate fails closed in CI without it)
+        working-directory: .selftest/strict
+        run: pnpm exec playwright install chromium --with-deps
+      # `types` catches the observability class; `lint` and `e2e` catch the a11y-deep class.
+      - name: THE GATE — full validate must be green with every module installed
+        working-directory: .selftest/strict
+        env:
+          HARNESS_REQUIRE_TOOLCHAINS: '1'
+        run: node tools/validate.mjs --min-floor
+      - name: Unit suite (module tests run for real, under the coverage floors)
+        working-directory: .selftest/strict
+        run: pnpm exec vitest run --coverage --silent
+      # The Windows E2E module's specs are transpiled by WDIO at run time and are NOT part of
+      # the root `tsc -b` solution, so the `types` gate never sees them. They ARE
+      # type-aware-linted through their own tsconfig (typescript-eslint's projectService
+      # discovers it) — but only when the module is installed, which is to say: only here.
+      - name: Windows E2E module specs typecheck standalone
+        working-directory: .selftest/strict
+        run: pnpm exec tsc -p e2e-windows --noEmit
+
   # The product promise: a stock Windows runner bootstraps to a green gate.
   # Runs on EVERY PR — Windows is the ship target, not a nightly afterthought.
   bootstrap-windows:

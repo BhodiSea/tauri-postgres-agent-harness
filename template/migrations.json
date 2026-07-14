@@ -58,9 +58,11 @@
     ]
   },
   "0.1.6": {
+    "//": "packages/schema/drizzle/0002_notes_keyset_idx.sql is seedOnInitOnly for a reason that is NOT cosmetic: drizzle/ is a seeded PREFIX, so `update` would otherwise auto-plant a NEW MIGRATION into an existing project's schema — DDL they never wrote, applied to their database on the next db:migrate, with a filename that may collide with their own 0002_*. The harness does not write migrations for you. A fresh install gets the composite keyset index as part of its exemplar; an upgraded install is told to author its own by the DAL plan probe, which reds on the Sort and names the index shape (see tests/rls/plan-regression.test.ts).",
     "seedOnInitOnly": [
       "LICENSE",
       "CITATION.cff",
+      "packages/schema/drizzle/0002_notes_keyset_idx.sql",
       "tools/decision-groups.json",
       "tools/dto-bounds-allow.json",
       "tools/duplication-allow.json",

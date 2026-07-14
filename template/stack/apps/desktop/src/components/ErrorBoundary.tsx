@@ -28,7 +28,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           role="alert"
           className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas p-8 text-ink"
         >
-          <h1 className="text-base font-semibold">Something went wrong</h1>
+          {/* The heading takes the danger token: this is the one screen where the app
+              has FAILED, and it rendered in the same ink as ordinary chrome. The body
+              copy stays `text-ink-muted` so the message itself remains easy to read. */}
+          <h1 className="text-base font-semibold text-danger">Something went wrong</h1>
           <p className="max-w-md text-center text-sm text-ink-muted">
             {this.state.error.message ||
               'An unexpected error occurred while rendering this screen.'}

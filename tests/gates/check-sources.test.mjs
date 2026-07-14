@@ -8,6 +8,7 @@
 import { test, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -226,16 +227,68 @@ test('GREEN: a reviewed { file, group, id, reason } override accepts a specific 
   assert.equal(r.code, 0, r.out)
 })
 
-test('GREEN: citing a groups-LESS corpus entry keeps presence semantics (per-entry self-disable)', () => {
-  // tauri/csp declares no groups array — consumer-added entries are never forced
-  // into the taxonomy, so the site stays presence-checked.
+test('RED (v0.1.6): a PRESENCE-ONLY (groups: []) corpus entry cannot justify a flagged decision — no wildcard', () => {
+  // tauri/csp ships groups: [] (a real authority for a decision NOT in the flagged
+  // taxonomy). Pre-0.1.6 a groups-less entry short-circuited the whole per-site match,
+  // so any of the 25 groups-less shipped entries universally justified any flagged class.
+  // Now a presence-only entry contributes no covered group, so citing it at a
+  // token-verification site is unjustified — the site must cite a token-verification entry.
   const r = runGate(fixture({
     files: {
       'apps/server/src/auth.ts':
-        '// SOURCE: pinned, taxonomy-free [corpus: tauri/csp]\nconst claims = await jwtVerify(token, jwks)\n',
+        '// SOURCE: presence-only, wrong class [corpus: tauri/csp]\nconst claims = await jwtVerify(token, jwks)\n',
     },
   }))
-  assert.equal(r.code, 0, r.out)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes("decision group 'token-verification'"), r.out)
+  assert.ok(r.out.includes('tauri/csp (groups: none)'), r.out)
+})
+
+test('RED (v0.1.6): a corpus entry MISSING its groups key fails closed (groups are mandatory)', () => {
+  // A missing `groups` key was the wildcard that made an entry a universal justifier.
+  // It is now a hard corpus-integrity error (never ramped): every entry must declare
+  // its groups, or [] for a presence-only authority.
+  const r = runGate(fixture({
+    corpus: JSON.stringify([
+      {
+        // no `groups` key
+        id: 'x/no-groups',
+        title: 'T',
+        url: 'https://example.com',
+        version: '1',
+        text: 'body',
+        sha256: createHash('sha256').update('body', 'utf8').digest('hex'),
+      },
+    ]),
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('missing/invalid `groups`'), r.out)
+})
+
+test('G27: a consumer decision-groups extension makes an uncited domain constant a flagged site', () => {
+  // The six built-in groups don't cover a RAG chunk size; the consumer declares it, so
+  // `chunkSize` becomes a decision site. The coverage lockstep then reds because no
+  // corpus entry grounds the new group — forcing the consumer to add an authority.
+  const r = runGate(fixture({
+    files: {
+      'tools/decision-groups.json': JSON.stringify({
+        groups: [{ key: 'chunk-size', description: 'RAG chunk sizing', patterns: ['chunkSize'] }],
+      }),
+      'packages/importer/src/rag.ts': 'export const chunkSize = 512\n',
+    },
+  }))
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('chunk-size'), r.out)
+})
+
+test('G27: a malformed decision-groups extension fails CLOSED (citation duty cannot be silently disabled)', () => {
+  const r = runGate(fixture({
+    files: {
+      'tools/decision-groups.json': JSON.stringify({ groups: [{ key: 'BadKey', patterns: [] }] }),
+      'packages/importer/src/x.ts': 'export const x = 1\n',
+    },
+  }))
+  assert.equal(r.code, 1, r.out)
 })
 
 test('RAMP: a pre-0.1.5 baseVersion manifest downgrades BOTH semantic checks to NOTEs and passes', () => {

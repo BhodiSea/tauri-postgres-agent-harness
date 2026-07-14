@@ -4,8 +4,10 @@
 // exposes. The route-manifest gate (tools/check-route-manifest.mjs) closes the
 // loop — a directory under src/features/ that no entry references (and that is
 // not allowlisted in tools/route-allowlist.json) fails validate — and the e2e
-// suites (e2e/states.spec.ts, the a11y sweeps) iterate this array, so a screen
-// missing an entry is a screen that ships untested.
+// suites (e2e/states.spec.ts, e2e/a11y.spec.ts's focus walk, e2e/reflow.spec.ts)
+// ITERATE this array, so a screen missing an entry is a screen that ships untested,
+// and a screen WITH an entry is automatically held to the state-quality, per-route
+// focus-visibility, and minimum-window reflow bars the day it registers.
 
 interface RouteStates {
   /** data-testid visible while the screen's primary query is in flight. */

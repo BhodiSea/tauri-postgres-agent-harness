@@ -1,14 +1,12 @@
 import { type Note, NotesPage } from '@app/schema'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiFetch } from '../../lib/api-client'
 
 // Keyset pagination over the server's { items, nextCursor } contract — the paged
 // counterpart to features/notes/useListQuery. Pages append; the initial load owns
 // the route's loading/empty/error surface, while a failed loadMore stays on the
 // rendered data and surfaces a toast + inline retry instead of blanking it.
 
-// Dev override via Vite env; otherwise the API origin baked into the committed
-// CSP at install time (same convention as useListQuery).
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
 const PAGE_LIMIT = 50
 
 type KeysetStatus = 'loading' | 'empty' | 'error' | 'ready'
@@ -45,11 +43,9 @@ async function fetchPage(
   readonly items: readonly Note[]
   readonly nextCursor: string | null
 }> {
-  const url = new URL(`${API_ORIGIN}/api/notes`)
-  url.searchParams.set('limit', String(PAGE_LIMIT))
-  if (cursor !== null) url.searchParams.set('cursor', cursor)
-  const response = await fetch(url, { signal })
-  if (!response.ok) throw new Error(`notes responded ${String(response.status)}`)
+  const query = new URLSearchParams({ limit: String(PAGE_LIMIT) })
+  if (cursor !== null) query.set('cursor', cursor)
+  const response = await apiFetch(`/api/notes?${query.toString()}`, { signal })
   return NotesPage.parse(await response.json())
 }
 

@@ -126,6 +126,11 @@ jobs:
       - name: Diff coverage (per-file floors on changed files)
         run: node tools/check-diff-coverage.mjs
 
+      # Copy-paste rot: the same Stop-chain duplication gate an agent runs at turn-end,
+      # enforced on the PR. Ramped on pre-0.1.6 baseVersions (a NOTE until graduated).
+      - name: Duplication (token clones across apps/*/src + packages/*/src)
+        run: node tools/check-duplication.mjs
+
   # ---------------------------------------------------------------------------
   # Runtime RLS — the headline isolation gate against REAL Postgres 16 + pgvector
   # (same digest-pinned image as docker-compose.yml). run-rls.mjs fresh-applies all
@@ -348,6 +353,110 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-lane-traces
+          path: test-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The desktop<->server seam. Every other lane mocks the network, which is how the
+  # desktop once shipped sending no Authorization header at all — list, create and
+  # paginate each 401'd against the real server while all 22 gates, the whole e2e
+  # suite and the perf lane stayed green. This lane stubs nothing but the Tauri IPC
+  # (the host that holds the token): real bundle -> real fetch -> real Hono server
+  # -> real Postgres under FORCE RLS. It needs those services, so it lives in CI and
+  # never in the agent-time chain (tools/check-e2e.mjs strips its env var).
+  # ---------------------------------------------------------------------------
+  integration-lane:
+    name: integration lane (desktop <-> server, real postgres)
+    runs-on: ubuntu-latest
+    env:
+      HARNESS_INTEGRATION_LANE: '1'
+      AUTH_MODE: stub
+      NODE_ENV: development
+      PORT: '8787'
+      VITE_API_ORIGIN: 'http://127.0.0.1:8787'
+      DATABASE_URL: 'postgres://app_api:postgres@127.0.0.1:5432/{{DB_NAME}}'
+      MIGRATOR_DATABASE_URL: 'postgres://app_migrator:postgres@127.0.0.1:5432/{{DB_NAME}}'
+      # The vite dev server is the page origin in this lane; the packaged app's real
+      # origins (tauri://localhost, http://tauri.localhost) are the server default.
+      CORS_ORIGINS: 'http://localhost:1420'
+    services:
+      db:
+        image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: '{{DB_NAME}}'
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d {{DB_NAME}}"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser (chromium)
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Provision database roles (db/init/01-roles.sql)
+        run: psql 'postgres://postgres:postgres@127.0.0.1:5432/{{DB_NAME}}' -v ON_ERROR_STOP=1 -f db/init/01-roles.sql
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      # The token the HOST would hold on a real desktop. Minted here, handed to the
+      # server (which verifies it) and to the mocked Tauri host (which hands it to the
+      # webview) — so the lane exercises the same bearer path production does.
+      - name: Mint a stub-mode dev token and boot the API server
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_ACCESS_TOKEN="$(pnpm --filter server mint-dev-token | tail -1)"
+          if [ -z "$APP_ACCESS_TOKEN" ]; then
+            echo "::error::mint-dev-token produced no token — the lane cannot prove the auth seam"
+            exit 1
+          fi
+          echo "APP_ACCESS_TOKEN=$APP_ACCESS_TOKEN" >> "$GITHUB_ENV"
+          pnpm --filter server dev > /tmp/server.log 2>&1 &
+          for _ in $(seq 1 40); do
+            if curl -fsS -m 2 "http://127.0.0.1:8787/healthz" > /dev/null; then
+              echo "server up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the API server never became healthy"; cat /tmp/server.log; exit 1
+
+      - name: Desktop <-> server integration lane
+        run: pnpm exec playwright test --project integration --workers 1
+
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/server.log || true
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-lane-traces
           path: test-results/
           retention-days: 7
 

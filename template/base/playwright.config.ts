@@ -9,7 +9,16 @@ import { defineConfig } from '@playwright/test'
 // Config files at the repo root belong to no tsconfig project; ESLint checks
 // them via the projectService default project (same as vitest.config.ts), so
 // node globals are declared locally instead of pulling in @types/node.
-declare const process: { env: { CI?: string; HARNESS_PERF_LANE?: string } } | undefined
+declare const process:
+  | {
+      env: {
+        CI?: string
+        HARNESS_PERF_LANE?: string
+        HARNESS_INTEGRATION_LANE?: string
+        VITE_API_ORIGIN?: string
+      }
+    }
+  | undefined
 
 const inCI = process?.env.CI !== undefined
 
@@ -22,6 +31,17 @@ const inCI = process?.env.CI !== undefined
 // enter the deterministic validate chain or the warm ≈5s Stop-hook path.
 const perfLane = process?.env.HARNESS_PERF_LANE === '1'
 const PERF_SPEC = /interaction-latency\.spec\.ts$/
+
+// The CI-only INTEGRATION lane (e2e/integration.spec.ts): the one place the two halves
+// of the app meet for real. Every other spec in this file mocks the network with
+// page.route — which is exactly how the desktop shipped for five releases sending no
+// Authorization header at all and still passing every gate. This lane stubs NOTHING but
+// the Tauri IPC (which supplies the host-held token): a real vite bundle, a real fetch,
+// a real Hono server in stub-auth mode, real Postgres under FORCE RLS. It needs those
+// services, so like the perf lane it exists only under its env flag and runs as a
+// blocking CI job — never in the agent-time chain.
+const integrationLane = process?.env.HARNESS_INTEGRATION_LANE === '1'
+const INTEGRATION_SPEC = /integration\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -40,7 +60,23 @@ export default defineConfig({
     reducedMotion: 'reduce',
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: PERF_SPEC },
+    {
+      name: 'chromium',
+      use: { browserName: 'chromium' },
+      testIgnore: [PERF_SPEC, INTEGRATION_SPEC],
+    },
+    ...(integrationLane
+      ? [
+          {
+            name: 'integration',
+            testMatch: INTEGRATION_SPEC,
+            // One worker: the specs create rows in a shared database and assert on
+            // list contents. Parallel writers would see each other's notes.
+            fullyParallel: false,
+            use: { browserName: 'chromium' },
+          },
+        ]
+      : []),
     ...(perfLane
       ? [
           {
@@ -70,7 +106,9 @@ export default defineConfig({
       // Stub origin: nothing listens here BY DESIGN — every spec intercepts
       // ${VITE_API_ORIGIN}/healthz with page.route (see e2e/mock-ipc.ts), so the
       // lane needs no running server and un-stubbed requests fail loudly.
-      VITE_API_ORIGIN: 'http://127.0.0.1:8787',
+      // The integration lane is the exception: a REAL server listens, and the CI job
+      // passes its origin through, so the bundle talks to it instead of a stub.
+      VITE_API_ORIGIN: process?.env.VITE_API_ORIGIN ?? 'http://127.0.0.1:8787',
     },
   },
 })

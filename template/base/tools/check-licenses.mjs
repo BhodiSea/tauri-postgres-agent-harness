@@ -6,7 +6,7 @@
 // the CI rust lane.
 // SOURCE: docs/harness/README.md (license gate) [corpus: harness/doctrine]
 import { existsSync, readFileSync } from 'node:fs'
-import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
+import { fail, failures, ok, rampNote, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
 const GATE = 'licenses'
@@ -29,6 +29,83 @@ const ALLOWED = new Set([
   'Python-2.0',
   'MPL-2.0', // file-level copyleft: acceptable as a dependency, never vendored
 ])
+
+// ── citeability + license declaration (G25, v0.1.6) ──────────────────────────────
+// Runs FIRST, and deliberately BEFORE the node_modules / `pnpm licenses` skips below:
+// this half is pure filesystem, so it is always possible. Letting an absent install skip
+// it would mean the artifact's own licensing went unchecked on exactly the machines that
+// have not installed yet.
+//
+// The harness proved ITS OWN licensing (REUSE, CITATION.cff) but shipped a scaffold that
+// declared none: no LICENSE, no CITATION.cff, no `license` field. The delivered "research
+// artifact" was therefore all-rights-reserved by default and not citable-as-a-work — the
+// two things such an artifact most needs to be. This asserts it DECLARES its terms and can
+// be cited, and that the declarations stay in lockstep. It never dictates WHICH license
+// (that is the project's own legal decision — change LICENSE, the package.json field and
+// CITATION.cff together).
+// Ramped: a pre-0.1.6 install has none of these (they ship seedOnInitOnly), so the check
+// is a NOTE until the project pulls them and graduates.
+// SOURCE: Citation File Format 1.2.0 — the standard GitHub/Zenodo read for software
+// citation https://citation-file-format.github.io/
+const citeErrs = []
+const pkgRaw = existsSync('package.json') ? readFileSync('package.json', 'utf8') : null
+if (pkgRaw !== null) {
+  let pkg = {}
+  try {
+    pkg = JSON.parse(pkgRaw)
+  } catch {
+    citeErrs.push('package.json is not valid JSON')
+  }
+  const declared = typeof pkg.license === 'string' ? pkg.license.trim() : ''
+  if (declared === '') {
+    citeErrs.push(
+      'package.json declares no "license" — the produced artifact is all-rights-reserved by default; declare your terms (e.g. "Apache-2.0", or "UNLICENSED" if deliberately proprietary)',
+    )
+  }
+  if (!existsSync('LICENSE')) {
+    citeErrs.push('no LICENSE file — the declared license needs its text in the repository root')
+  }
+  if (!existsSync('CITATION.cff')) {
+    citeErrs.push(
+      'no CITATION.cff — a research artifact must be citable-as-a-work (GitHub/Zenodo/reference managers read this file directly)',
+    )
+  } else {
+    // Lockstep: a citation naming the wrong version or license misattributes the work.
+    const cff = readFileSync('CITATION.cff', 'utf8')
+    const cffField = (name) => {
+      const m = new RegExp(`^${name}:\\s*(.+?)\\s*$`, 'm').exec(cff)
+      return m === null ? null : m[1].replace(/^['"]|['"]$/g, '')
+    }
+    const cffVersion = cffField('version')
+    const cffLicense = cffField('license')
+    if (cffVersion === null) {
+      citeErrs.push('CITATION.cff carries no `version:` field')
+    } else if (typeof pkg.version === 'string' && cffVersion !== pkg.version) {
+      citeErrs.push(
+        `CITATION.cff version "${cffVersion}" != package.json version "${pkg.version}" — a citation must name the version it describes; bump both together`,
+      )
+    }
+    if (cffLicense === null) {
+      citeErrs.push('CITATION.cff carries no `license:` field')
+    } else if (declared !== '' && cffLicense !== declared) {
+      citeErrs.push(
+        `CITATION.cff license "${cffLicense}" != package.json license "${declared}" — the artifact must state ONE set of terms`,
+      )
+    }
+  }
+}
+if (
+  citeErrs.length > 0 &&
+  !rampNote(GATE, '0.1.6', `${citeErrs.length} citeability/license finding(s)`)
+) {
+  failures(
+    GATE,
+    citeErrs,
+    'The produced artifact must declare its terms and be citable: keep LICENSE, package.json#license and CITATION.cff (version + license) in lockstep.',
+  )
+} else if (citeErrs.length > 0) {
+  for (const e of citeErrs) console.log(`${GATE}: NOTE — (ramp) ${e}`)
+}
 
 if (!existsSync('node_modules')) {
   skipOrFail(GATE, 'node_modules missing — run pnpm install (license tree needs a resolution)')
@@ -97,4 +174,7 @@ failures(
   'Either replace the dependency, or (human decision) add it to tools/license-exceptions.json with a reason.',
 )
 recordGreen()
-ok(GATE, 'production dependency licenses all within the allowlist')
+ok(
+  GATE,
+  'production dependency licenses all within the allowlist; the artifact declares its license and is citable (CITATION.cff in version/license lockstep)',
+)

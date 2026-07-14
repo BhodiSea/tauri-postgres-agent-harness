@@ -42,8 +42,9 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
 
 - A turn is NOT done until `pnpm validate` is green. The Stop hook re-runs
   validate + `node tests/rls/run-rls.mjs` + `pnpm exec vitest run --silent` +
-  `node tools/check-diff-coverage.mjs` and exits 2 until everything passes.
-  Fix root causes; do not stop.
+  `node tools/check-diff-coverage.mjs` + `node tools/check-duplication.mjs`
+  (token clones across `apps/*/src` + `packages/*/src`) and exits 2 until
+  everything passes. Fix root causes; do not stop.
 - **Prove, don't claim.** Show passing gate output; never assert "it works".
 - Do NOT edit a test in the same turn as the fix it covers (reward-hacking).
 - The 22 gates, in order: `format`, `gate-integrity`, `rust-fmt`, `types`,
@@ -63,6 +64,16 @@ versions = `catalog:` (the catalog is the only place version numbers appear).
   `SET LOCAL app.user_id`), returns Zod-parsed DTOs, never raw rows. Routes
   never touch the db driver. **Tauri IPC, capabilities, and the CSP are NOT
   authorization** — they are containment; authorize in the DAL, on FORCE RLS.
+- **The desktop talks to the API ONLY through `src/lib/api-client.ts`** —
+  `apiFetch`/`apiPost` attach the bearer token and decode the error envelope. Never
+  call `fetch()` directly from a feature: an unauthenticated request 401s against the
+  real server, and every unit test + e2e spec mocks the network, so nothing local
+  would tell you. The token is held by the Tauri HOST (`access_token` over typed IPC,
+  wired in `main.tsx`) — never a `VITE_` var (compiled into the bundle) and never
+  webview storage. The desktop is CROSS-ORIGIN to the API (`tauri://localhost`), so
+  the server's CORS allowlist runs ahead of the auth guard; a preflight carries no
+  token by definition. `e2e/integration.spec.ts` (CI-only `integration` lane) is the
+  one place both halves run for real.
 - **GUC discipline:** RLS identity is `set_config('app.user_id', $uuid, true)`
   inside a transaction. NEVER `set_config(..., false)`, `SET SESSION app.*`, or
   bare `SET app.*` — session GUCs leak identity across pooled connections.

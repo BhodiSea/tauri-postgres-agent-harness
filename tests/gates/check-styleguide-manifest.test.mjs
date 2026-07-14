@@ -474,3 +474,101 @@ test('NOTE: a keyless (pre-0.1.5) manifest self-disables the scan, naming key + 
   assert.ok(r.out.includes('"controlPrimitives"'), r.out)
   assert.ok(r.out.includes('update --refresh-seeded tools/styleguide.manifest.json'), r.out)
 })
+
+// ── status channel (0.1.6) ──────────────────────────────────────────────────────
+// The near-monochrome system had no status hue at all, so a failed-write toast rendered
+// in the same pixels as "Theme: dark" — the only channel telling a user their data was
+// not saved was the prose inside the box. These lock the gate that forbids that.
+
+const ALERT_SURFACE = (className) =>
+  `export function Panel() {\n  return <div role="alert" className="${className}">Could not load notes.</div>\n}\n`
+
+test('status: a role=alert surface with NO status token is red, naming the file', () => {
+  const rel = 'apps/desktop/src/features/x/Panel.tsx'
+  const r = runGate(fixture({ sources: { [rel]: ALERT_SURFACE('rounded border border-edge p-3') } }))
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /Panel\.tsx: announces status/)
+  assert.match(r.out, /role="alert"/)
+})
+
+test('status: the same surface painted with a danger token passes', () => {
+  const rel = 'apps/desktop/src/features/x/Panel.tsx'
+  const r = runGate(
+    fixture({ sources: { [rel]: ALERT_SURFACE('rounded border border-danger p-3') } }),
+  )
+  assert.equal(r.code, 0, r.out)
+})
+
+test('status: aria-invalid and role=status are status signals too', () => {
+  for (const [signal, source] of [
+    ['aria-invalid', 'export const I = () => <input aria-invalid={true} className="border-edge" />\n'],
+    ['role="status"', 'export const S = () => <p role="status" className="text-ink">up</p>\n'],
+  ]) {
+    const r = runGate(fixture({ sources: { 'apps/desktop/src/features/x/S.tsx': source } }))
+    assert.equal(r.code, 1, `${signal} must be a status signal: ${r.out}`)
+    assert.match(r.out, /announces status/)
+  }
+})
+
+test('status: a token named only in a COMMENT does not count — the check must not fail open', () => {
+  // The bug this exists for: `// border-danger, not border-edge` styles nothing, but a
+  // naive whole-file scan reads it as the channel being present and passes.
+  const rel = 'apps/desktop/src/features/x/Panel.tsx'
+  const commented =
+    '// border-danger is the right token here\n' +
+    '/* text-success would also match a careless scan */\n' +
+    ALERT_SURFACE('rounded border border-edge p-3')
+  const r = runGate(fixture({ sources: { [rel]: commented } }))
+  assert.equal(r.code, 1, `a commented token must not satisfy the status channel: ${r.out}`)
+  assert.match(r.out, /announces status/)
+})
+
+test('status: statusSurfaces.allow is the reviewed escape; a STALE entry is red', () => {
+  const rel = 'apps/desktop/src/features/x/Panel.tsx'
+  const allowed = withManifest((m) => {
+    m.statusSurfaces.allow = [{ file: rel, reason: 'legacy surface, scheduled for redesign' }]
+  })
+  // Live violation + matching allow entry → green.
+  const green = runGate(
+    fixture({ manifest: allowed, sources: { [rel]: ALERT_SURFACE('border border-edge p-3') } }),
+  )
+  assert.equal(green.code, 0, green.out)
+
+  // Same allow entry once the file DOES carry the token → the exemption is stale.
+  const stale = runGate(
+    fixture({ manifest: allowed, sources: { [rel]: ALERT_SURFACE('border border-danger p-3') } }),
+  )
+  assert.equal(stale.code, 1, stale.out)
+  assert.match(stale.out, /stale entry/)
+})
+
+test('status: a declared status token absent from tokens[] is red (it compiles to nothing)', () => {
+  const bogus = withManifest((m) => {
+    m.statusSurfaces.tokens = ['danger', 'warning']
+  })
+  const r = runGate(fixture({ manifest: bogus }))
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /not in tokens\[\]/)
+})
+
+test('status: a malformed statusSurfaces key FAILS CLOSED (it can never silently disarm)', () => {
+  const broken = withManifest((m) => {
+    m.statusSurfaces = { tokens: [], signals: [] }
+  })
+  const r = runGate(fixture({ manifest: broken }))
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /cannot silently disarm/)
+})
+
+test('status: a pre-0.1.6 manifest without the key self-disables with the adoption NOTE', () => {
+  const keyless = withManifest((m) => {
+    delete m.statusSurfaces
+  })
+  const rel = 'apps/desktop/src/features/x/Panel.tsx'
+  const r = runGate(
+    fixture({ manifest: keyless, sources: { [rel]: ALERT_SURFACE('border border-edge p-3') } }),
+  )
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /no "statusSurfaces" key/)
+  assert.match(r.out, /refresh-seeded/)
+})

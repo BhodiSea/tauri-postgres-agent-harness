@@ -20,6 +20,12 @@ export interface MockIpcOptions {
    * a toggled choice can survive a reload without the init script re-pinning it.
    */
   readonly pinTheme?: boolean
+  /**
+   * Bearer token the mocked `access_token` command hands back. The api-client refuses
+   * to send an unauthenticated request, so the default keeps every data spec signed in;
+   * pass `null` to drive the signed-out surface.
+   */
+  readonly accessToken?: string | null
 }
 
 interface TauriInternalsMock {
@@ -34,8 +40,9 @@ interface TauriInternalsMock {
 export async function installMockIpc(page: Page, options: MockIpcOptions = {}): Promise<void> {
   const appVersion = options.appVersion ?? '0.1.0-e2e'
   const pinTheme = options.pinTheme ?? true
+  const accessToken = options.accessToken === undefined ? 'e2e-stub-token' : options.accessToken
   await page.addInitScript(
-    ({ version, pinTheme: pin }) => {
+    ({ version, pinTheme: pin, token }) => {
       // Pin the theme so the theme-agnostic specs (a11y/states/degraded) are
       // deterministic: chromium defaults prefers-color-scheme to light, which
       // would otherwise flip the `system` default and change computed contrast.
@@ -53,6 +60,10 @@ export async function installMockIpc(page: Page, options: MockIpcOptions = {}): 
         // from attachConsole, plugin:log forwarding, …) resolves to a benign id.
         invoke: (cmd: string): Promise<unknown> => {
           if (cmd === 'app_version') return Promise.resolve(version)
+          // The bearer token the host holds. Without this the api-client refuses to
+          // send (a request with no token is a bug, not a 401 to render) and every
+          // data-driven spec would sit in its error state.
+          if (cmd === 'access_token') return Promise.resolve(token)
           nextCallbackId += 1
           return Promise.resolve(nextCallbackId)
         },
@@ -71,7 +82,7 @@ export async function installMockIpc(page: Page, options: MockIpcOptions = {}): 
         configurable: true,
       })
     },
-    { version: appVersion, pinTheme },
+    { version: appVersion, pinTheme, token: accessToken },
   )
 }
 

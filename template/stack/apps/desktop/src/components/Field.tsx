@@ -5,13 +5,19 @@ import { cn } from '../lib/utils'
 // the aria contract computed in exactly ONE place. The control is a render
 // prop — Field hands the caller the id/aria props and the caller spreads them
 // onto whatever control primitive it renders (Input today), so the wiring can
-// never be forgotten and Field never clones or introspects children. Error
-// copy is announced through the description relationship, not color alone: no
-// dedicated danger token exists, and the inline line + aria-invalid carry the
-// meaning in both themes.
+// never be forgotten and Field never clones or introspects children.
+//
+// The error line carries THREE channels, none of them sufficient alone: the
+// aria-describedby relationship (screen readers), the aria-invalid flag, and the
+// danger token (sighted users). It used to render in the same `text-ink` as the label,
+// so a validation failure was typographically indistinguishable from a hint — and the
+// invalid control kept its resting `border-edge`, which is the one place colour is
+// genuinely load-bearing: you cannot describe a border to yourself.
 // SOURCE: WAI forms tutorial — inline errors are tied to their control with
 // aria-describedby and the control is flagged aria-invalid
 // https://www.w3.org/WAI/tutorials/forms/notifications/
+// SOURCE: WCAG 2.2 SC 1.4.1 Use of Color — the text + ARIA carry the meaning; colour is
+// the redundant channel https://www.w3.org/TR/WCAG22/#use-of-color
 
 /** Props Field computes for its control — spread them onto the Input (or peer primitive). */
 interface FieldControlProps {
@@ -44,7 +50,7 @@ export function Field({ label, error, children, className }: FieldProps) {
         'aria-invalid': hasError ? true : undefined,
       })}
       {hasError && (
-        <p id={errorId} className="text-xs font-medium text-ink">
+        <p id={errorId} className="text-xs font-medium text-danger">
           {error}
         </p>
       )}

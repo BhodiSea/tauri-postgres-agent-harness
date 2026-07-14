@@ -9,5 +9,21 @@ export const commands = {
 	 *  `tauri.conf.json`, and the workspace package versions in lockstep.
 	 */
 	appVersion: () => __TAURI_INVOKE<string>("app_version"),
+	/**
+	 *  The bearer token the API server authenticates the user with.
+	 * 
+	 *  It lives in the HOST, never in the webview: a `VITE_`-prefixed token would be
+	 *  compiled into the shipped client bundle (the write-guard bans the very name), and
+	 *  a token in webview storage is reachable by any injected script. The webview asks
+	 *  for it over typed IPC and attaches it per request (`src/lib/api-client.ts`).
+	 * 
+	 *  HONEST LIMIT — this reads the token the host was started with. Acquiring it is the
+	 *  project seam: a real deployment runs the Entra (MSAL) authorization-code + PKCE flow
+	 *  here and caches the result in the OS keychain, refreshing before expiry. The scaffold
+	 *  ships the dev path (stub-mode token minted by `scripts/mint-dev-token.mjs`) so the
+	 *  desktop↔server auth seam is EXERCISED end-to-end by a real gate rather than assumed.
+	 *  `None` means unauthenticated — the client surfaces it, it never sends a bare request.
+	 */
+	accessToken: () => __TAURI_INVOKE<string | null>("access_token"),
 };
 

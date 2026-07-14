@@ -219,18 +219,24 @@ if (corpus !== null) {
     if (entry.sha256 !== actual) {
       problems.push(`corpus entry ${id} text/hash mismatch — the corpus is tamper-evident data`)
     }
-    if (entry.groups !== undefined) {
-      if (!Array.isArray(entry.groups)) {
-        problems.push(`corpus entry ${id}: groups must be an array of decision-group keys`)
-      } else {
-        for (const g of entry.groups) {
-          if (knownGroupKeys.has(g)) {
-            coveredGroups.add(g)
-          } else {
-            problems.push(
-              `corpus entry ${id}: unknown decision group ${JSON.stringify(g)} (known: ${[...knownGroupKeys].join(', ')})`,
-            )
-          }
+    // groups is MANDATORY (v0.1.6): a missing `groups` key used to be a WILDCARD —
+    // citing such an entry short-circuited the per-site group-match, so any of the 25
+    // groups-less shipped entries justified any flagged decision class. Now every entry
+    // must declare its groups; `groups: []` is the explicit "presence-only" marker (a
+    // real authority for a decision NOT in the flagged taxonomy — CSP, a11y, tokens) that
+    // grounds citation existence but can never justify a flagged decision group.
+    if (!Array.isArray(entry.groups)) {
+      problems.push(
+        `corpus entry ${id}: missing/invalid \`groups\` — declare an array of decision-group keys, or [] for a presence-only authority (a groups-less entry can no longer universally justify a flagged decision site)`,
+      )
+    } else {
+      for (const g of entry.groups) {
+        if (knownGroupKeys.has(g)) {
+          coveredGroups.add(g)
+        } else {
+          problems.push(
+            `corpus entry ${id}: unknown decision group ${JSON.stringify(g)} (known: ${[...knownGroupKeys].join(', ')})`,
+          )
         }
       }
     }
@@ -258,14 +264,18 @@ if (corpus !== null) {
   const entryGroups = new Map()
   for (const entry of corpus) {
     if (typeof entry?.id === 'string' && entry.id !== '') {
-      entryGroups.set(entry.id, Array.isArray(entry.groups) ? entry.groups : null)
+      // Absent/invalid groups is already a `problems` red above; treat it as [] here so a
+      // malformed entry can never re-open the wildcard by being cited.
+      entryGroups.set(entry.id, Array.isArray(entry.groups) ? entry.groups : [])
     }
   }
   for (const site of citedSites) {
     const refs = [...site.payload.matchAll(CORPUS_REF)].map((m) => m[1])
     const known = refs.filter((id) => entryGroups.has(id))
     if (known.length === 0) continue // URL/path citation, or unresolvable ids (sweep 3 reds those)
-    if (known.some((id) => entryGroups.get(id) === null)) continue // wildcard: a groups-less entry is cited
+    // No wildcard: a presence-only ([]) entry contributes NO covered groups, so citing one
+    // at a flagged decision site no longer auto-satisfies the group-match. The site must
+    // cite an entry whose groups actually include the flagged class.
     const covered = new Set(known.flatMap((id) => entryGroups.get(id)))
     for (const g of site.groups) {
       if (covered.has(g)) continue

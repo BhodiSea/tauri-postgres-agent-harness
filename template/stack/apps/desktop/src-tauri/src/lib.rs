@@ -16,6 +16,29 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
 
+/// The bearer token the API server authenticates the user with.
+///
+/// It lives in the HOST, never in the webview: a `VITE_`-prefixed token would be
+/// compiled into the shipped client bundle (the write-guard bans the very name), and
+/// a token in webview storage is reachable by any injected script. The webview asks
+/// for it over typed IPC and attaches it per request (`src/lib/api-client.ts`).
+///
+/// HONEST LIMIT — this reads the token the host was started with. Acquiring it is the
+/// project seam: a real deployment runs the Entra (MSAL) authorization-code + PKCE flow
+/// here and caches the result in the OS keychain, refreshing before expiry. The scaffold
+/// ships the dev path (stub-mode token minted by `scripts/mint-dev-token.mjs`) so the
+/// desktop↔server auth seam is EXERCISED end-to-end by a real gate rather than assumed.
+/// `None` means unauthenticated — the client surfaces it, it never sends a bare request.
+// SOURCE: Tauri 2 security model — the webview is untrusted; secrets stay host-side
+// [corpus: tauri/capabilities]
+#[tauri::command]
+#[specta::specta]
+fn access_token() -> Option<String> {
+    std::env::var("APP_ACCESS_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+}
+
 /// Structured-log contract for webview render-process failures.
 ///
 /// As of tauri 2.11 the safe API surface does NOT expose `WebView2`'s
@@ -38,7 +61,7 @@ pub fn log_webview_process_failure(webview_label: &str, detail: &str) {
 /// is registered here, and BOTH the runtime invoke handler and the exported
 /// TypeScript bindings derive from it — they cannot drift from each other.
 fn specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![app_version])
+    Builder::<tauri::Wry>::new().commands(collect_commands![app_version, access_token])
 }
 
 /// Builds and runs the tauri application.

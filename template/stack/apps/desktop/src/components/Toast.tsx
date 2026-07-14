@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
+import { cn } from '../lib/utils'
 import { Button } from './Button'
 
 // SOURCE: WCAG 2.2 SC 4.1.3 Status Messages — a toast is a polite live-region
@@ -7,13 +8,34 @@ import { Button } from './Button'
 // https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html
 const TOAST_DISMISS_MS = 6000
 
+/**
+ * What the toast is TELLING you. Not decoration: a failed write and a confirmed one used
+ * to render as the same pixels, so the only way to learn you had lost data was to read
+ * the prose. Tone drives the colour channel AND the announcement urgency — an error is
+ * assertive (role="alert"), everything else stays polite.
+ * SOURCE: WCAG 2.2 SC 1.4.1 Use of Color — colour is a redundant channel here, never the
+ * only one: the message text carries the meaning on its own
+ * https://www.w3.org/TR/WCAG22/#use-of-color
+ */
+export type ToastTone = 'info' | 'error' | 'success'
+
+// Body copy stays `text-ink` (the AAA 7:1 tier) in every tone — the status hue rides the
+// BORDER, so colour is added without demoting the text a user actually has to read.
+const TONE_CLASS: Record<ToastTone, string> = {
+  info: 'border-edge',
+  error: 'border-danger',
+  success: 'border-success',
+}
+
 interface ToastItem {
   readonly id: number
   readonly message: string
+  readonly tone: ToastTone
 }
 
 interface ToastApi {
-  readonly show: (message: string) => void
+  /** Defaults to 'info'. Pass 'error' for anything the user must not miss. */
+  readonly show: (message: string, tone?: ToastTone) => void
 }
 
 const ToastContext = createContext<ToastApi | null>(null)
@@ -40,10 +62,10 @@ export function ToastProvider({ children }: { readonly children: ReactNode }) {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }
 
-  const show = (message: string): void => {
+  const show = (message: string, tone: ToastTone = 'info'): void => {
     nextId.current += 1
     const id = nextId.current
-    setToasts((current) => [...current, { id, message }])
+    setToasts((current) => [...current, { id, message, tone }])
     const timer = setTimeout(() => {
       timers.current.delete(timer)
       dismiss(id)
@@ -74,7 +96,15 @@ export function ToastProvider({ children }: { readonly children: ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="pointer-events-auto flex items-center gap-3 rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink shadow-md"
+            // An error is announced ASSERTIVELY: the enclosing region is polite, which is
+            // right for a confirmation but wrong for "your write was lost" — that must
+            // interrupt. role="alert" (not "status") also avoids colliding with the
+            // single role=status ConnectionStatus owns.
+            role={toast.tone === 'error' ? 'alert' : undefined}
+            className={cn(
+              'pointer-events-auto flex items-center gap-3 rounded-md border border-l-4 bg-surface px-3 py-2 text-sm text-ink shadow-md',
+              TONE_CLASS[toast.tone],
+            )}
           >
             <span>{toast.message}</span>
             <Button

@@ -10,10 +10,11 @@
 // this hook keeps the I/O, path-normalization, and path-scoped decision plumbing. Every
 // rule id there has a behavioral canary in tests/hooks/hook-contract.test.mjs.
 // SOURCE: docs/harness/README.md (pretool-write-guard)
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
+import { basename, dirname } from 'node:path'
 import { denyTool, pass, readHookInput } from './lib/hookio.mjs'
 
-export const HARNESS_HOOK_VERSION = '0.1.5'
+export const HARNESS_HOOK_VERSION = '0.1.6'
 
 // Dynamic import AFTER hookio installed its fail-closed handlers: a missing, broken, or
 // mis-shaped rules module must BLOCK (exit 2) — a guard that cannot load its rules approves
@@ -52,10 +53,56 @@ const path = String(ti.file_path ?? ti.path ?? '')
 const toPosix = (p) => p.replaceAll('\\', '/')
 const projectDir = toPosix(process.env.CLAUDE_PROJECT_DIR ?? '')
 const posixPath = toPosix(path)
-const rel =
-  projectDir && posixPath.startsWith(projectDir)
-    ? posixPath.slice(projectDir.length).replace(/^\/+/, '')
-    : posixPath.replace(/^\.?\/+/, '')
+/** @param {string} p @param {string} root @returns {string} */
+const relativize = (p, root) =>
+  root && p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p.replace(/^\.?\/+/, '')
+const rel = relativize(posixPath, projectDir)
+
+// Symlink shadowing: a link whose NAME is innocuous but whose TARGET is protected used to
+// walk straight through — the RAW tool path was matched against WRITE_PROTECTED, so
+// `ln -s tools/validate.mjs shim` then `Write shim` edited the gate runner unguarded (and
+// from there .harness/manifest.json can be forged so gate-integrity re-hashes to green).
+// Resolve the destination through the filesystem — the leaf when it exists, else its parent
+// directory, so a NEW file created inside a symlinked directory is caught too — and judge
+// BOTH spellings: a write is protected if the NAME or the bytes' TRUE destination is.
+// SOURCE: docs/harness/README.md (tamper evidence)
+/** @param {string} p @returns {string | null} */
+function realpathOrNull(p) {
+  if (!p) return null
+  try {
+    return toPosix(realpathSync(p))
+  } catch {
+    try {
+      return `${toPosix(realpathSync(dirname(p)))}/${basename(p)}`
+    } catch {
+      return null
+    }
+  }
+}
+const projectDirReal = projectDir ? (realpathOrNull(projectDir) ?? projectDir) : ''
+const realPath = realpathOrNull(path)
+const realRel = realPath ? relativize(realPath, projectDirReal) : null
+// The path spellings this write must be judged under: what it is called, and where its
+// bytes actually land. Deduped; `null` when the target does not resolve (a brand-new file
+// in a brand-new directory) — then the raw path is all there is.
+const rels = [...new Set([rel, realRel].filter((r) => typeof r === 'string' && r !== ''))]
+
+// A link inside the project pointing OUT of it is never legitimate agent work, and it is
+// the other half of the shadowing trick (write through the tree to an unguarded absolute
+// path). Judge escape only when the raw path was project-relative — an explicit absolute
+// path outside the repo (a scratchpad file) stays the caller's business.
+if (
+  process.env.HARNESS_ALLOW_SELF_EDIT !== '1' &&
+  projectDirReal &&
+  realPath &&
+  !posixPath.startsWith('/') &&
+  !realPath.startsWith(`${projectDirReal}/`)
+) {
+  denyTool(
+    'PreToolUse',
+    `symlink escape: ${rel} resolves to ${realPath}, outside the project root — writing through a link out of the tree bypasses every path-scoped guard. SOURCE: docs/harness/README.md (tamper evidence)`,
+  )
+}
 
 // Tamper evidence (layer 2): the gate must not be able to rewrite itself. Edits to the
 // harness config, the gate runner + the frozen CI floor + every gate script, the RLS
@@ -65,7 +112,10 @@ const rel =
 // deliberately NOT blanket-protected — adding a permission or crate is routine
 // vertical-slice work; specific weakenings are content-checked below instead.
 // SOURCE: docs/harness/README.md (tamper evidence)
-if (process.env.HARNESS_ALLOW_SELF_EDIT !== '1' && WRITE_PROTECTED.some(({ re }) => re.test(rel))) {
+if (
+  process.env.HARNESS_ALLOW_SELF_EDIT !== '1' &&
+  WRITE_PROTECTED.some(({ re }) => rels.some((r) => re.test(r)))
+) {
   denyTool(
     'PreToolUse',
     'harness-protected file: set HARNESS_ALLOW_SELF_EDIT=1 (human-in-the-loop) to modify the gate itself. SOURCE: docs/harness/README.md (tamper evidence)',
@@ -75,12 +125,18 @@ if (process.env.HARNESS_ALLOW_SELF_EDIT !== '1' && WRITE_PROTECTED.some(({ re })
 // Migrations are APPEND-ONLY: editing an already-committed migration file rewrites
 // history that may already be applied to a database. New migration files are fine.
 // SOURCE: docs/harness/README.md (append-only migrations)
-if (/^packages\/schema\/drizzle\/[^/]+\.sql$/.test(rel) && existsSync(path)) {
+if (rels.some((r) => /^packages\/schema\/drizzle\/[^/]+\.sql$/.test(r)) && existsSync(path)) {
   denyTool(
     'PreToolUse',
     'migrations are append-only: never edit an existing migration — add a new one (drizzle-kit generate) that transforms the schema forward.',
   )
 }
+
+// Every path-scoped decision below is judged over BOTH spellings (name and true
+// destination), so a symlink cannot borrow an exempt name to smuggle content into a
+// checked location.
+/** @param {RegExp} re @returns {boolean} */
+const anyRel = (re) => rels.some((r) => re.test(r))
 
 // Exempt harness tooling and test bodies from the content checks below.
 // Deliberately NARROW: only the root-level test trees (the harness's own RLS/
@@ -88,7 +144,11 @@ if (/^packages\/schema\/drizzle\/[^/]+\.sql$/.test(rel) && existsSync(path)) {
 // A directory merely named "tests" deeper in the app tree (src/dal/tests/…)
 // is product code and stays fully content-checked — the old any-segment match
 // let real invariant violations ship from such paths.
-if (/^\.claude\//.test(rel) || /^(tests?|e2e)\//.test(rel) || /\.(test|spec)\.[a-z]+$/.test(rel)) {
+// EVERY spelling must be exempt: a link named `x.test.ts` pointing at a DAL module
+// lands product bytes, so one exempt-looking name must not buy an exemption.
+const isExempt = (/** @type {string} */ r) =>
+  /^\.claude\//.test(r) || /^(tests?|e2e)\//.test(r) || /\.(test|spec)\.[a-z]+$/.test(r)
+if (rels.every(isExempt)) {
   pass()
 }
 
@@ -106,7 +166,7 @@ const text = [
 const isWholeFile = typeof ti.content === 'string'
 
 // ---- Tauri config surface: content-checked, not blanket-protected ----
-if (/(^|\/)tauri\.conf\.json$/.test(rel)) {
+if (anyRel(/(^|\/)tauri\.conf\.json$/)) {
   /** @type {[RegExp, string][]} */
   const weakenings = [
     [/"csp"\s*:\s*null/, 'CSP must never be null — the committed CSP is a security invariant.'],
@@ -116,7 +176,7 @@ if (/(^|\/)tauri\.conf\.json$/.test(rel)) {
   ]
   for (const [re, msg] of weakenings) if (re.test(text)) denyTool('PreToolUse', `tauri.conf.json: ${msg}`)
 }
-if (/(^|\/)capabilities\/[^/]+\.json$/.test(rel)) {
+if (anyRel(/(^|\/)capabilities\/[^/]+\.json$/)) {
   /** @type {[RegExp, string][]} */
   const weakenings = [
     [/"remote"\s*:/, 'remote-URL capabilities are banned — IPC is local-window only.'],
@@ -125,12 +185,12 @@ if (/(^|\/)capabilities\/[^/]+\.json$/.test(rel)) {
   ]
   for (const [re, msg] of weakenings) if (re.test(text)) denyTool('PreToolUse', `capabilities: ${msg}`)
 }
-if (/(^|\/)src-tauri\/Cargo\.toml$/.test(rel) && isWholeFile && !/unsafe_code\s*=\s*"forbid"/.test(text)) {
+if (anyRel(/(^|\/)src-tauri\/Cargo\.toml$/) && isWholeFile && !/unsafe_code\s*=\s*"forbid"/.test(text)) {
   denyTool('PreToolUse', 'src-tauri/Cargo.toml must keep `unsafe_code = "forbid"` in [lints.rust].')
 }
 
 // ---- SQL (any location): recursion + GUC discipline ----
-if (/\.(sql|ts|tsx|mjs)$/.test(rel) && /WITH\s+RECURSIVE/i.test(text) && !/CYCLE|visited/i.test(text)) {
+if (anyRel(/\.(sql|ts|tsx|mjs)$/) && /WITH\s+RECURSIVE/i.test(text) && !/CYCLE|visited/i.test(text)) {
   denyTool(
     'PreToolUse',
     'WITH RECURSIVE without a CYCLE clause / visited guard can loop forever on graph data — add one. SOURCE: docs/harness/README.md (graph queries)',
@@ -139,7 +199,7 @@ if (/\.(sql|ts|tsx|mjs)$/.test(rel) && /WITH\s+RECURSIVE/i.test(text) && !/CYCLE
 
 // Police source code only from here down. Docs/markdown/config legitimately
 // mention the banned patterns by name.
-if (!/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(path)) pass()
+if (!anyRel(/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/)) pass()
 
 // Everywhere-checks: banned in any source file (WRITE_GLOBAL_CHECKS is pure data).
 for (const { re, message } of WRITE_GLOBAL_CHECKS) {
@@ -148,14 +208,16 @@ for (const { re, message } of WRITE_GLOBAL_CHECKS) {
 
 // Desktop-bundle purity: the client never touches server/database modules, and
 // Tauri APIs stay wrapped inside src/ipc/** + src/keyboard/**.
-if (/^apps\/desktop\//.test(rel)) {
+if (anyRel(/^apps\/desktop\//)) {
   if (/from\s+['"](postgres|drizzle-orm|pg|@hono\/[^'"]+|pino)['"]/.test(text)) {
     denyTool(
       'PreToolUse',
       'the desktop client must never import server/database modules — talk to the API via typed contracts from @app/schema.',
     )
   }
-  const inWrapperDirs = /^apps\/desktop\/src\/(ipc|keyboard)\//.test(rel)
+  // The wrapper exemption requires EVERY spelling to sit inside it — a link named
+  // src/ipc/x.ts landing outside the facade would otherwise import Tauri unwrapped.
+  const inWrapperDirs = rels.every((r) => /^apps\/desktop\/src\/(ipc|keyboard)\//.test(r))
   if (!inWrapperDirs && /from\s+['"]@tauri-apps\//.test(text)) {
     denyTool(
       'PreToolUse',
@@ -166,7 +228,7 @@ if (/^apps\/desktop\//.test(rel)) {
 
 // Positive requirement: DAL modules must run through the request-context wrapper
 // (withUserContext = the SET LOCAL RLS identity). Whole-file writes only.
-if (/^apps\/server\/src\/dal\/[^/]+\.ts$/.test(rel) && isWholeFile && !/withUserContext/.test(text)) {
+if (anyRel(/^apps\/server\/src\/dal\/[^/]+\.ts$/) && isWholeFile && !/withUserContext/.test(text)) {
   denyTool(
     'PreToolUse',
     'every DAL module must acquire the database through withUserContext(userId, …) — that wrapper IS the authorization boundary (SET LOCAL app.user_id + FORCE RLS).',

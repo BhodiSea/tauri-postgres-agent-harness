@@ -70,13 +70,25 @@ constants) lacking `// SOURCE:` (`-- SOURCE:` in SQL) within a 3-line window. Id
 heuristic to the PostToolUse hook, so in-session and CI can never disagree. Pass by
 citing an authority (add `[corpus: <id>]` when pinned in `tools/mcp/corpus/index.json`).
 Two semantic checks ride on top (v0.1.5, rampNote-gated — NOTE-only on pre-0.1.5
-baseVersions): a cited corpus entry that declares `groups` must cover the site's own
-decision group (reviewed cross-group escapes live in `tools/provenance-overrides.json`;
-groups-less entries stay presence-checked), and a bare-URL citation grounds only when
-its host is on the `tools/lib/citation-domains.mjs` allowlist.
+baseVersions): a cited corpus entry must cover the site's own decision group (reviewed
+cross-group escapes live in `tools/provenance-overrides.json`), and a bare-URL citation
+grounds only when its host is on the `tools/lib/citation-domains.mjs` allowlist.
+**v0.1.6 hardening:** (C02) `groups` is now MANDATORY on every corpus entry — a missing
+key is a hard corpus-integrity error (never ramped), and `groups: []` is the explicit
+"presence-only" marker for an authority that grounds a decision *outside* the flagged
+taxonomy. A presence-only entry no longer WILDCARDS the per-site match (before, any of the
+25 groups-less shipped entries universally justified any flagged class). (G27) the six
+built-in decision groups are extensible: a consumer's own research/domain classes live in
+`tools/decision-groups.json` (write-guard-protected), merged into the heuristic so both
+enforcement layers see them, and the corpus coverage lockstep forces each added group to
+ship an authority that can ground it — so a consumer's chunk-size/threshold/epsilon
+constants carry a citation duty too. Graduation is one command: `npx … graduate` runs the
+ramp-aware validate and advances `baseVersion` only when zero ramp NOTEs remain (G26).
 **Anti-vacuity:** add `const timeoutMs = 5000` with no citation → FAIL with file:line;
 cite `[corpus: llamacpp/sampling]` on a `jwtVerify` line → FAIL naming the group
-mismatch; cite a bare URL on a non-allowlisted host → FAIL naming the host.
+mismatch; cite a presence-only `[corpus: tauri/csp]` on a flagged line → FAIL (no
+wildcard); ship a corpus entry with no `groups` key → FAIL; cite a bare URL on a
+non-allowlisted host → FAIL naming the host.
 
 ### 7. tauri-policy — `node tools/check-tauri-policy.mjs`
 
@@ -264,6 +276,22 @@ module). Over the Tailwind v4 CSS-first theme in `apps/desktop/src/styles.css` a
   `allow` list; malformed or STALE entries (file gone, or no live match) FAIL. The
   manifest is seeded, so a pre-0.1.5 manifest without the key self-disables with a
   NOTE naming `update --refresh-seeded tools/styleguide.manifest.json`.
+- **Status channel** (conditional on `manifest.statusSurfaces`, v0.1.6). A near-
+  monochrome system with a single accent is a deliberate aesthetic — but it left the
+  design system with **no status hue at all**, so a failed-write toast rendered in the
+  same pixels as "Theme: dark": the only channel telling a user their data had not been
+  saved was the prose inside the box. Colour must never be the ONLY channel (WCAG 1.4.1
+  — these surfaces keep their text and their ARIA), but it has to be **a** channel. Any
+  `.tsx` that announces status (`role="alert"`, `role="status"`, `aria-invalid` — the
+  reviewable `signals` list) must reference a `danger`/`success` token; a file that
+  announces without colouring is gate-red. The two tokens are contrast-computed like
+  every other pair (AA 4.5 as text on canvas AND surface, both themes) and are excluded
+  from `accentTokens`, so they never consume the accent budget. Comments are stripped
+  before the token check — a comment that merely NAMES `border-danger` styles nothing,
+  and counting it would let the gate fail OPEN. `statusSurfaces.allow: [{ file, reason }]`
+  is the reviewed escape; malformed, unknown-token (a utility for an undeclared token
+  compiles to NOTHING) and STALE entries all FAIL. Keyless manifests self-disable with
+  an adoption NOTE, like `controlPrimitives`.
 - **Accent budget.** Accent-utility usage stays within the documented budget.
 
 **Anti-vacuity:** delete an erasure marker → FAIL naming the namespace; add
@@ -273,7 +301,10 @@ computed ratio (e.g. `accent on surface = 4.24:1 (min 4.5:1)`); lighten ink into
 the 4.5–7 band → FAIL at the AAA boundary printing `(min 7:1)` (the red can only
 come from the raised per-pair min); push a token
 out of the sRGB gamut → FAIL 'unverifiable'; drop a light-theme token override → FAIL
-('the base value paints through'); hand-roll a `<button className=…>` in a screen →
+('the base value paints through'); repaint an error surface with the neutral `edge`
+token, or drop the Toast's tone classes so a failure looks like a confirmation → FAIL
+naming the file; declare a `statusSurfaces` token that is not in `tokens[]` → FAIL (the
+utility would compile to nothing); hand-roll a `<button className=…>` in a screen →
 FAIL with the primitive-naming FIX line; strip `controlPrimitives` from the manifest
 → NOTE + pass (the pre-0.1.5 shape).
 
@@ -365,8 +396,17 @@ duplicate path, or reused state id → FAIL naming the offender; malformed allow
 ### 21. e2e — `node tools/check-e2e.mjs`
 
 The agent-time Playwright lane: runs the whole `e2e/` directory (a11y + states +
-theme + motion + matrix + degraded-network + mutation + palette + forced-colors —
-mutation locks the
+theme + motion + matrix + degraded-network + mutation + palette + forced-colors +
+reflow — states/a11y/reflow all iterate the ROUTES manifest, so a new screen is held to
+the same bar the day it registers, and the coverage is QUALITY, not existence: the
+loading state must be a real Skeleton (it announces itself sr-only + renders placeholder
+bars, never a silent spinner or a bare "Loading" word — G20), the empty state must carry
+a title AND a descriptive sentence (the EmptyState primitive, never a bare label — G20),
+the keyboard focus-visibility walk runs on EVERY route not just home (a control shipping
+without a visible `:focus-visible` indicator reds — G21), and each route is re-driven at
+the Tauri window's declared minimum (read from `tauri.conf.json` minWidth/minHeight, so
+it can't drift) asserting no horizontal document scroll + an axe re-sweep (a fixed-width
+panel that spills off the 640×480 window reds — G23, WCAG 1.4.10); mutation locks the
 optimistic create-note write path: held-POST optimistic row, reconcile on 201, rollback +
 envelope toast on 500; palette locks the command palette keyboard-only: pinned fuzzy
 ranking, grouped sections, recents persistence across reload, contextual matrix
@@ -394,7 +434,10 @@ desktop graph by depcruise + bundle purity — none can change a desktop e2e ver
 omitting them cannot ride a stale green. CI always re-runs.
 **Anti-vacuity:** an exit-0 run reporting zero passing tests FAILS ("an empty e2e run
 is a vacuous pass"); break a state test id or remove the `:focus-visible` outline →
-the suite (and thus the gate) reds.
+the suite (and thus the gate) reds; replace a route's `<EmptyState>` with a bare-word div,
+or its `<Skeleton>` with a silent spinner → the states quality check reds; give a screen
+a fixed panel wider than the 640px minimum window → the reflow lane reds naming the
+overflow in px.
 
 ### 22. docs-sync — `node tools/check-docs-sync.mjs`
 
@@ -504,6 +547,26 @@ function and no test → FAIL naming the file as absent from the coverage map;
 `tests/gates/check-diff-coverage.test.mjs` additionally pins the below-floor
 red, the at-floor green, and the fail-closed missing-artifact path.
 
+### duplication — `node tools/check-duplication.mjs`
+
+Copy-paste rot (G17, v0.1.6): a zero-dep token clone detector over `apps/*/src` +
+`packages/*/src`. Each source is tokenized (comments/whitespace stripped, string and
+number literals normalized to `S`/`N` so a paste that swapped only a constant still
+matches); a MIN_TOKENS=70 window slides across the stream, and any matching run ≥ 70
+tokens **and** ≥ 6 lines is a clone — extended token-by-token to its maximal span and
+reported once, naming both sites and a stable content fingerprint. Exact-ish (type-1)
+matching, so a red is a genuine paste, not two functions that merely rhyme. Tests, `.d.ts`,
+and the generated `ipc/bindings.ts` are excluded. A **Stop-chain step, NOT a floor
+member** (the 22-gate floor stays frozen), also enforced in the consumer `unit` CI job.
+**Ramped:** on a pre-0.1.6 baseVersion install a clone is a NOTE, not a fail, so a
+consumer's pre-existing copy-paste never ambushes an `update` — sweep it and graduate by
+bumping baseVersion. Reviewed accepted clones live in `tools/duplication-allow.json`
+(write-guard-protected, gate-integrity-hashed), keyed by fingerprint so an accepted clone
+stays accepted after it moves lines.
+**Anti-vacuity:** paste a ≥ 70-token / 6-line block across two files → FAIL naming both
+sites + fingerprint; `tests/gates/check-duplication.test.mjs` pins the red, the DRY green,
+the allowlist mute, the malformed-allow fail-closed, and the ramp NOTE ↔ turn-fatal split.
+
 ## CI-only lanes (outside the chain and the Stop hook)
 
 ### interaction-latency (perf lane) — `HARNESS_PERF_LANE=1 pnpm exec playwright test --project perf`
@@ -551,6 +614,30 @@ into the scaffold and asserts the lane REDS (long-task count + arrow median), th
 that the clean scaffold stays green. This canary lives in the harness selftest, not
 `tests/canary/injections.json` — the registry is scoped to chain/Stop-hook steps by
 construction.
+
+### integration (desktop ↔ server) — `HARNESS_INTEGRATION_LANE=1 pnpm exec playwright test --project integration`
+
+The one lane where the two halves of the app actually meet (`e2e/integration.spec.ts`).
+Every other e2e spec and every unit test mocks the network — which is precisely how the
+desktop once shipped sending **no `Authorization` header at all**: the notes list, the
+optimistic create and the keyset pager each 401'd against the real server, while all 22
+gates, the whole e2e suite and the perf lane stayed green. No lane owned the seam, so
+nothing caught it. (The same blind spot hid a second defect: the server sent no CORS
+headers, and its auth guard sat ahead of the preflight — so the packaged webview, which
+is cross-origin to the API by construction, could not read a single response.)
+
+This lane stubs **nothing** except the Tauri IPC — the host that holds the bearer token,
+and there is no host in chromium. Real vite bundle → real `fetch` → real `Authorization`
+header → real Hono server in `AUTH_MODE=stub` → real Postgres under FORCE RLS. It needs
+those services, so it lives in the blocking `integration-lane` CI job and never in the
+chain: `tools/check-e2e.mjs` strips `HARNESS_INTEGRATION_LANE`, and the default chromium
+project `testIgnore`s the spec, so the agent-time gate provably cannot run it.
+
+**Anti-vacuity:** the lane carries its own negative control — an unauthenticated desktop
+must render its error surface, so a lane that stopped sending the header could not pass
+by having the server stop checking it (the seeded-positive-control doctrine the RLS suite
+uses). Falsifiability: delete the `authorization` header from `src/lib/api-client.ts` and
+three of the four tests red immediately.
 
 ## Opt-in modules
 

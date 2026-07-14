@@ -16,13 +16,17 @@
 // [\\/] everywhere a separator appears: on Windows shells the same write is spelled
 // `tools\validate.mjs`, and a `/`-only pattern would fail OPEN there.
 const PROT_DIRS = String.raw`(?:\.[\\/])?(?:tools|\.claude|\.harness|\.github[\\/]workflows|packages[\\/]schema[\\/]drizzle|tests[\\/]rls|tests[\\/]migrations)[\\/][^\s"'|;&]*`
-const PROT_FILES = String.raw`(?:\.[\\/])?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
+// tsconfig(.base).json belongs here as much as it belongs in WRITE_PROTECTED: it carries
+// the max-strict compiler surface every other type gate rests on, and while the Edit/Write
+// path was guarded, `sed -i 's/"strict": true/"strict": false/' tsconfig.base.json` was
+// caught by NOTHING — not this guard, not gate-integrity, not `tsc -b`, not CI.
+const PROT_FILES = String.raw`(?:\.[\\/])?(?:pnpm-lock\.yaml|Cargo\.lock|lefthook\.yml|biome\.jsonc|knip\.json|eslint\.config\.mjs|vitest\.config\.ts|playwright\.config\.ts|commitlint\.config\.mjs|\.dependency-cruiser\.cjs|pnpm-workspace\.yaml|tsconfig(?:\.base)?\.json|deny\.toml|rust-toolchain\.toml|\.gitleaks\.toml|\.mcp\.json)\b`
 const PROT = `(?:${PROT_DIRS}|${PROT_FILES})`
 
 const SHELL_WRITE_MSG =
-  'Blocked: shell writes to the enforcement surface (gate scripts, hooks, stamps, lockfiles, migrations, workflows) bypass the write-guard — edit via the Write tool with HARNESS_ALLOW_SELF_EDIT=1 (human-in-the-loop).'
+  'Blocked: shell writes to the enforcement surface (gate scripts, hooks, stamps, lockfiles, migrations, workflows, the strictness configs) bypass the write-guard — edit via the Write tool with HARNESS_ALLOW_SELF_EDIT=1 (human-in-the-loop).'
 
-// Four spellings of a write whose destination is the protected surface.
+// Five spellings of a write whose destination is the protected surface.
 const SHELL_WRITE_RES = [
   // shell redirection: `> path` / `>> path`
   new RegExp(`(?:^|[^<>])>{1,2}\\s*(?:"|')?${PROT}`),
@@ -33,7 +37,26 @@ const SHELL_WRITE_RES = [
   // cp/mv/etc with a protected path as the DESTINATION (final argument). Reading
   // FROM the surface (`cp tools/x.mjs /tmp/`) stays allowed.
   new RegExp(String.raw`\b(?:cp|mv|rsync|install|ln)\b[^|;&]*\s(?:"|')?${PROT}(?:"|')?\s*(?:$|[|;&])`),
+  // Patch application: `git apply` / `patch` reconstruct arbitrary bytes at a protected
+  // path with no redirect operator to match on.
+  new RegExp(String.raw`\b(?:git\s+apply|patch)\b[^|;&]*${PROT}`),
 ]
+
+// An INTERPRETER is a write primitive: `node -e "fs.appendFileSync('tools/rls-exempt.json',…)"`
+// lands the same bytes as `>` while matching none of the redirect spellings above — it was
+// the one un-denied way to widen a security escape list, doctor a gate script, or forge a
+// stamp. Deny an inline-eval invocation (or dd/base64 reconstruction) whose PROGRAM TEXT
+// names the protected surface. This is a tripwire, not a sandbox: an obfuscated path
+// (string concat, base64, a variable) still evades it, which is precisely why the harness
+// claims tamper-EVIDENT, not tamper-proof — gate-integrity re-hashing and CI parity are the
+// layers that do not depend on pattern-matching.
+// SOURCE: docs/harness/README.md (tamper evidence; guards are tripwires, not sandboxes)
+const INTERPRETER_WRITE_RE = new RegExp(
+  String.raw`\b(?:node|deno|bun|python3?|ruby|perl|php)\b[^|;&]*\s-(?:e|c|-eval|-exec)\b[^|;&]*${PROT}` +
+    String.raw`|\bdeno\s+eval\b[^|;&]*${PROT}` +
+    String.raw`|\bdd\b[^|;&]*\bof=(?:"|')?${PROT}` +
+    String.raw`|\bbase64\b[^|;&]*\s-{1,2}(?:d|decode)\b[^|;&]*${PROT}`,
+)
 
 // The sanctioned uses of the RLS-bypassing migrator DSN: drizzle-kit migrate/generate/check
 // and the harness RLS runners (tests/migrations fresh-apply; tests/rls orchestrator).
@@ -56,6 +79,13 @@ export const BASH_RULES = [
     test: (cmd) => SHELL_WRITE_RES.some((re) => re.test(cmd)),
     message: SHELL_WRITE_MSG,
     // Honors the same HARNESS_ALLOW_SELF_EDIT=1 human escape hatch as the write-guard.
+    allowWhen: (_cmd, ctx) => ctx.selfEdit,
+  },
+  {
+    id: 'interpreter-write-protected',
+    re: INTERPRETER_WRITE_RE,
+    message:
+      'Blocked: an inline interpreter (`node -e`, `python -c`, `deno eval`, dd/base64) writing to the enforcement surface bypasses the write-guard the same way a redirect would — widening an escape list (tools/rls-exempt.json), doctoring a gate script, or forging a stamp is a human-in-the-loop act (HARNESS_ALLOW_SELF_EDIT=1).',
     allowWhen: (_cmd, ctx) => ctx.selfEdit,
   },
   {
@@ -175,6 +205,7 @@ export const WRITE_PROTECTED = [
   { id: 'lock-json', re: /^tools\/(identity|prompts)\.lock\.json$/ },
   { id: 'rls-exempt', re: /^tools\/rls-exempt\.json$/ }, // exempting a table from RLS is a human decision
   { id: 'provenance-overrides', re: /^tools\/provenance-overrides\.json$/ }, // cross-group citation escapes are a human decision
+  { id: 'decision-groups', re: /^tools\/decision-groups\.json$/ }, // extending the citation taxonomy is a human decision
   { id: 'license-exceptions', re: /^tools\/license-exceptions\.json$/ }, // license exceptions are a human decision
   { id: 'bundle-budget', re: /^tools\/bundle-budget\.json$/ },
   // The committed gzip-ratchet baseline: regenerated ONLY by `pnpm perf:baseline`
@@ -187,6 +218,8 @@ export const WRITE_PROTECTED = [
   { id: 'styleguide-manifest', re: /^tools\/styleguide\.manifest\.json$/ },
   { id: 'mutation-baseline', re: /^tools\/mutation-baseline\.json$/ }, // accepting a surviving mutant is a human decision
   { id: 'route-allowlist', re: /^tools\/route-allowlist\.json$/ }, // exempting a features dir from ROUTES is a human decision
+  { id: 'dto-bounds-allow', re: /^tools\/dto-bounds-allow\.json$/ }, // exempting a wire string from the .max() bound is a human decision
+  { id: 'duplication-allow', re: /^tools\/duplication-allow\.json$/ }, // accepting a code clone is a human decision
   { id: 'rls-runner', re: /^tests\/rls\/run-rls\.mjs$/ }, // the RLS runner the Stop hook invokes directly
   { id: 'migration-apply-runner', re: /^tests\/migrations\/migration-apply\.mjs$/ },
   { id: 'lefthook', re: /^lefthook\.yml$/ },

@@ -8,10 +8,17 @@
 //      references must mirror the pnpm workspace dependency graph — three parallel
 //      topologies (workspace deps, project refs, knip map) desynchronize into
 //      confusing type errors otherwise. Pure static check, no install needed.
+//   3. bounded wire strings (G18): every `z.string()` in the shared @app/schema
+//      contract must be length-bounded with `.max(N)`. An unbounded wire string is a
+//      memory-amplification vector — the server accepts a 50 MB "title" the client
+//      never meant to send. The app.errors spec-walk already proves the ENVELOPE on
+//      every OpenAPI route; this closes the other half (a new field's `z.string()`
+//      passed every gate). Reviewed exceptions live in tools/dto-bounds-allow.json.
 // SOURCE: docs/harness/README.md (contracts gate) [corpus: harness/doctrine]
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
+import { walkFiles } from './lib/fs-walk.mjs'
+import { fail, failures, ok, runCmd, skipOrFail, stampGate } from './lib/gate.mjs'
 import { parseJsonc } from './lib/jsonc.mjs'
 import { STAMP_INPUTS } from './lib/stamp-inputs.mjs'
 
@@ -92,6 +99,129 @@ if (existsSync(EMIT)) {
   }
 }
 
+// ---- 3. bounded wire strings (G18): every z.string() carries .max() ----
+const SCHEMA_SRC = 'packages/schema/src'
+const DTO_ALLOW = 'tools/dto-bounds-allow.json'
+let boundedChecked = 0
+if (existsSync(SCHEMA_SRC)) {
+  // Reviewed escape hatch: a genuinely-unbounded string the contract accepts on
+  // purpose. Same fail-closed-parse discipline as every other exemption list.
+  const allow = new Set()
+  if (existsSync(DTO_ALLOW)) {
+    let parsed
+    try {
+      parsed = JSON.parse(readFileSync(DTO_ALLOW, 'utf8'))
+    } catch (e) {
+      fail(
+        GATE,
+        `${DTO_ALLOW} is not valid JSON (${e.message}) — the exemption list must be reviewable data`,
+      )
+    }
+    if (!Array.isArray(parsed.allow)) {
+      fail(
+        GATE,
+        `${DTO_ALLOW} must carry an "allow" ARRAY of {"site": "file:line", "reason": string} entries`,
+      )
+    }
+    for (const entry of parsed.allow) {
+      const okShape =
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof entry.site === 'string' &&
+        typeof entry.reason === 'string' &&
+        entry.reason.trim() !== ''
+      if (!okShape) {
+        fail(
+          GATE,
+          `${DTO_ALLOW}: every entry must be {"site": "file:line", "reason": non-empty string} — got ${JSON.stringify(entry)}`,
+        )
+      }
+      allow.add(entry.site)
+    }
+  }
+
+  // Consume a literal delimited by `close` starting just after text[open]; return the
+  // index of the char after the closing delimiter (handling `\` escapes). Shared by the
+  // string ('/"/`) and regex (/) skips so skipBalanced stays flat.
+  const skipDelimited = (text, open, close) => {
+    let i = open + 1
+    while (i < text.length && text[i] !== close) {
+      if (text[i] === '\\') i += 1
+      i += 1
+    }
+    return i + 1
+  }
+  const isStringDelim = (ch) => ch === '"' || ch === "'" || ch === '`'
+  // A `/` begins a regex literal here unless it opens a comment (comments are already
+  // blanked upstream, but the guard keeps this correct in isolation).
+  const isRegexStart = (text, i) => text[i] === '/' && text[i + 1] !== '/' && text[i + 1] !== '*'
+
+  // Consume a balanced (...) starting at text[open] (which must be '('); return the index
+  // just past the matching ')'. Nested parens count; a paren INSIDE a string/regex does
+  // not (a regex like /f(o)o/ would otherwise miscount).
+  const skipBalanced = (text, open) => {
+    let depth = 0
+    for (let i = open; i < text.length; i += 1) {
+      const ch = text[i]
+      if (isStringDelim(ch)) i = skipDelimited(text, i, ch) - 1
+      else if (isRegexStart(text, i)) i = skipDelimited(text, i, '/') - 1
+      else if (ch === '(') depth += 1
+      else if (ch === ')' && (depth -= 1) === 0) return i + 1
+    }
+    return text.length
+  }
+
+  // From the end of a `z.string(...)` call, walk the fluent method chain
+  // (`.name(...)` / `.name`) and report whether `.max(` appears in it. Whitespace and
+  // newlines between a value and its `.method` are the chain continuing.
+  const chainHasMax = (text, afterCall) => {
+    let i = afterCall
+    for (;;) {
+      while (i < text.length && /\s/.test(text[i])) i += 1
+      if (text[i] !== '.') return false
+      const m = /^\.([A-Za-z_$][\w$]*)/.exec(text.slice(i))
+      if (m === null) return false
+      const name = m[1]
+      i += m[0].length
+      while (i < text.length && /\s/.test(text[i])) i += 1
+      if (text[i] === '(') i = skipBalanced(text, i)
+      if (name === 'max') return true
+    }
+  }
+
+  // BLANK comments (replace with spaces) rather than removing them, so byte offsets —
+  // and therefore reported line numbers — stay identical to the source file. Blanking a
+  // commented `z.string()` also stops it matching (no phantom sites), and blanking a
+  // documentation `.max(...)` inside a comment stops it from falsely satisfying a real,
+  // uncommented site — so the strip can only make the check STRICTER, never fail open.
+  const blank = (m) => m.replace(/[^\n]/g, ' ')
+  const stripComments = (src) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, blank)
+      .replace(/(^|[^:])(\/\/[^\n]*)/g, (_, pre, com) => pre + blank(com))
+
+  const STRING_CALL = /\bz\s*\.\s*(?:coerce\s*\.\s*)?string\s*\(/g
+  for (const file of walkFiles(SCHEMA_SRC, {
+    filter: (p) => /\.ts$/.test(p) && !/\.(test|spec)\.ts$/.test(p),
+  })) {
+    const rel = `${SCHEMA_SRC}/${file}`
+    const text = stripComments(readFileSync(rel, 'utf8'))
+    for (const m of text.matchAll(STRING_CALL)) {
+      boundedChecked += 1
+      const afterCall = skipBalanced(text, text.indexOf('(', m.index))
+      if (chainHasMax(text, afterCall)) continue
+      const line = text.slice(0, m.index).split('\n').length
+      if (allow.has(`${rel}:${line}`)) continue
+      errs.push(
+        `${rel}:${line}: unbounded z.string() — every wire string DTO must carry .max(N) (an unbounded string lets a client send an arbitrarily large payload the server buffers and stores). Add a .max(...) bound, or a reviewed {"site": "${rel}:${line}", "reason": …} entry in ${DTO_ALLOW}`,
+      )
+    }
+  }
+}
+
 failures(GATE, errs)
 recordGreen()
-ok(GATE, 'openapi.json in sync; tsconfig references mirror the workspace graph')
+ok(
+  GATE,
+  `openapi.json in sync; tsconfig references mirror the workspace graph; ${boundedChecked} wire string(s) length-bounded`,
+)

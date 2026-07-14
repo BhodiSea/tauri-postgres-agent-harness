@@ -53,7 +53,15 @@ export const STAMP_INPUTS = {
     'pnpm-lock.yaml',
   ],
   // pnpm license metadata + the exception list
-  licenses: ['pnpm-lock.yaml', 'package.json', 'tools/license-exceptions.json'],
+  // + the citeability surface (G25): LICENSE and CITATION.cff are gate inputs now, so a
+  // drifted citation version can never ride a warm stamp.
+  licenses: [
+    'pnpm-lock.yaml',
+    'package.json',
+    'tools/license-exceptions.json',
+    'LICENSE',
+    'CITATION.cff',
+  ],
   // the Rust host + the committed specta bindings it must stay in sync with
   'rust-check': [
     'apps/desktop/src-tauri',

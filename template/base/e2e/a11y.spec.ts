@@ -1,13 +1,14 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test } from '@playwright/test'
-import { installMockIpc, stubHealthz, stubNotes } from './mock-ipc'
+import { expect, type Page, test } from '@playwright/test'
+import { ROUTES } from '../apps/desktop/src/routes'
+import { installMockIpc, makeNoteRows, stubHealthz, stubNotes } from './mock-ipc'
 
 // Accessibility gate for the app shell (fast lane: chromium + mock IPC, no Tauri
-// binary). Three layers: the axe engine scan (fails on ANY violation), a
-// keyboard-traversal walk that must find a NON-EMPTY sequence of focus stops each
-// with a VISIBLE focus indicator, and a modal focus-trap/restore check over the
-// shortcuts overlay and command palette. The deep, per-route sweep lives in the
-// opt-in gate-a11y-deep module.
+// binary). Layers: the axe engine scan (fails on ANY violation), a keyboard-traversal
+// walk that must find a NON-EMPTY sequence of focus stops each with a VISIBLE focus
+// indicator — run over EVERY route in the manifest, not just home — and a modal
+// focus-trap/restore check over the shortcuts overlay and command palette. The deep,
+// per-route sweep lives in the opt-in gate-a11y-deep module.
 // SOURCE: WCAG 2.2 AA as the shipping bar [corpus: wcag/contrast-aa]
 
 test.beforeEach(async ({ page }) => {
@@ -58,13 +59,12 @@ interface TabStop {
   readonly descriptor: string
 }
 
-test('keyboard traversal: non-empty, visibly-indicated focus path through the landmarks, no trap', async ({
-  page,
-}) => {
-  // Tab through the page recording each stop's landmark AND whether focus is
-  // actually VISIBLE: computed style while focused must differ from the same
-  // element blurred (the shell styles :focus-visible with a 2px accent outline).
-  // SOURCE: WCAG 2.2 SC 2.4.7 Focus Visible / 1.4.11 Non-text Contrast [corpus: wcag/contrast-aa]
+// Tab through the page recording each stop's landmark AND whether focus is actually
+// VISIBLE: computed style while focused must differ from the same element blurred (the
+// shell styles :focus-visible with a 2px accent outline). Returns the ordered path; a
+// null stop (wrap back to <body>) ends the walk.
+// SOURCE: WCAG 2.2 SC 2.4.7 Focus Visible / 1.4.11 Non-text Contrast [corpus: wcag/contrast-aa]
+async function walkFocus(page: Page): Promise<TabStop[]> {
   const path: TabStop[] = []
   for (let press = 0; press < 25; press += 1) {
     await page.keyboard.press('Tab')
@@ -101,10 +101,13 @@ test('keyboard traversal: non-empty, visibly-indicated focus path through the la
     if (stop === null) break // wrapped back to <body> — traversal complete, no trap
     path.push(stop)
   }
+  return path
+}
 
+function assertWalk(path: TabStop[]): void {
   // ANTI-VACUITY: a page with zero tabbable elements is keyboard-inoperable —
   // the walk must fail, not pass by never asserting anything.
-  expect(path.length, 'the shell must expose at least one keyboard focus stop').toBeGreaterThan(0)
+  expect(path.length, 'the screen must expose at least one keyboard focus stop').toBeGreaterThan(0)
 
   for (const stop of path) {
     expect(stop.landmark, `${stop.descriptor} must live inside a landmark`).not.toBe('outside')
@@ -119,6 +122,13 @@ test('keyboard traversal: non-empty, visibly-indicated focus path through the la
   const firstSeen = landmarks.filter((entry, index) => landmarks.indexOf(entry) === index)
   const indices = firstSeen.map((entry) => landmarkOrder.indexOf(entry))
   expect([...indices].sort((a, b) => a - b)).toEqual(indices)
+}
+
+test('keyboard traversal (home): non-empty, visibly-indicated focus path, no trap', async ({
+  page,
+}) => {
+  const path = await walkFocus(page)
+  assertWalk(path)
 
   // No focus trap: after the walk (25 presses ≫ focusable count) the active
   // element must be back at the document root, not stuck inside a widget.
@@ -127,6 +137,38 @@ test('keyboard traversal: non-empty, visibly-indicated focus path through the la
   )
   expect(finished).toBe(true)
 })
+
+// G21: the focus-visibility walk runs over EVERY route, not just home — a route whose
+// controls ship without a visible :focus-visible indicator (a raw <button>, a control
+// that overrode the outline) used to be invisible to this suite because it only ever
+// loaded `/`. The manifest is the source of truth, so a new screen is covered the day it
+// registers. (Home is also covered by the trap-checking test above; this loop adds the
+// per-route indicator coverage without re-asserting the trap on every screen.)
+for (const route of ROUTES) {
+  test(`keyboard focus is visibly indicated on every stop: ${route.id} (${route.path})`, async ({
+    page,
+  }) => {
+    await installMockIpc(page)
+    await stubHealthz(page, { kind: 'ok', version: '9.9.9' })
+    // A full page of rows so the screen renders its interactive, most-populated state —
+    // the most focus stops to indicate.
+    await page.route(
+      (url) => url.port === '8787' && !url.pathname.endsWith('/healthz'),
+      async (dataRoute) => {
+        await dataRoute.fulfill({
+          status: 200,
+          headers: { 'access-control-allow-origin': '*' },
+          contentType: 'application/json',
+          body: JSON.stringify({ items: makeNoteRows(50), nextCursor: null }),
+        })
+      },
+    )
+    await page.goto(route.path)
+    await expect(page.getByRole('status')).toContainText('API connected (v9.9.9)')
+
+    assertWalk(await walkFocus(page))
+  })
+}
 
 // The two modal surfaces the shell ships. Native <dialog>.showModal() provides
 // the trap; this spec PROVES it instead of trusting it.

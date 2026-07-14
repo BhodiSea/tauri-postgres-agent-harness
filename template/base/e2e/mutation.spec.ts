@@ -190,6 +190,25 @@ for (const theme of ['dark', 'light'] as const) {
 
     // The toast carries the ENVELOPE's human message, not a generic string.
     await expect(page.getByText(ENVELOPE_MESSAGE)).toBeVisible()
+
+    // …and it LOOKS like a failure. A lost write used to render in exactly the same
+    // pixels as "Theme: dark" — same border, same ink — so the only channel telling a
+    // user their data had not been saved was the prose inside the box. The failure toast
+    // is now announced assertively (role=alert) and painted with the danger token; the
+    // computed colour is compared against the neutral chrome around it, so the assertion
+    // holds in BOTH themes without hard-coding either theme's values.
+    const failureToast = page.getByRole('alert').filter({ hasText: ENVELOPE_MESSAGE })
+    await expect(failureToast).toBeVisible()
+    const [toastBorder, neutralBorder] = await Promise.all([
+      failureToast.evaluate((node) => getComputedStyle(node).borderLeftColor),
+      // The composer's own border is the same `edge` token every neutral surface uses.
+      input.evaluate((node) => getComputedStyle(node).borderLeftColor),
+    ])
+    expect(
+      toastBorder,
+      'the failure toast is painted with the neutral edge token — a lost write is indistinguishable from a confirmation',
+    ).not.toBe(neutralBorder)
+
     // Rollback: no pending row survives, and the title exists only as the
     // preserved draft in the input — never as a phantom list row.
     await expect(page.locator('li[data-pending="true"]')).toHaveCount(0)

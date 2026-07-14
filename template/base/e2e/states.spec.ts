@@ -69,7 +69,26 @@ for (const route of ROUTES) {
         await dataRoute.fulfill({ ...fulfillJson, body: EMPTY_PAGE })
       })
       await page.goto(route.path)
-      await expect(page.getByTestId(route.states.loading)).toBeVisible()
+      const loadingEl = page.getByTestId(route.states.loading)
+      await expect(loadingEl).toBeVisible()
+
+      // QUALITY, not just existence (G20): the loading surface must be a real Skeleton —
+      // it ANNOUNCES itself to assistive tech (a bare spinner is silent) and renders
+      // placeholder bars. A route that shipped `<div data-testid="x-loading">Loading</div>`
+      // used to satisfy the manifest and this spec; now it reds.
+      const loadInfo = await loadingEl.evaluate((root) => ({
+        text: root.textContent.trim().toLowerCase(),
+        bars: root.querySelectorAll('[aria-hidden="true"]').length,
+      }))
+      expect(
+        loadInfo.text,
+        'the loading state must announce itself to assistive tech (the Skeleton sr-only string) — a silent spinner leaves a screen-reader user guessing',
+      ).toContain('loading')
+      expect(
+        loadInfo.bars,
+        'the loading state renders placeholder bars (the Skeleton primitive), not a bare word',
+      ).toBeGreaterThan(0)
+
       await expectAxeClean(page, `${route.id}:loading`)
       // Releasing the held response must advance the screen out of loading.
       release()
@@ -83,7 +102,34 @@ for (const route of ROUTES) {
         await dataRoute.fulfill({ ...fulfillJson, body: EMPTY_PAGE })
       })
       await page.goto(route.path)
-      await expect(page.getByTestId(route.states.empty)).toBeVisible()
+      const emptyEl = page.getByTestId(route.states.empty)
+      await expect(emptyEl).toBeVisible()
+
+      // QUALITY, not just existence (G20): an empty state is a title AND a supporting
+      // description (the EmptyState primitive), never a bare "None". A route that shipped
+      // `<div data-testid="x-empty">Empty</div>` cleared the manifest and the old
+      // visible-check; now the structure is asserted against the real render.
+      const emptyInfo = await emptyEl.evaluate((root) => {
+        const leaves = Array.from(root.querySelectorAll('*')).filter(
+          (el) => el.children.length === 0 && el.textContent.trim() !== '',
+        )
+        // A bare `<div>None</div>` has no element children — fall back to its own text so
+        // it still counts as exactly one run (and fails the ≥2 check below).
+        const runs =
+          leaves.length > 0
+            ? leaves.map((el) => el.textContent.trim())
+            : [root.textContent.trim()].filter((t) => t !== '')
+        return { runs, maxWords: Math.max(0, ...runs.map((r) => r.split(/\s+/).length)) }
+      })
+      expect(
+        emptyInfo.runs.length,
+        'the empty state must carry a title AND a description, not a single bare label (the EmptyState primitive)',
+      ).toBeGreaterThanOrEqual(2)
+      expect(
+        emptyInfo.maxWords,
+        'the empty state needs a descriptive line — a real sentence telling the user what goes here, not just a heading word',
+      ).toBeGreaterThanOrEqual(3)
+
       await expect(page.getByRole('status')).toContainText(CONNECTED)
       await expectAxeClean(page, `${route.id}:empty`)
     })

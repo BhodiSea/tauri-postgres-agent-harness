@@ -1,5 +1,6 @@
-import { ApiError, NewNoteInput, NoteDto } from '@app/schema'
+import { NewNoteInput, NoteDto } from '@app/schema'
 import { useCallback, useReducer, useRef } from 'react'
+import { ApiRequestError, apiPost } from '../../lib/api-client'
 
 // The write-UX exemplar: ONE plain reducer drives the whole optimistic
 // create-note lifecycle. Submit validates against the @app/schema contract at
@@ -10,10 +11,6 @@ import { useCallback, useReducer, useRef } from 'react'
 // (the Toast pattern, same seam as useKeysetQuery's onLoadMoreError).
 // SOURCE: harness doctrine — latency feel is a first-class UI concern; the
 // optimistic row must never outlive a failed write [corpus: harness/doctrine]
-
-// Dev override via Vite env; otherwise the API origin baked into the committed
-// CSP at install time (same convention as useListQuery).
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
 
 /** What the list renders for an optimistic entry — temp while pending, server after. */
 export interface ComposerRow {
@@ -65,14 +62,15 @@ function createNoteReducer(state: CreateNoteState, action: CreateNoteAction): Cr
 
 export type SubmitOutcome = 'rejected' | 'settled' | 'failed'
 
-// Every non-2xx body is the ONE error envelope — surface its human message;
-// fall back to the status when a proxy answers with something else entirely.
-async function envelopeMessage(response: Response): Promise<string> {
-  try {
-    return ApiError.parse(await response.json()).error.message
-  } catch {
-    return `create note responded ${String(response.status)}`
+// What the failure toast says. A server-side failure carries a requestId that correlates
+// this exact toast with the server's logs — quote it, so "it failed" becomes a ticket an
+// engineer can actually trace. Anything else (offline socket, signed-out session) speaks
+// for itself through its own message.
+function failureMessage(cause: unknown): string {
+  if (cause instanceof ApiRequestError && cause.requestId !== null) {
+    return `${cause.message} (ref ${cause.requestId.slice(0, 8)})`
   }
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
 export function useCreateNote(onFailure: (message: string) => void): {
@@ -101,16 +99,10 @@ export function useCreateNote(onFailure: (message: string) => void): {
       inFlight.current = true
       dispatch({ type: 'start', row: { id: tempId, title: parsed.data.title, pending: true } })
       try {
-        const response = await fetch(`${API_ORIGIN}/api/notes`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(parsed.data),
-        })
-        if (!response.ok) {
-          dispatch({ type: 'fail', tempId })
-          onFailure(await envelopeMessage(response))
-          return 'failed'
-        }
+        // apiPost attaches the host-held bearer token and throws ApiRequestError
+        // carrying the envelope's own message — so the ONE rollback path below covers
+        // a 4xx, a 5xx, an offline socket, and an unauthenticated session alike.
+        const response = await apiPost('/api/notes', parsed.data)
         const note = NoteDto.parse(await response.json())
         dispatch({
           type: 'settle',
@@ -120,7 +112,7 @@ export function useCreateNote(onFailure: (message: string) => void): {
         return 'settled'
       } catch (cause) {
         dispatch({ type: 'fail', tempId })
-        onFailure(cause instanceof Error ? cause.message : String(cause))
+        onFailure(failureMessage(cause))
         return 'failed'
       } finally {
         inFlight.current = false

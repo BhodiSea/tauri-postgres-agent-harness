@@ -3,6 +3,7 @@ import { Button } from '../../components/Button'
 import { EmptyState } from '../../components/EmptyState'
 import { Skeleton } from '../../components/Skeleton'
 import { useToast } from '../../components/Toast'
+import { apiFetch, UnauthenticatedError } from '../../lib/api-client'
 import { cn } from '../../lib/utils'
 import { ROUTES } from '../../routes'
 import { NoteComposer } from './NoteComposer'
@@ -21,17 +22,23 @@ import { type ListFetcher, type ListQueryState, useListQuery } from './useListQu
 // SOURCE: harness doctrine — degraded/empty/loading states are a first-class
 // UI concern, never a blank panel [corpus: harness/doctrine]
 
-// Dev override via Vite env; otherwise the API origin baked into the committed
-// CSP (tauri.conf.json connect-src) at install time.
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
-
 // Zod parse at the fetch boundary — the desktop trusts contracts, not wire
 // bytes. Keyset pagination: the scaffold panel renders the FIRST page; the matrix
-// screen (features/matrix/useKeysetQuery) shows the paged variant.
+// screen (features/matrix/useKeysetQuery) shows the paged variant. apiFetch carries
+// the bearer token and throws the envelope's own message, which useListQuery renders
+// as the error state.
 const fetchNotes: ListFetcher<Note> = async (signal) => {
-  const response = await fetch(`${API_ORIGIN}/api/notes`, { signal })
-  if (!response.ok) throw new Error(`notes responded ${String(response.status)}`)
-  return NotesPage.parse(await response.json()).items
+  try {
+    const response = await apiFetch('/api/notes', { signal })
+    return NotesPage.parse(await response.json()).items
+  } catch (cause) {
+    // A signed-out session is not a server fault — say what it is, and what to do.
+    // Everything else keeps the envelope's own message.
+    if (cause instanceof UnauthenticatedError) {
+      throw new Error('Not signed in — reconnect to load your notes.')
+    }
+    throw cause
+  }
 }
 
 // The scaffold's home screen; its manifest entry carries the state test ids.
@@ -73,7 +80,10 @@ function NotesBody({
       <div
         data-testid={HOME.states.error}
         role="alert"
-        className="mt-3 rounded-md border border-edge bg-canvas p-3"
+        // border-danger, not border-edge: the failure surface used to be the same box as
+        // the empty state. The message text stays `text-ink` (AAA) — colour is the
+        // redundant channel, never the only one.
+        className="mt-3 rounded-md border border-danger bg-canvas p-3"
       >
         <p className="text-sm">Could not load notes.</p>
         <p className="mt-1 font-mono text-xs text-ink-muted">{state.message}</p>
@@ -114,7 +124,12 @@ export function NotesPanel() {
   const toast = useToast()
   // Write failures surface as envelope-message toasts — same seam as the
   // matrix screen's failed loadMore.
-  const { state: createState, submit } = useCreateNote(toast.show)
+  // 'error', not the default info tone: a failed write is the one message in this app a
+  // user must not scroll past, and it used to render in exactly the same pixels as
+  // "Theme: dark".
+  const { state: createState, submit } = useCreateNote((message) => {
+    toast.show(message, 'error')
+  })
 
   return (
     <section

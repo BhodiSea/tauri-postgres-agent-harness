@@ -54,14 +54,16 @@ if (typeof chromiumPath !== 'string' || !existsSync(chromiumPath)) {
   skipOrFail(GATE, 'chromium browser not installed — run `pnpm exec playwright install chromium`')
 }
 
-// The CI-only perf lane must never run inside the gate chain: even with
-// HARNESS_PERF_LANE exported in the agent's shell, this run strips it, so the
-// 'perf' project is never defined here (playwright.config.ts gates it on that
-// env var and the chromium project testIgnores its spec) — the agent-time lane
-// provably runs exactly the non-perf projects, keeping the chain deterministic
-// and the warm-validate promise intact.
+// The CI-only lanes must never run inside the gate chain: even with
+// HARNESS_PERF_LANE / HARNESS_INTEGRATION_LANE exported in the agent's shell, this run
+// strips them, so neither project is ever defined here (playwright.config.ts gates each
+// on its env var and the chromium project testIgnores both specs) — the agent-time lane
+// provably runs exactly the fast mocked projects, keeping the chain deterministic and
+// the warm-validate promise intact. The perf lane is wall-clock (flaky by nature); the
+// integration lane needs a live server + Postgres (unavailable on a plane).
 const env = { ...process.env }
 delete env.HARNESS_PERF_LANE
+delete env.HARNESS_INTEGRATION_LANE
 
 const res = spawnSync('pnpm exec playwright test', {
   shell: true, // pnpm is a .cmd shim on Windows; the config decides workers/reporter

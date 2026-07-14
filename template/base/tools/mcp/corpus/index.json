@@ -36,6 +36,7 @@
     "version": "16"
   },
   {
+    "groups": [],
     "id": "postgres/recursive-cycle",
     "sha256": "cc6bbfe4d5deb3879d8f820a68e01d3c2d706d3d3d40ab4b5e48ea09f1bb4ee5",
     "text": "A recursive query over graph data with cycles will loop indefinitely unless terminated. Use the SQL-standard CYCLE clause (Postgres 14+) or carry a visited-path array and test against it in the recursive term.",
@@ -71,14 +72,16 @@
     "version": "6"
   },
   {
+    "groups": [],
     "id": "tauri/isolation",
     "sha256": "85bee32b43c0d40ac3bee00930007d7a5ce4e309e3aa9d706729b62f20799d57",
     "text": "The isolation pattern injects a sandboxed <iframe> between the frontend and Tauri Core: every IPC message passes through the isolation application, which can verify and reject unexpected messages before they reach the host. Recommended whenever the frontend includes any third-party code. Configured via app.security.pattern { use: 'isolation', options.dir }.",
     "title": "Tauri isolation pattern: intercept and verify IPC before it reaches Core",
-    "url": "https://tauri.app/security/isolation/",
+    "url": "https://tauri.app/concept/inter-process-communication/isolation/",
     "version": "2"
   },
   {
+    "groups": [],
     "id": "tauri/csp",
     "sha256": "5cee5efaf55d85a71d9f0f433f0fb08c1582813d37efea0235a2afd8cb06ae95",
     "text": "tauri.conf.json app.security.csp is applied to all app windows; Tauri appends nonces/hashes for its own injected scripts. A null CSP disables the protection entirely. connect-src must enumerate the API origins the webview may reach; keep default-src 'self' and never add remote script sources.",
@@ -87,6 +90,7 @@
     "version": "2"
   },
   {
+    "groups": [],
     "id": "tauri/capabilities",
     "sha256": "1f3e66bd7807d7601ab389e6cb752c9fab750bcdba94d566e97d4cae7a0c1067",
     "text": "Capabilities grant permissions to windows/webviews; grant the least privilege the window needs. Remote-URL capabilities extend IPC to remote content and should not be used for local-first apps. Prefer adding a typed #[tauri::command] over granting shell/process/fs plugin permissions.",
@@ -95,6 +99,7 @@
     "version": "2"
   },
   {
+    "groups": [],
     "id": "tauri/webview2-offline",
     "sha256": "967ae3a606ab33c8dc76a85838dfaf8c95c378acc8db145ba7af1e5b3c2d2b10",
     "text": "webviewInstallMode offlineInstaller embeds the ~127MB WebView2 installer so installation needs no network — required for locked-down/offline enterprise targets. downloadBootstrapper is smaller but silently fails on machines without egress; skip assumes a preinstalled runtime.",
@@ -103,6 +108,7 @@
     "version": "2"
   },
   {
+    "groups": [],
     "id": "tauri/updater-signing",
     "sha256": "f886c063dce1147b722d3644c29feb9fd2a48e81e3b40beca5f972fd744375e0",
     "text": "Updater artifacts are signed with a minisign keypair; the public key ships in tauri.conf.json and the private key must exist only in CI secrets. A leaked private key lets an attacker ship arbitrary 'updates' to every install.",
@@ -111,6 +117,7 @@
     "version": "2"
   },
   {
+    "groups": [],
     "id": "windows/code-signing",
     "sha256": "12cf97bbc26014ed3827ecfafc5536b5d75d80989cdf68b96797a9bd9128336f",
     "text": "Windows executables should be Authenticode-signed; unsigned or fresh-certificate binaries trip SmartScreen reputation warnings. Azure Trusted Signing provides managed certificates with short-lived keys and integrates with signtool in CI; EV certificates grant faster reputation. Verify with signtool verify /pa /all after signing.",
@@ -119,6 +126,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "react/compiler",
     "sha256": "423af0b0b7669912634e79e95282859d043e62e658598c881c2402a4be2c4f18",
     "text": "React Compiler memoizes automatically at build time; code must follow the Rules of React (components/hooks pure, no conditional hooks). Adopt with an exact-pinned babel-plugin-react-compiler and the eslint-plugin-react-hooks compiler rules so violations fail lint instead of silently deoptimizing.",
@@ -127,6 +135,7 @@
     "version": "19"
   },
   {
+    "groups": [],
     "id": "wcag/character-key-shortcuts",
     "sha256": "43551654bb12c239ff7594bae18d9dff76b28957f9abd860964146948b3eae94",
     "text": "WCAG 2.1.4 (Character Key Shortcuts, Level A): if a keyboard shortcut uses only a single printable character, users must be able to turn it off or remap it, or it must only fire on focus. Speech-input and screen-reader users otherwise trigger shortcuts accidentally. Registering all shortcuts in one auditable registry makes this testable.",
@@ -144,6 +153,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "drizzle/migrations-append-only",
     "sha256": "674ad14c52d09c2d479ea8aa81faf4be4240b613e0359b969fae257e1b817260",
     "text": "Generated migrations are ordered, immutable steps; editing an already-applied migration desynchronizes databases that ran the original. Schema changes go through a NEW migration (drizzle-kit generate) — never edit an existing file, never `drizzle-kit push` outside local prototyping.",
@@ -152,6 +162,7 @@
     "version": "1.0"
   },
   {
+    "groups": [],
     "id": "microsoft/api-guidelines",
     "sha256": "0bb0dad4565d23e1518bc2def252d1099bad62fef80938de5c423236eacdab1f",
     "text": "The Microsoft Azure REST API Guidelines require error responses to be a single JSON object with a top-level error property carrying a stable machine-readable code and a human-readable message (plus optional details). Clients branch on the code, never the message text, so codes are a documented stable contract while messages may change; every non-2xx body uses the one envelope shape.",
@@ -169,6 +180,7 @@
     "version": "4"
   },
   {
+    "groups": [],
     "id": "wcag/contrast-aa",
     "sha256": "99959ffffcf0a8048d4ff5d7948f188d9f2d60ae4e5d5c08f0984b2146c0f8f5",
     "text": "SC 1.4.3 Contrast (Minimum), Level AA: text and images of text need a contrast ratio of at least 4.5:1 (3:1 for large-scale text). SC 1.4.11 Non-text Contrast requires 3:1 against adjacent colors for UI components and meaningful graphical objects. Purely decorative elements carry no minimum but must never be the sole carrier of meaning.",
@@ -177,6 +189,7 @@
     "version": "2.2"
   },
   {
+    "groups": [],
     "id": "tauri/specta-bindings",
     "sha256": "2271243206a6bcb59f240c6061a65e29524f56192774bd223d634a7562739f38",
     "text": "tauri-specta v2 derives a TypeScript bindings file from the registered #[tauri::command] functions: the runtime invoke handler and the exported frontend types come from the same builder, so they cannot drift from the Rust signatures. The generated bindings are committed and regenerated deterministically; rc versions are pinned exactly because rc bumps change the emitted file layout.",
@@ -185,6 +198,7 @@
     "version": "2.0.0-rc"
   },
   {
+    "groups": [],
     "id": "tauri/vite-integration",
     "sha256": "49881440a8b86540fad95e8f92544e4861f18d8f29eefa7df95a5922636b493c",
     "text": "Tauri's Vite integration fixes the dev server port with strictPort so tauri.conf.json devUrl never points at a drifted port, excludes src-tauri from the watcher, and pins build.target to the webview engines actually shipped: Chromium/WebView2 (>=105) on Windows and WebKit (WKWebView/WebKitGTK) on macOS and Linux.",
@@ -193,6 +207,7 @@
     "version": "2"
   },
   {
+    "groups": [],
     "id": "tauri/windows-longpath",
     "sha256": "c8cbeaf76546750446527c6996b1c58282a3003b69a072b4baedf707958ad24f",
     "text": "Win32 path APIs are limited to MAX_PATH (260 characters) unless the process opts out: from Windows 10 version 1607, the limit is lifted for processes whose application manifest sets the longPathAware element (with the LongPathsEnabled setting). Tauri embeds a custom Windows manifest via tauri_build::WindowsAttributes::app_manifest; a replacement manifest must re-declare everything the default provided (Common Controls v6, asInvoker execution level) alongside the addition.",
@@ -201,6 +216,7 @@
     "version": "Windows 10 1607"
   },
   {
+    "groups": [],
     "id": "tauri/webview-process-failed",
     "sha256": "be8023137e4f0cfd93822ba2a42f78ed8dbd451bfcbaaf426e8c709db82f1aef",
     "text": "WebView2 runs its browser and renderer processes separately from the host app, so the webview can crash or hang while the host keeps running; applications must handle the ProcessFailed event and recover or report instead of leaving a live window with a dead renderer. Tauri 2's safe API surface does not expose ProcessFailed, so the base app routes failure details through one stable logging function that the crash-reporting module wires to the raw event.",
@@ -209,6 +225,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "tauri/rust-lints",
     "sha256": "f6414c862ad37f50edf8b43bf2d11529ff78256fafc63c48919800fbb4746c66",
     "text": "The [lints] table in Cargo.toml (stable since Rust 1.74) declares lint levels for the whole package. forbid is stronger than deny: inner allow attributes cannot override it, so [lints.rust] unsafe_code = \"forbid\" structurally keeps unsafe blocks out of the crate, and a deny-by-default clippy profile (unwrap_used, panic, print_stdout) rides in the same table.",
@@ -217,6 +234,7 @@
     "version": "Rust 1.74"
   },
   {
+    "groups": [],
     "id": "tauri/release-profile",
     "sha256": "870cbd797e824129bf13c9e13dde05423c098fda16210d4a3258b5a8dc5f485e",
     "text": "Tauri's app-size guidance tunes [profile.release] for the shipped binary: codegen-units = 1 and lto = true enable whole-program optimization, opt-level \"s\"/\"z\" optimizes for size over speed, strip = true removes debug symbols, and panic = \"abort\" drops unwinding machinery. The trade is longer compile times for a smaller, faster installer.",
@@ -234,6 +252,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "csswg/oklch-srgb",
     "sha256": "577aab9f4507bc752cc17dcea25e071e38d1a1d6978b1039a1dc738fc828e045",
     "text": "The spec's reference conversion functions map OKLCH to sRGB in stages: OKLCH to OKLab is polar-to-rectangular (a = C * cos(H), b = C * sin(H)); OKLab to LMS multiplies by a fixed OKLab-to-LMS matrix and cubes each component; LMS routes through XYZ (D65) to linear-light sRGB via two more 3x3 matrices; a final transfer function (12.92 * v below 0.0031308, else 1.055 * v^(1/2.4) - 0.055) gamma-encodes each channel. OKLCH can name colors outside the sRGB gamut, so out-of-range results must be CSS gamut-mapped — reducing chroma toward the nearest displayable color — before use.",
@@ -242,6 +261,7 @@
     "version": "4"
   },
   {
+    "groups": [],
     "id": "wcag/relative-luminance",
     "sha256": "83f8b3c1d66c8300f287c4a958f0a73ad46abc460655f46d400c28699204fdff",
     "text": "Relative luminance is L = 0.2126 * R + 0.7152 * G + 0.0722 * B, where each 8-bit sRGB channel c/255 is first linearized: values <= 0.04045 become c/12.92, else ((c + 0.055)/1.055)^2.4 (WCAG raised this threshold from 0.03928 to 0.04045 in May 2021). Contrast ratio is (L1 + 0.05)/(L2 + 0.05) with L1 the lighter and L2 the darker luminance, spanning 1:1 to 21:1. SC 1.4.3 (AA) needs 4.5:1 for body text and 3:1 for large text; SC 1.4.11 needs 3:1 for UI components and meaningful graphics.",
@@ -250,6 +270,7 @@
     "version": "2.2"
   },
   {
+    "groups": [],
     "id": "wai-aria/apg-grid",
     "sha256": "685db7421e290fae471dab7468d5aab6bc290385bd94955b6ffe7633a50e1d74",
     "text": "An ARIA grid is one tab stop: exactly one cell or cell-widget is tabbable via roving tabindex, and the author moves focus with the arrow keys, Home/End to the first/last cell in a row, Ctrl+Home/Ctrl+End to the first/last cell of the grid, and Page Up/Page Down to page by rows. The role structure is role=grid over role=row over role=gridcell/columnheader/rowheader. When rows are virtualized and not all present in the DOM, aria-rowcount declares the grid's total row count and each row's aria-rowindex its 1-based position in the full set, so assistive technology reports true size and location.",
@@ -258,6 +279,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "web/mulberry32",
     "sha256": "50c71829086ddcf71ec497a925c141bc269eb7ff5cf75b1f5805b53e66e95b0c",
     "text": "mulberry32 is a compact seeded 32-bit PRNG (single 32-bit state word, a few integer ops per draw) with good statistical quality for non-cryptographic use. The same seed always reproduces the same sequence, making it a standard choice for deterministic fixtures and reproducible synthetic data where Math.random, which cannot be seeded, would break run-to-run comparability.",
@@ -266,6 +288,7 @@
     "version": "2017"
   },
   {
+    "groups": [],
     "id": "web/prefers-color-scheme",
     "sha256": "aa2dea7349cc79891a4eb010c7b61c635e2c48b410129701cbfeb9bc086e9f54",
     "text": "The prefers-color-scheme media feature reports the user's OS or user-agent color-theme preference (light or dark). It is read-only and does not reflect an in-app toggle, so persisting an explicit user override — layered over the system default — is the application's own responsibility. Its complement is the CSS color-scheme property, which opts an element into the user agent's light or dark rendering of form controls, scrollbars, and system colors and influences used color values; declaring it keeps native UI in sync with the theme the app actually paints.",
@@ -274,6 +297,7 @@
     "version": "2026"
   },
   {
+    "groups": [],
     "id": "wcag/reduced-motion",
     "sha256": "425f8955ae3222149d45ff3264377054aec1908a0c1fbaf4f3faae0c65381a97",
     "text": "SC 2.3.3 Animation from Interactions (Level AAA): motion animation triggered by interaction must be able to be disabled unless the animation is essential to the function or the information conveyed. The prefers-reduced-motion media query is the mechanism — when the OS reduce-motion setting is on, non-essential transitions and animations become opt-in and should be removed or replaced with instant or opacity-only changes. Separately, SC 2.2.2 Pause, Stop, Hide (Level A) covers auto-starting movement that lasts more than five seconds alongside other content: it must be pausable, stoppable, or hideable.",
@@ -282,6 +306,7 @@
     "version": "2.2"
   },
   {
+    "groups": [],
     "id": "web/forced-colors",
     "sha256": "d38f69cf227a87a9cda0c514a317633a59301d937e1cf782f5d82e4e124abaf5",
     "text": "The forced-colors: active media feature detects a forced colors mode (Windows High Contrast / Contrast Themes), in which the user agent replaces the author's palette with a limited user-chosen system palette. Backgrounds are flattened toward Canvas and box shadows are removed, while border and outline geometry is preserved with colors forced to system inks — so an affordance carried by background color alone disappears, and a border-STYLE difference (for example dashed) survives flattening. Authors should style within the mode using the CSS system color keywords (Canvas, CanvasText, ButtonText, Highlight, HighlightText, …), which resolve to the user's chosen palette; keep focus indicators outline-based, because outlines persist; and reach for forced-color-adjust: none only where overriding the user's color choice is genuinely necessary.",

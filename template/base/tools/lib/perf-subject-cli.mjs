@@ -47,16 +47,33 @@ async function main() {
     process.exit(1)
   }
 
-  // Warmup: JIT + module init noise stays out of the measured runs.
-  for (let i = 0; i < 2; i += 1) renderSubject(cells)
-  const samples = []
-  for (let i = 0; i < runs; i += 1) {
-    const start = performance.now()
-    const html = renderSubject(cells)
-    samples.push(performance.now() - start)
-    // Anti-vacuity: an empty/degenerate render is a vacuously fast "pass". The
-    // expected marker's absence means we measured nothing, so the number would
-    // be a lie. The default-marker message stays byte-identical to 0.1.4.
+  // Does the marker appear ONCE PER CELL (the default — role="gridcell" does), so its
+  // count can be checked against the declared `cells`? A subject whose marker is a
+  // container (one per render) sets PERF_SUBJECT_MARKER_SCALES=0 and falls back to the
+  // weaker presence-only check.
+  const markerScales = process.env.PERF_SUBJECT_MARKER_SCALES !== '0'
+  // Tolerance: the subject may round cells to whole rows (cells/columns), so demand 90%
+  // rather than an exact match. A degenerate render misses by orders of magnitude.
+  const minMarkers = Math.floor(cells * 0.9)
+
+  const countOf = (haystack, needle) => {
+    let n = 0
+    let at = haystack.indexOf(needle)
+    while (at !== -1) {
+      n += 1
+      at = haystack.indexOf(needle, at + needle.length)
+    }
+    return n
+  }
+
+  // Anti-vacuity, both halves. Exits 1 with a reason if the render measured nothing real.
+  //   presence — an empty/degenerate render is a vacuously fast "pass"; the marker's
+  //     absence means we measured nothing, so the number would be a lie.
+  //   scale (G30) — PRESENCE was never enough: a subject that renders ONE row still
+  //     contains role="gridcell" and "passed" the budget in ~1 ms, so a real regression
+  //     could be hidden simply by shrinking what gets measured. The work must actually
+  //     scale with the declared cells.
+  const assertNotVacuous = (html) => {
     if (!html.includes(expect)) {
       console.error(
         expect === DEFAULT_EXPECT
@@ -65,6 +82,26 @@ async function main() {
       )
       process.exit(1)
     }
+    if (!markerScales) return
+    const rendered = countOf(html, expect)
+    if (rendered < minMarkers) {
+      console.error(
+        `subject rendered ${String(rendered)} × ${expect} but declares cells: ${String(cells)} (expected >= ${String(minMarkers)}) — ` +
+          'the measurement does not scale with the declared work, so the number is a lie. ' +
+          'Render the full declared workload, fix `cells` in tools/perf-budget.json, or (if the marker is a container rather than one-per-cell) set markerScales: false on the subject.',
+      )
+      process.exit(1)
+    }
+  }
+
+  // Warmup: JIT + module init noise stays out of the measured runs.
+  for (let i = 0; i < 2; i += 1) renderSubject(cells)
+  const samples = []
+  for (let i = 0; i < runs; i += 1) {
+    const start = performance.now()
+    const html = renderSubject(cells)
+    samples.push(performance.now() - start)
+    assertNotVacuous(html)
   }
 
   process.stdout.write(`${JSON.stringify({ samples })}\n`)

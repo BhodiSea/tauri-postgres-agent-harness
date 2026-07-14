@@ -1,5 +1,6 @@
 import { HealthResponse } from '@app/schema'
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../../lib/api-client'
 import { cn } from '../../lib/utils'
 
 // SOURCE: harness doctrine — degraded-network states are a first-class UI
@@ -8,10 +9,6 @@ import { cn } from '../../lib/utils'
 // [corpus: harness/doctrine]
 const POLL_INTERVAL_MS = 10_000
 const PROBE_TIMEOUT_MS = 3_000
-
-// Dev override via Vite env; otherwise the API origin baked into the committed
-// CSP (tauri.conf.json connect-src) at install time.
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '{{API_ORIGIN}}'
 
 // Dispatched by the command palette's "Probe API connection now" — the status
 // indicator owns the probe loop; other features only ever signal it.
@@ -31,10 +28,12 @@ export function ConnectionStatus() {
     let cancelled = false
     const probe = async (): Promise<void> => {
       try {
-        const response = await fetch(`${API_ORIGIN}/healthz`, {
+        // The liveness probe is the ONE unauthenticated call: it must report a
+        // reachable-but-signed-out server as connected, not degraded.
+        const response = await apiFetch('/healthz', {
+          auth: false,
           signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         })
-        if (!response.ok) throw new Error(`healthz responded ${String(response.status)}`)
         const body: unknown = await response.json()
         // HealthResponse pins `ok: literal(true)` — a degraded body fails the
         // parse and lands in the catch below.
@@ -64,14 +63,19 @@ export function ConnectionStatus() {
 
   return (
     <p aria-live="polite" role="status" className="flex items-center gap-2 text-xs">
+      {/* The dot is decorative (aria-hidden) — the text beside it carries the meaning.
+          But `degraded` and `connecting` used to render the SAME hollow ink-muted dot,
+          differing only by an animation that reduced-motion users never see: at a glance
+          a dead API was indistinguishable from one still connecting. Degraded now takes
+          the danger token, connected takes success. */}
       <span
         aria-hidden="true"
         className={cn(
           'size-2 rounded-full',
-          state.status === 'ok' && 'bg-accent',
+          state.status === 'ok' && 'bg-success',
           state.status === 'connecting' &&
             'border border-ink-muted bg-transparent motion-safe:animate-pulse',
-          state.status === 'degraded' && 'border border-ink-muted bg-transparent',
+          state.status === 'degraded' && 'bg-danger',
         )}
       />
       {state.status === 'ok' ? (

@@ -294,20 +294,23 @@ const CLI = fileURLToPath(
   new URL('../../template/base/tools/lib/perf-subject-cli.mjs', import.meta.url),
 )
 /** @param {string} subjectSource @param {number} cells @param {number} runs @param {{ expect?: string }} [opts] */
-function runCli(subjectSource, cells, runs, { expect } = {}) {
+function runCli(subjectSource, cells, runs, { expect, markerScales } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-perfcli-'))
   const subj = join(dir, 'subject.mjs')
   writeFileSync(subj, subjectSource)
   const env = { ...process.env }
   delete env.PERF_SUBJECT_EXPECT
+  delete env.PERF_SUBJECT_MARKER_SCALES
   if (expect !== undefined) env.PERF_SUBJECT_EXPECT = expect
+  if (markerScales === false) env.PERF_SUBJECT_MARKER_SCALES = '0'
   const res = spawnSync('node', [CLI, subj, String(cells), String(runs)], { encoding: 'utf8', env })
   return { code: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, stdout: res.stdout ?? '' }
 }
 
 test('perf-subject-cli: a valid subject prints ONE {"samples":[…]} line of N numbers', () => {
+  // A REAL subject renders one marker per declared cell — the G30 scale check demands it.
   const src =
-    'export function renderSubject(cells) { return `<span role="gridcell">${cells}</span>` }\n'
+    'export function renderSubject(cells) { return \'<span role="gridcell">x</span>\'.repeat(cells) }\n'
   const r = runCli(src, 100, 5)
   assert.equal(r.code, 0, r.out)
   const lines = r.stdout.trim().split('\n')
@@ -333,8 +336,9 @@ test('perf-subject-cli: a subject with no renderSubject export exits 1', () => {
 })
 
 test('perf-subject-cli: PERF_SUBJECT_EXPECT overrides the anti-vacuity marker per subject', () => {
-  const src = 'export function renderSubject() { return \'<div data-heatcell="1">x</div>\' }\n'
-  // The custom marker is present → green even though role="gridcell" is absent.
+  const src =
+    'export function renderSubject(cells) { return \'<div data-heatcell="1">x</div>\'.repeat(cells) }\n'
+  // The custom marker is present (and scales) → green even though role="gridcell" is absent.
   const hit = runCli(src, 100, 3, { expect: 'data-heatcell' })
   assert.equal(hit.code, 0, hit.out)
   // No override → the gridcell default still applies to the same render.
@@ -346,6 +350,25 @@ test('perf-subject-cli: PERF_SUBJECT_EXPECT overrides the anti-vacuity marker pe
   assert.equal(wrong.code, 1, wrong.out)
   assert.ok(wrong.out.includes('expected marker role="row"'), wrong.out)
   assert.ok(wrong.out.includes('vacuous'), wrong.out)
+})
+
+// ---- v0.1.6 (G30): PRESENCE was never enough — the work must SCALE with `cells` ----
+test('perf-subject-cli: a subject whose markers do NOT scale with cells exits 1 (G30)', () => {
+  // The exact green-but-bad path: ONE gridcell still satisfies the presence check, so the
+  // budget "passed" in ~1 ms while measuring essentially nothing. A regression could be
+  // hidden simply by shrinking what gets measured.
+  const src =
+    'export function renderSubject() { return \'<span role="gridcell">only one</span>\' }\n'
+  const r = runCli(src, 10000, 3)
+  assert.equal(r.code, 1, r.out)
+  assert.ok(r.out.includes('does not scale with the declared work'), r.out)
+  assert.ok(r.out.includes('10000'), r.out)
+})
+
+test('perf-subject-cli: markerScales=false is the reviewed opt-out for a container marker', () => {
+  const src = 'export function renderSubject() { return \'<div data-chart="1">x</div>\' }\n'
+  const r = runCli(src, 10000, 3, { expect: 'data-chart', markerScales: false })
+  assert.equal(r.code, 0, r.out)
 })
 
 // ---- v0.1.5: subjects[] shape + dense-feature closure ----------------------------

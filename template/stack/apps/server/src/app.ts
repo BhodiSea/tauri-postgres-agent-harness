@@ -11,6 +11,7 @@ import {
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import type { Context, MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { createTokenVerifier, type TokenVerifier } from './auth/verify.js'
 import { decodeNotesCursor } from './dal/cursor.js'
@@ -139,6 +140,36 @@ const deleteNoteRoute = createRoute({
   },
 })
 
+// The desktop is a CROSS-ORIGIN client. The webview serves the app from a Tauri scheme —
+// `tauri://localhost` on macOS/Linux, `http://tauri.localhost` on Windows — and from the
+// vite dev server in development, while the API lives on its own origin. So every request
+// the desktop makes is cross-origin: the browser preflights it (the desktop sends
+// `authorization` and `x-client-version`, neither of which is a CORS-safelisted header)
+// and refuses to hand the response to the app unless the server opts in by name.
+//
+// An ALLOWLIST, never `*`: this API answers with the caller's own rows under FORCE RLS,
+// and a wildcard would let any page a user visits read them with a stolen token.
+// Overridable per deployment (CORS_ORIGINS, comma-separated) because a packaged app may
+// be served from a custom scheme.
+// SOURCE: Tauri 2 serves the webview from a custom scheme, so the API is a cross-origin
+// endpoint and must send CORS headers [corpus: tauri/capabilities]
+const DEFAULT_DESKTOP_ORIGINS = [
+  'tauri://localhost', // macOS + Linux packaged app
+  'http://tauri.localhost', // Windows packaged app (WebView2)
+  'https://tauri.localhost', // Windows, https scheme variant
+  'http://localhost:1420', // vite dev server (tauri.conf.json devUrl)
+] as const
+
+function resolveCorsOrigins(env: Readonly<Record<string, string | undefined>>): string[] {
+  const configured = env['CORS_ORIGINS']
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin !== '')
+  return configured !== undefined && configured.length > 0
+    ? configured
+    : [...DEFAULT_DESKTOP_ORIGINS]
+}
+
 export interface AppOptions {
   /** Server version; defaults to the package.json version. */
   readonly version?: string
@@ -150,6 +181,8 @@ export interface AppOptions {
   readonly sseTickMs?: number
   /** Test hook: invoked when an SSE client aborts mid-stream. */
   readonly onSseAbort?: () => void
+  /** Origins allowed to read API responses; defaults to the Tauri + dev origins. */
+  readonly corsOrigins?: readonly string[]
 }
 
 export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
@@ -158,6 +191,7 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   const dal = options.notesDal ?? notesDal
   const sseTickMs = options.sseTickMs ?? 250
   const onSseAbort = options.onSseAbort
+  const corsOrigins = options.corsOrigins ?? resolveCorsOrigins(process.env)
 
   // defaultHook: EVERY route's validation failure becomes the ApiError envelope.
   const app = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
@@ -166,6 +200,25 @@ export function createApp(options: AppOptions = {}): OpenAPIHono<AppEnv> {
   app.use(requestId)
   app.notFound(notFoundHandler)
   app.onError(onErrorHandler)
+
+  // CORS runs FIRST — before the skew and auth guards. A preflight (OPTIONS) carries no
+  // Authorization header by definition, so an auth guard placed ahead of it answers 401
+  // and the browser never sends the real request: the desktop would be locked out of its
+  // own API with a green server. Hono's cors() short-circuits the preflight itself.
+  app.use(
+    '*',
+    cors({
+      origin: [...corsOrigins],
+      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      // Exactly what the desktop sends: the bearer token and the skew middleware's
+      // version header. Neither is CORS-safelisted, so both must be named here.
+      allowHeaders: ['authorization', 'content-type', 'x-client-version'],
+      // Let the client read the correlation id off a failed response, so a user-visible
+      // error can be quoted straight into a support ticket.
+      exposeHeaders: ['x-request-id'],
+      maxAge: 600,
+    }),
+  )
 
   app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
     type: 'http',

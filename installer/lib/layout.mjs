@@ -57,6 +57,7 @@ export const SEEDED_FILES = new Set([
   'AGENTS.md',
   'CLAUDE.md',
   'CITATION.cff',
+  'LICENSE',
   'SECURITY.md',
   '.env.example',
   '.gitignore',
@@ -86,6 +87,9 @@ export const SEEDED_FILES = new Set([
   // template scaffold's bytes never ratchet someone else's bundle).
   'tools/perf-baseline.json',
   'tools/route-allowlist.json',
+  'tools/dto-bounds-allow.json',
+  'tools/duplication-allow.json',
+  'tools/decision-groups.json',
   'tests/rls/db-context.ts',
 ])
 

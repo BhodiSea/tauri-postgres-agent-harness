@@ -359,6 +359,78 @@ const PALETTE = new RegExp(
   'g',
 )
 
+// ---- 6c: status surfaces must carry the status COLOUR channel ----------------
+// A near-monochrome system with one accent is a deliberate aesthetic — but it made the
+// failure toast pixel-identical to the confirmation toast, so the only thing separating
+// "your write was lost" from "your write landed" was the prose inside it. Colour is not
+// allowed to be the ONLY channel (WCAG 1.4.1 — these surfaces keep their text + ARIA),
+// but it must be A channel: a surface that announces status (role="alert"/"status", or
+// an aria-invalid control) has to reference a status token.
+// Content-conditional like controlPrimitives: a keyless (pre-0.1.6) manifest self-
+// disables with an adoption NOTE, a malformed key fails CLOSED, and stale allow entries
+// are red so the escape list can only shrink to reality.
+let status = null
+if (manifest.statusSurfaces !== undefined) {
+  const ss = manifest.statusSurfaces
+  const okShape =
+    ss !== null &&
+    typeof ss === 'object' &&
+    Array.isArray(ss.tokens) &&
+    ss.tokens.length > 0 &&
+    ss.tokens.every((t) => typeof t === 'string' && /^[a-z][a-z0-9-]*$/.test(t)) &&
+    Array.isArray(ss.signals) &&
+    ss.signals.length > 0 &&
+    ss.signals.every((s) => typeof s === 'string' && s.trim() !== '') &&
+    (ss.allow === undefined || Array.isArray(ss.allow))
+  if (!okShape) {
+    fail(
+      GATE,
+      `${MANIFEST} statusSurfaces must be { "tokens": non-empty array of token names, "signals": non-empty array of source markers, "allow": array } — got ${JSON.stringify(ss)}; the status-channel scan cannot silently disarm`,
+    )
+  }
+  // Every declared status token must actually EXIST in the vocabulary, or the scan
+  // would be satisfied by a utility that compiles to nothing.
+  for (const t of ss.tokens) {
+    if (!manifest.tokens.includes(t)) {
+      fail(
+        GATE,
+        `${MANIFEST} statusSurfaces.tokens names "${t}", which is not in tokens[] — a status utility for an undeclared token compiles to NOTHING (worse than no colour at all)`,
+      )
+    }
+  }
+  const allowEntries = ss.allow ?? []
+  for (const entry of allowEntries) {
+    const entryOk =
+      entry !== null &&
+      typeof entry === 'object' &&
+      typeof entry.file === 'string' &&
+      typeof entry.reason === 'string' &&
+      entry.reason.trim().length > 0
+    if (!entryOk) {
+      fail(
+        GATE,
+        `${MANIFEST}: every statusSurfaces.allow entry must be {"file": string, "reason": non-empty string} — got ${JSON.stringify(entry)}`,
+      )
+    }
+  }
+  status = {
+    tokens: ss.tokens,
+    // A source marker is matched literally — role="alert" / aria-invalid — so the
+    // signal list stays reviewable data rather than a regex an agent can weaken.
+    signals: ss.signals,
+    allowFiles: new Set(allowEntries.map((e) => e.file)),
+    live: new Set(),
+    // Any status token used as text/border/bg/ring counts as carrying the channel.
+    use: new RegExp(
+      `\\b(?:text|bg|border|ring|fill|stroke|outline|decoration|shadow)-(?:${ss.tokens.join('|')})\\b`,
+    ),
+  }
+} else {
+  console.log(
+    `${GATE}: NOTE — ${MANIFEST} has no "statusSurfaces" key, so the status-channel scan is OFF (an error toast that looks exactly like a success toast would not red). Current manifests declare statusSurfaces: { "tokens": ["danger","success"], "signals": ["role=\\"alert\\"","role=\\"status\\"","aria-invalid"], "dir": "${SRC_DIR}", "allow": [] } and the matching --color-danger/--color-success tokens in ${STYLES}. ${MANIFEST} is seeded — update never rewrites it; adopt deliberately with \`update --refresh-seeded ${MANIFEST}\` (see docs/runbooks/harness-upgrade.md, content-conditional checks)`,
+  )
+}
+
 // Tailwind arbitrary VALUES — the escape the palette-name scan misses. Three
 // forms, each an off-token color/length smuggled inline instead of extending the
 // vocabulary:
@@ -441,6 +513,29 @@ for (const file of files) {
     }
   }
 
+  // ---- 6c: status surfaces carry the colour channel — .tsx only ---------------
+  // File-scoped by design: the component that RENDERS the status announcement is the
+  // one that must colour it, and a per-element AST walk would be a parser this gate
+  // deliberately does not carry (same honest limit as the scans above).
+  if (status !== null && /\.tsx$/.test(rel)) {
+    const announced = status.signals.filter((signal) => text.includes(signal))
+    // Comments are stripped before asking "does this file carry the channel?": a code
+    // comment that merely NAMES a token (`// border-danger, not border-edge`) styles
+    // nothing, and counting it would let the gate fail OPEN — the one direction a gate
+    // must never fail. Over-matching in the SIGNAL detection above is safe by contrast
+    // (it only ever demands colour), which is why only this half is stripped.
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    if (announced.length > 0 && !status.use.test(code)) {
+      if (status.allowFiles.has(rel)) {
+        status.live.add(rel)
+      } else {
+        errs.push(
+          `${rel}: announces status (${announced.join(', ')}) but references no status token — an error surface that looks identical to a neutral one makes the user READ prose to find out whether they lost data. FIX: colour it with a ${status.tokens.map((t) => `text-${t}`).join('/')} utility (they are contrast-checked in both themes, and do not count against the accent budget), or add a reviewed statusSurfaces.allow entry {"file": "${rel}", "reason": …} to ${MANIFEST}`,
+        )
+      }
+    }
+  }
+
   // ---- 7: accent usage budget (declarations in styles.css don't count) --------
   if (!rel.endsWith('styles.css')) {
     const count = (text.match(accentPattern) ?? []).length
@@ -468,6 +563,22 @@ if (control !== null) {
   }
 }
 
+// statusSurfaces.allow entries must map to LIVE violations too — same doctrine: the
+// escape list can only shrink toward reality, never quietly outlive what it excused.
+if (status !== null) {
+  for (const file of [...status.allowFiles].sort()) {
+    if (!existsSync(file)) {
+      errs.push(
+        `${MANIFEST} statusSurfaces.allow exempts "${file}" but the file does not exist — stale entry; remove it`,
+      )
+    } else if (!status.live.has(file)) {
+      errs.push(
+        `${MANIFEST} statusSurfaces.allow exempts "${file}" but it no longer announces status without a status token (it now carries one, or the signal is gone) — stale entry; remove it`,
+      )
+    }
+  }
+}
+
 if (accentUses > manifest.accentUsageBudget) {
   errs.push(
     `accent utilities used ${accentUses}× (budget ${manifest.accentUsageBudget}) — the single-accent design dies by a thousand highlights. Remove uses, or raise the budget in ${MANIFEST} as a reviewed decision.\n    ${usesByFile.join('\n    ')}`,
@@ -482,7 +593,11 @@ const controlNote =
   control === null
     ? ''
     : `; primitive boundary held (<${control.tags.join('|')}> + className only under ${control.home})`
+const statusNote =
+  status === null
+    ? ''
+    : `; every status surface (${status.signals.join(', ')}) carries a ${status.tokens.join('/')} token`
 ok(
   GATE,
-  `${declared.size} oklch tokens + ${Object.keys(manifest.families ?? {}).length} families in lockstep; erasure intact; no raw hex/px/inline-style/arbitrary-value; accent ${accentUses}/${manifest.accentUsageBudget}${contrastNote}${controlNote}`,
+  `${declared.size} oklch tokens + ${Object.keys(manifest.families ?? {}).length} families in lockstep; erasure intact; no raw hex/px/inline-style/arbitrary-value; accent ${accentUses}/${manifest.accentUsageBudget}${contrastNote}${controlNote}${statusNote}`,
 )

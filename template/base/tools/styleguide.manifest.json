@@ -1,16 +1,62 @@
 {
   "comment": "Design-system contract enforced by tools/check-styleguide-manifest.mjs against apps/desktop/src/styles.css. tokens/families mirror the @theme declarations bidirectionally; erasedNamespaces must keep their `--<ns>-*: initial` markers; accentUsageBudget caps accent-utility occurrences across the desktop source; allow entries (file + reason) exempt a file from the raw px/hex/inline-style source scan. themes.<name>.selector names a :root override block in styles.css whose --color-* set must EQUAL tokens exactly (oklch-only, no alpha/var) — a missing override token is a dark value silently painted on the light canvas. contrast pairs are COMPUTED (oklch -> linear sRGB -> WCAG luminance) for the base @theme AND every theme block, each asserted >= min. AAA tier (v0.1.5): the primary reading pairs — ink/canvas and ink/surface — carry min 7 (WCAG SC 1.4.6 body text) in both themes; the ink-muted and accent pairs deliberately stay at 4.5 — AAA is scoped honestly to body text, secondary ink and the accent-as-text remain AA. controlPrimitives arms the primitive-boundary scan: a raw JSX open-tag for one of `tags` carrying a literal className in a .tsx outside `home` is red — interactive controls render through the src/components primitives (Button/Input), and new control styling goes INTO the primitive; controlAllow entries (file + reason) are the reviewed escape, and stale entries (file gone, or no live match) are red. This file is write-guard-protected: extending the design system is a reviewed human diff of styles.css AND this manifest together.",
-  "tokens": ["canvas", "surface", "edge", "ink", "ink-muted", "accent"],
+  "tokens": ["canvas", "surface", "edge", "ink", "ink-muted", "accent", "danger", "success"],
   "themes": {
-    "light": { "selector": ":root[data-theme='light']" }
+    "light": {
+      "selector": ":root[data-theme='light']"
+    }
   },
   "contrast": [
-    { "fg": "ink", "bg": "canvas", "min": 7 },
-    { "fg": "ink", "bg": "surface", "min": 7 },
-    { "fg": "ink-muted", "bg": "canvas", "min": 4.5 },
-    { "fg": "ink-muted", "bg": "surface", "min": 4.5 },
-    { "fg": "accent", "bg": "canvas", "min": 4.5 },
-    { "fg": "accent", "bg": "surface", "min": 4.5 }
+    {
+      "fg": "ink",
+      "bg": "canvas",
+      "min": 7
+    },
+    {
+      "fg": "ink",
+      "bg": "surface",
+      "min": 7
+    },
+    {
+      "fg": "ink-muted",
+      "bg": "canvas",
+      "min": 4.5
+    },
+    {
+      "fg": "ink-muted",
+      "bg": "surface",
+      "min": 4.5
+    },
+    {
+      "fg": "accent",
+      "bg": "canvas",
+      "min": 4.5
+    },
+    {
+      "fg": "accent",
+      "bg": "surface",
+      "min": 4.5
+    },
+    {
+      "fg": "danger",
+      "bg": "canvas",
+      "min": 4.5
+    },
+    {
+      "fg": "danger",
+      "bg": "surface",
+      "min": 4.5
+    },
+    {
+      "fg": "success",
+      "bg": "canvas",
+      "min": 4.5
+    },
+    {
+      "fg": "success",
+      "bg": "surface",
+      "min": 4.5
+    }
   ],
   "accentTokens": ["accent"],
   "accentUsageBudget": 10,
@@ -36,5 +82,11 @@
       "file": "apps/desktop/src/features/matrix/MatrixGrid.tsx",
       "reason": "virtualized grid: the row window is positioned with an inline style transform/height (offset + total scroll height are runtime pixel values that no token utility can express); all colors/spacing remain tokens"
     }
-  ]
+  ],
+  "statusSurfaces": {
+    "tokens": ["danger", "success"],
+    "signals": ["role=\"alert\"", "role=\"status\"", "aria-invalid"],
+    "dir": "apps/desktop/src",
+    "allow": []
+  }
 }

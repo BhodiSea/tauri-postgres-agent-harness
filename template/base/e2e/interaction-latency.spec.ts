@@ -120,24 +120,33 @@ async function tabIntoGrid(page: Page): Promise<boolean> {
   return false
 }
 
-// ── (a) TTI: navigation → the notes list is in the DOM ────────────────────────
-// The marker is recorded IN PAGE: an init script arms a MutationObserver before
-// any app code runs and stamps performance.now() (whose time origin is THIS
-// navigation) the first time a notes row ([data-note-id]) exists — the driver
-// only reads the stamp afterwards, so its polling latency never inflates a
-// sample. Median of `runs` navigations: the first is vite-transform cold, the
-// rest warm; the median converges on the warm value either way.
-
+// ── (a) TTI: navigation → the screen is actually usable ───────────────────────
+// The marker is recorded IN PAGE: an init script arms a MutationObserver before any app
+// code runs and stamps performance.now() (whose time origin is THIS navigation) the first
+// time the screen is interactive — the driver only reads the stamp afterwards, so its
+// polling latency never inflates a sample. Median of `runs` navigations: the first is
+// vite-transform cold, the rest warm; the median converges on the warm value either way.
+//
+// C03 — the definition is ROUTE-AGNOSTIC, driven off the ROUTES manifest rather than the
+// notes exemplar's `[data-note-id]`. "Interactive" = the route's declared loading surface
+// is gone AND <main> has rendered content. Every route declares a loading test id, so a
+// screen an agent ADDS gets a wall-clock TTI budget the day it registers — previously the
+// lane only ever measured home and matrix, so a new dense screen's mount cost was
+// enforced by nothing, agent-time or CI.
 type PerfWindow = Window & {
   __harnessTtiMs?: number
   __harnessCollectLongTasks?: () => readonly number[]
 }
 
-async function installTtiMarker(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installTtiMarker(page: Page, loadingTestId: string): Promise<void> {
+  await page.addInitScript((loadingId: string) => {
     const w = window as PerfWindow
     const record = (): boolean => {
-      if (document.querySelector('[data-note-id]') === null) return false
+      // Still loading → not interactive.
+      if (document.querySelector(`[data-testid="${loadingId}"]`) !== null) return false
+      // Not mounted yet → not interactive (guards a t≈0 false stamp before React runs).
+      const main = document.querySelector('main')
+      if (main === null || main.children.length === 0) return false
       w.__harnessTtiMs = performance.now()
       return true
     }
@@ -145,38 +154,45 @@ async function installTtiMarker(page: Page): Promise<void> {
       if (record()) observer.disconnect()
     })
     observer.observe(document, { childList: true, subtree: true })
-  })
+  }, loadingTestId)
 }
 
-test('TTI: navigation → notes list mounted, median of runs under ttiMs', async ({ page }) => {
-  if (HOME === undefined) {
-    test.skip(true, 'ROUTES has no "home" entry — the app does not ship the notes exemplar')
-    return
-  }
-  const budget = loadBudget()
-  await installMockIpc(page)
-  await installTtiMarker(page)
-  await stubHealthz(page, { kind: 'ok', version: '9.9.9' })
-  await stubNotesPages(page, [{ items: makeNoteRows(50), nextCursor: null }])
-
-  const samples: number[] = []
-  for (let run = 0; run < budget.runs; run += 1) {
-    await page.goto(HOME.path)
-    await page.waitForFunction(() => (window as PerfWindow).__harnessTtiMs !== undefined)
-    samples.push(await page.evaluate(() => (window as PerfWindow).__harnessTtiMs ?? Number.NaN))
-  }
-  const measured = median(samples)
-  // Green runs print the numbers too — re-baselining reads them from any CI log.
-  console.log(
-    `[perf] TTI median ${measured.toFixed(0)}ms (budget ${String(budget.ttiMs)}ms; samples ${fmtSamples(samples)}ms)`,
-  )
-  expect(
-    measured,
-    `TTI median ${measured.toFixed(0)}ms exceeds the ${String(budget.ttiMs)}ms budget ` +
-      `(${BUDGET_PATH} ttiMs; samples ${fmtSamples(samples)}ms) — something slowed the ` +
-      `navigation→content path; ${RE_BASELINE}`,
-  ).toBeLessThanOrEqual(budget.ttiMs)
+// C03: EVERY registered route gets a wall-clock TTI budget, not just the two exemplars.
+// A dense screen an agent adds is measured the day it registers in ROUTES.
+test('the ROUTES manifest is non-empty (else the TTI sweep below is a vacuous pass)', () => {
+  expect(ROUTES.length).toBeGreaterThan(0)
 })
+
+for (const route of ROUTES) {
+  test(`TTI: ${route.id} (${route.path}) navigation → interactive, median under ttiMs`, async ({
+    page,
+  }) => {
+    const budget = loadBudget()
+    await installMockIpc(page)
+    await installTtiMarker(page, route.states.loading)
+    await stubHealthz(page, { kind: 'ok', version: '9.9.9' })
+    // A full page of rows: the densest ready state the screen can reach.
+    await stubNotesPages(page, [{ items: makeNoteRows(50), nextCursor: null }])
+
+    const samples: number[] = []
+    for (let run = 0; run < budget.runs; run += 1) {
+      await page.goto(route.path)
+      await page.waitForFunction(() => (window as PerfWindow).__harnessTtiMs !== undefined)
+      samples.push(await page.evaluate(() => (window as PerfWindow).__harnessTtiMs ?? Number.NaN))
+    }
+    const measured = median(samples)
+    // Green runs print the numbers too — re-baselining reads them from any CI log.
+    console.log(
+      `[perf] TTI ${route.id} median ${measured.toFixed(0)}ms (budget ${String(budget.ttiMs)}ms; samples ${fmtSamples(samples)}ms)`,
+    )
+    expect(
+      measured,
+      `TTI median ${measured.toFixed(0)}ms on ${route.id} exceeds the ${String(budget.ttiMs)}ms budget ` +
+        `(${BUDGET_PATH} ttiMs; samples ${fmtSamples(samples)}ms) — something slowed the ` +
+        `navigation→content path; ${RE_BASELINE}`,
+    ).toBeLessThanOrEqual(budget.ttiMs)
+  })
+}
 
 // ── (b) arrow-key latency on the roving grid ──────────────────────────────────
 // Timed entirely IN PAGE: dispatch a keydown on the focused cell, then poll one

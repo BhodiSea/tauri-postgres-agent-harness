@@ -4,7 +4,7 @@
 // (tools/check-sources.mjs) — so the decision-site patterns, file scoping, and the
 // 3-line SOURCE window can never drift apart the way hand-duplicated regexes did.
 // SOURCE: docs/harness/README.md (provenance; one heuristic, two enforcement layers) [corpus: harness/doctrine]
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { isAllowedCitationHost } from './citation-domains.mjs'
@@ -16,7 +16,7 @@ import { toPosix } from './fs-walk.mjs'
 // the corpus growing an authority that can ground it.
 // Pattern set and order are exactly v0.1.1's hand-maintained DECISION regex (the gate
 // and hook carried identical copies; this is their union — nothing weakened).
-export const DECISION_GROUPS = [
+const BUILTIN_DECISION_GROUPS = [
   {
     key: 'rls-policy',
     description: 'RLS policy SQL — row-security enablement and policy declarations',
@@ -49,7 +49,66 @@ export const DECISION_GROUPS = [
   },
 ]
 
-// Combined matcher — the same alternatives, in the same order, as the v0.1.1 regex.
+// G27 — the CONSUMER's own decision classes. The six built-in groups cover THIS stack's
+// security/LLM surface, but a consumer's domain constants (a RAG chunk size, a similarity
+// threshold, an epsilon, a sampling seed) carried no citation duty at all — they are the
+// research decisions a research-grade artifact most needs grounded. tools/decision-groups.json
+// (write-guard-protected, so extending it is a reviewed act) is merged in here, so both
+// enforcement layers pick it up at once, and the corpus coverage lockstep then forces a
+// consumer-added group to ship with an authority that can ground it.
+// SOURCE: docs/harness/README.md (provenance; one heuristic, two enforcement layers) [corpus: harness/doctrine]
+function loadConsumerDecisionGroups() {
+  const root = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+  const path = resolve(root, 'tools/decision-groups.json')
+  if (!existsSync(path)) return []
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch (e) {
+    // Fail CLOSED: a malformed extension file must not silently disable citation duty.
+    // The gate reds; the hook (fail-closed handlers) blocks.
+    throw new Error(`tools/decision-groups.json is not valid JSON (${e.message})`)
+  }
+  const list = parsed?.groups
+  if (!Array.isArray(list)) {
+    throw new Error(
+      'tools/decision-groups.json must carry a "groups" ARRAY of {key, description, patterns}',
+    )
+  }
+  const builtinKeys = new Set(BUILTIN_DECISION_GROUPS.map((g) => g.key))
+  return list.map((g) => {
+    if (
+      g === null ||
+      typeof g !== 'object' ||
+      typeof g.key !== 'string' ||
+      !/^[a-z][a-z0-9-]*$/.test(g.key) ||
+      typeof g.description !== 'string' ||
+      g.description.trim() === '' ||
+      !Array.isArray(g.patterns) ||
+      g.patterns.length === 0 ||
+      !g.patterns.every((p) => typeof p === 'string' && p !== '')
+    ) {
+      throw new Error(
+        `tools/decision-groups.json: each group must be {key: lowercase-kebab, description: non-empty, patterns: non-empty string[]} — got ${JSON.stringify(g)}`,
+      )
+    }
+    if (builtinKeys.has(g.key)) {
+      throw new Error(
+        `tools/decision-groups.json: '${g.key}' shadows a built-in decision group — choose a distinct key`,
+      )
+    }
+    // Patterns are authored as regex-source strings; compile once here.
+    return {
+      key: g.key,
+      description: g.description,
+      patterns: g.patterns.map((p) => new RegExp(p)),
+    }
+  })
+}
+
+export const DECISION_GROUPS = [...BUILTIN_DECISION_GROUPS, ...loadConsumerDecisionGroups()]
+
+// Combined matcher — every built-in and consumer group's patterns, in order.
 export const DECISION = new RegExp(
   DECISION_GROUPS.flatMap((g) => g.patterns.map((p) => p.source)).join('|'),
 )

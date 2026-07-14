@@ -30,7 +30,7 @@ interface MatrixPanelProps {
 export function MatrixPanel({ registerCommands }: MatrixPanelProps) {
   const toast = useToast()
   const { state, loadMore, reload } = useKeysetQuery((message) => {
-    toast.show(`Could not load more rows: ${message}`)
+    toast.show(`Could not load more rows: ${message}`, 'error')
   })
   const rows = notesToMatrixRows(state.rows)
   const roving = useRovingGrid({
@@ -91,7 +91,8 @@ export function MatrixPanel({ registerCommands }: MatrixPanelProps) {
       <div
         data-testid={MATRIX.states.error}
         role="alert"
-        className="m-8 rounded-md border border-edge bg-canvas p-4"
+        // border-danger: the failure surface must not be the same box as the empty one.
+        className="m-8 rounded-md border border-danger bg-canvas p-4"
       >
         <p className="text-sm">Could not load the matrix.</p>
         <p className="mt-1 font-mono text-xs text-ink-muted">{state.message}</p>

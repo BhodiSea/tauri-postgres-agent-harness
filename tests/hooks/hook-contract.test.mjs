@@ -12,7 +12,7 @@
 import { test, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -141,8 +141,37 @@ const RULE_CANARIES = {
     bashDeny('echo x | tee .claude\\hooks\\stop-validate-gate.mjs'),
     bashDeny('echo deadbeef > .harness\\build.ok'),
     bashDeny('cp evil.yml .github\\workflows\\quality-gate.yml'),
+    // tsconfig(.base).json carries the max-strict compiler surface every type gate rests
+    // on. It was write-guard-protected but ABSENT from the shell-write surface, so this
+    // exact command weakened strictness with nothing to catch it — not this guard, not
+    // gate-integrity, not `tsc -b`, not CI.
+    bashDeny('sed -i \'s/"strict": true/"strict": false/\' tsconfig.base.json'),
+    bashDeny('echo {} > tsconfig.json'),
     // Honors the HARNESS_ALLOW_SELF_EDIT=1 human escape hatch (canary CI uses it).
     bashAllow('echo x > tools/canary-probe.mjs', SELF_EDIT),
+  ],
+  'interpreter-write-protected': [
+    // An inline interpreter is a write primitive: it lands the same bytes as `>` while
+    // matching none of the redirect spellings above. This was the one un-denied way to
+    // widen a security escape list, doctor a gate script, or forge a stamp.
+    bashDeny(
+      `node -e "require('fs').appendFileSync('tools/rls-exempt.json', '{}')"`,
+    ),
+    bashDeny(`node --eval "require('fs').writeFileSync('tools/validate.mjs','')"`),
+    bashDeny(`python3 -c "open('tools/check-sources.mjs','w').write('')"`),
+    bashDeny(`ruby -e "File.write('.claude/hooks/stop-validate-gate.mjs','')"`),
+    bashDeny(`deno eval "Deno.writeTextFileSync('tools/validate.floor.json','[]')"`),
+    bashDeny('git apply /tmp/weaken-gate.patch tools/check-rls-manifest.mjs'),
+    bashDeny('dd if=/dev/zero of=.harness/build.ok'),
+    bashDeny('base64 -d payload.b64 > tools/harness.config.mjs'),
+    // Interpreters are the agent's normal working tools — only a write to the PROTECTED
+    // surface is denied. A guard that blocked `node -e` outright would be unusable.
+    bashAllow('node -e "console.log(1 + 1)"'),
+    bashAllow(`node -e "require('fs').writeFileSync('src/app.ts','x')"`),
+    bashAllow('node tools/validate.mjs'),
+    bashAllow('python3 scripts/report.py'),
+    // Human-in-the-loop escape hatch, same as every other tamper rule.
+    bashAllow(`node -e "require('fs').writeFileSync('tools/validate.mjs','x')"`, SELF_EDIT),
   ],
   'git-hookspath-repoint': [
     bashDeny('git config core.hooksPath /tmp/nohooks'),
@@ -218,6 +247,9 @@ const RULE_CANARIES = {
   'styleguide-manifest': [pathDeny('tools/styleguide.manifest.json')],
   'mutation-baseline': [pathDeny('tools/mutation-baseline.json')],
   'route-allowlist': [pathDeny('tools/route-allowlist.json')],
+  'dto-bounds-allow': [pathDeny('tools/dto-bounds-allow.json')],
+  'duplication-allow': [pathDeny('tools/duplication-allow.json')],
+  'decision-groups': [pathDeny('tools/decision-groups.json')],
   'rls-runner': [pathDeny('tests/rls/run-rls.mjs')],
   'migration-apply-runner': [pathDeny('tests/migrations/migration-apply.mjs')],
   'lefthook': [pathDeny('lefthook.yml')],
@@ -554,4 +586,52 @@ test('stop gate: green output surfaces SKIPPED layers instead of staying silent'
   assert.equal(r.code, 0, r.stderr)
   assert.ok(r.stderr.includes('skipped layers'), r.stderr)
   assert.ok(r.stderr.includes('SKIPPED'), r.stderr)
+})
+
+// ── symlink shadowing: the write-guard judges the DESTINATION, not the name ───
+// A link whose name is innocuous but whose target is protected used to walk straight
+// through: the RAW tool path was matched against WRITE_PROTECTED, so `ln -s
+// tools/validate.mjs shim` + `Write shim` edited the gate runner unguarded — and from
+// there .harness/manifest.json can be forged so gate-integrity re-hashes to green.
+test('write-guard: a symlink pointing at a protected file is DENIED under its innocuous name', () => {
+  writeFileSync(join(proj, 'tools/validate.mjs'), '// the real gate runner\n')
+  symlinkSync('tools/validate.mjs', join(proj, 'shim.mjs'))
+  const r = runHook('pretool-write-guard.mjs', {
+    tool_name: 'Write',
+    tool_input: { file_path: 'shim.mjs', content: 'process.exit(0)\n' },
+  })
+  assert.ok(denied(r), 'a symlink to the gate runner must be denied, not approved by its name')
+})
+
+test('write-guard: an exempt-LOOKING link name cannot smuggle content into a checked path', () => {
+  mkdirSync(join(proj, 'apps/server/src/dal'), { recursive: true })
+  writeFileSync(join(proj, 'apps/server/src/dal/notes.ts'), 'export const q = 1\n')
+  // *.test.ts is content-check-exempt (test bodies legitimately reference banned
+  // patterns) — but the bytes here land in a DAL module, which must carry withUserContext.
+  symlinkSync('apps/server/src/dal/notes.ts', join(proj, 'sneaky.test.ts'))
+  const r = runHook('pretool-write-guard.mjs', {
+    tool_name: 'Write',
+    tool_input: { file_path: 'sneaky.test.ts', content: 'export const all = () => db.select()\n' },
+  })
+  assert.ok(denied(r), 'an exempt name must not buy an exemption for bytes landing in the DAL')
+})
+
+test('write-guard: a link out of the project tree is DENIED (path-scoped guards cannot see it)', () => {
+  const outside = mkdtempSync(join(tmpdir(), 'tpah-outside-'))
+  symlinkSync(outside, join(proj, 'escape'))
+  const r = runHook('pretool-write-guard.mjs', {
+    tool_name: 'Write',
+    tool_input: { file_path: 'escape/anything.ts', content: 'export const x = 1\n' },
+  })
+  assert.ok(denied(r), 'writing through a link out of the tree bypasses every path-scoped guard')
+  rmSync(outside, { recursive: true, force: true })
+})
+
+test('write-guard: an ordinary file is still approved (the resolver must not over-block)', () => {
+  mkdirSync(join(proj, 'apps/desktop/src'), { recursive: true })
+  const r = runHook('pretool-write-guard.mjs', {
+    tool_name: 'Write',
+    tool_input: { file_path: 'apps/desktop/src/App.tsx', content: 'export const App = () => null\n' },
+  })
+  assert.ok(!denied(r), `ordinary source writes must still pass: ${r.stdout} ${r.stderr}`)
 })

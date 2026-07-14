@@ -55,7 +55,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { walkFiles } from './lib/fs-walk.mjs'
-import { fail, failures, MAX_BUFFER, ok, skipOrFail } from './lib/gate.mjs'
+import { fail, failures, MAX_BUFFER, ok, rampNote, skipOrFail } from './lib/gate.mjs'
 
 const GATE = 'perf-budget'
 const BUDGET_PATH = 'tools/perf-budget.json'
@@ -86,8 +86,15 @@ const cliAbs = fileURLToPath(new URL('./lib/perf-subject-cli.mjs', import.meta.u
 // not argv: markers like role="gridcell" would be mangled by shell:true quoting.
 // The legacy single-subject path passes undefined — the spawn env stays exactly
 // as it shipped in 0.1.4 and the CLI applies its own gridcell default.
-function measureViaSubject(subjectRel, cells, runs, expect) {
+function measureViaSubject(subjectRel, cells, runs, expect, markerScales) {
   const subjectAbs = resolve(process.cwd(), subjectRel)
+  // markerScales (G30): the CLI asserts the marker count SCALES with `cells`, not merely
+  // that it is present — a one-row subject used to "pass" the budget in ~1 ms. A subject
+  // whose marker is a per-render container rather than per-cell opts out with
+  // `markerScales: false`, and takes the weaker presence-only guarantee.
+  const env = { ...process.env }
+  if (expect !== undefined) env.PERF_SUBJECT_EXPECT = expect
+  if (markerScales === false) env.PERF_SUBJECT_MARKER_SCALES = '0'
   const res = spawnSync(
     'pnpm',
     ['--filter', 'desktop', 'exec', 'tsx', cliAbs, subjectAbs, String(cells), String(runs)],
@@ -96,7 +103,7 @@ function measureViaSubject(subjectRel, cells, runs, expect) {
       encoding: 'utf8',
       shell: true,
       maxBuffer: MAX_BUFFER,
-      env: expect === undefined ? process.env : { ...process.env, PERF_SUBJECT_EXPECT: expect },
+      env,
     },
   )
   if (res.error) {
@@ -140,15 +147,15 @@ function measureViaSubject(subjectRel, cells, runs, expect) {
 // Median-of-runs with the re-measure-once discipline, parameterized by subject
 // entry; fails the gate on two independent over-budget medians, otherwise
 // returns the human-readable detail line.
-/** @param {{ subject: string, cells: number, runs: number, medianBudgetMs: number, expect?: string }} entry */
-function measureWithRetry({ subject, cells, runs, medianBudgetMs, expect }) {
-  let { median, samples } = measureViaSubject(subject, cells, runs, expect)
+/** @param {{ subject: string, cells: number, runs: number, medianBudgetMs: number, expect?: string, markerScales?: boolean }} entry */
+function measureWithRetry({ subject, cells, runs, medianBudgetMs, expect, markerScales }) {
+  let { median, samples } = measureViaSubject(subject, cells, runs, expect, markerScales)
   let retried = false
   if (median > medianBudgetMs) {
     // One full re-measure before failing: two independent over-budget medians
     // cannot both be scheduler noise.
     retried = true
-    ;({ median, samples } = measureViaSubject(subject, cells, runs, expect))
+    ;({ median, samples } = measureViaSubject(subject, cells, runs, expect, markerScales))
   }
   const detail = `subject ${subject}, ${cells} cells, ${runs} runs${retried ? ' (re-measured once)' : ''}: median ${median.toFixed(1)}ms (budget ${medianBudgetMs}ms; samples ${samples.map((s) => s.toFixed(0)).join('/')}ms)`
   if (median > medianBudgetMs) {
@@ -262,6 +269,36 @@ if (hasSubjects) {
   // they ship a subject.
   const DENSE_IMPORT =
     /\bfrom\s*(['"])(?:[^'"]*\/)?(?:useVirtualWindow|useRovingGrid)(?:\.[cm]?[tj]sx?)?\1/
+
+  // G13 — density is a SHAPE, not two import names. The v0.1.5 closure keyed entirely on
+  // `useVirtualWindow`/`useRovingGrid`, so a dense screen that hand-rolled its
+  // virtualization, painted to a canvas, or simply rendered a big grid was never measured
+  // by anything. These STRUCTURAL signals catch the shape instead of the spelling:
+  //   • aria-rowcount — the APG marker a grid uses to declare a row count LARGER than the
+  //     DOM it renders. Nothing else has a reason to say it: it IS the virtualization tell.
+  //   • role="grid"   — a 2-D data surface.
+  //   • <canvas       — an imperative paint surface, dense by construction.
+  // Extensible as reviewable data: `densitySignals: ["regex-source", …]` in perf-budget.json.
+  // Over-detection reds with `exempt[]` as the reviewed escape; it can never fail open.
+  const DEFAULT_DENSITY_SIGNALS = [
+    String.raw`aria-rowcount`,
+    String.raw`role=["']grid["']`,
+    String.raw`<canvas\b`,
+  ]
+  const configured = budget.densitySignals
+  if (configured !== undefined && !Array.isArray(configured)) {
+    fail(
+      GATE,
+      `${BUDGET_PATH} densitySignals must be an ARRAY of regex-source strings — got ${JSON.stringify(configured)}`,
+    )
+  }
+  const signalSources = (configured ?? DEFAULT_DENSITY_SIGNALS).map((s) => {
+    if (typeof s !== 'string' || s === '') {
+      fail(GATE, `${BUDGET_PATH} densitySignals entries must be non-empty regex-source strings`)
+    }
+    return s
+  })
+  const DENSITY_SIGNALS = signalSources.map((s) => new RegExp(s))
   // A consumer without a features/ tree (e.g. a 0.1.3-vintage install that
   // adopted subjects[] by hand) has nothing to scan: the closure below no-ops
   // and only the declared-file existence check applies.
@@ -272,6 +309,9 @@ if (hasSubjects) {
         .sort()
     : []
   const errs = []
+  // v0.1.6 structural-density findings, held separately so they can be ramped: an upgraded
+  // consumer's existing grid/canvas screen must not be ambushed by newly-widened detection.
+  const shapeErrs = []
   for (const entry of budget.subjects) {
     if (!existsSync(resolve(process.cwd(), entry.subject))) {
       errs.push(
@@ -286,12 +326,22 @@ if (hasSubjects) {
       excludeDirs: new Set(['node_modules']),
       filter: (rel) => /\.tsx?$/.test(rel),
     })
-    const dense = files.some((rel) => DENSE_IMPORT.test(readFileSync(`${dirRel}/${rel}`, 'utf8')))
+    const sources = files.map((rel) => readFileSync(`${dirRel}/${rel}`, 'utf8'))
+    // The v0.1.5 signal (hook import) stays turn-fatal. The v0.1.6 structural signals are
+    // RAMPED — broadening detection would otherwise ambush an upgraded consumer whose
+    // existing grid/canvas screen was never held to this bar.
+    const denseByHook = sources.some((src) => DENSE_IMPORT.test(src))
+    const matchedSignals = DENSITY_SIGNALS.filter((re) => sources.some((src) => re.test(src)))
+    const denseByShape = matchedSignals.length > 0
     const subjectRel = `${dirRel}/perfSubject.ts`
     const hasSubjectFile = existsSync(subjectRel)
-    if (dense && !hasSubjectFile) {
+    if (denseByHook && !hasSubjectFile) {
       errs.push(
         `${dirRel}/ imports useVirtualWindow/useRovingGrid (data-dense by doctrine) but ships NO perfSubject.ts — a dense screen nobody measures is a silent regression farm. FIX: create ${subjectRel} exporting renderSubject(cells): string that renderToString's the feature's dense component (worked pattern: ${WORKED_SUBJECT}), declare it in ${BUDGET_PATH} subjects[] with its cells + medianBudgetMs, or exempt "${dirName}" with a reviewed reason in ${BUDGET_PATH} exempt[]`,
+      )
+    } else if (denseByShape && !hasSubjectFile) {
+      shapeErrs.push(
+        `${dirRel}/ is data-dense by SHAPE (${matchedSignals.map((re) => re.source).join(', ')}) but ships NO perfSubject.ts — density is a shape, not an import name: a screen that hand-rolls its virtualization, paints a canvas, or renders a grid is exactly as capable of regressing as one that imports the matrix hooks. FIX: create ${subjectRel} (worked pattern: ${WORKED_SUBJECT}) and declare it in ${BUDGET_PATH} subjects[], or exempt "${dirName}" with a reviewed reason in ${BUDGET_PATH} exempt[]`,
       )
     }
     if (hasSubjectFile && !declared.has(subjectRel)) {
@@ -307,10 +357,20 @@ if (hasSubjects) {
       )
     }
   }
+  // Ramp the SHAPE findings only (the hook signal keeps its v0.1.5 turn-fatal contract).
+  if (
+    shapeErrs.length > 0 &&
+    rampNote(GATE, '0.1.6', `${shapeErrs.length} structural-density finding(s)`)
+  ) {
+    for (const e of shapeErrs) console.log(`${GATE}: NOTE — (ramp) ${e}`)
+  } else {
+    errs.push(...shapeErrs)
+  }
+
   failures(
     GATE,
     errs,
-    `  Dense-feature closure: every ${FEATURES_DIR}/* dir importing the matrix hooks ships a measured perfSubject.ts (see docs/harness/gates-catalog.md "perf-budget").`,
+    `  Dense-feature closure: every ${FEATURES_DIR}/* dir that is data-dense — by importing the matrix hooks, or by SHAPE (aria-rowcount / role="grid" / <canvas>) — ships a measured perfSubject.ts (see docs/harness/gates-catalog.md "perf-budget").`,
   )
 
   // Closure holds — measure every declared subject sequentially (never in

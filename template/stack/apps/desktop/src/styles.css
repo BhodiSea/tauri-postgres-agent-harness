@@ -41,6 +41,22 @@
   --color-ink-muted: oklch(0.72 0.01 240);
   --color-accent: oklch(0.8 0.12 200);
 
+  /* STATUS is a channel, not a decoration. The near-monochrome system deliberately
+     has one accent — but "your write failed" and "your write landed" must not be the
+     same pixel: without a status hue the only difference between an error toast and a
+     confirmation toast is the words in it, which is a colour-blind-equivalent UI for
+     everyone (you have to read prose to learn whether you lost data).
+     These are NOT accents (accentTokens excludes them, so they do not consume the
+     accent budget) — they are semantic, and the styleguide gate's status scan reds a
+     role="alert"/aria-invalid surface that does not reference one.
+     Both clear AA 4.5:1 as TEXT on canvas AND surface, computed by the gate from these
+     very values — measured dark: danger 7.30/6.66, success 9.54/8.71.
+     SOURCE: WCAG 2.2 SC 1.4.1 Use of Color — colour is never the ONLY channel (these
+     pair with text + ARIA, they do not replace it)
+     https://www.w3.org/TR/WCAG22/#use-of-color */
+  --color-danger: oklch(0.72 0.16 25);
+  --color-success: oklch(0.76 0.14 150);
+
   /* Typography: system stacks only — a desktop app must render identically
      offline, so no webfont ever enters the bundle. The erasure also removes the
      unused weights; the four kept below are the full sanctioned range. Values
@@ -127,6 +143,13 @@
        5.90 / 5.24 by the styleguide gate). Hue stays 200 — recognizably the same
        cyan-teal, just gamut-bound. */
     --color-accent: oklch(0.475 0.08 200);
+    /* Status hues invert with the theme: dark-on-light here, and both still clear
+       4.5:1 as text on canvas AND surface (measured light: danger 6.08/5.40,
+       success 5.65/5.01). A theme override that omits a token would paint a DARK
+       value on the light canvas — the gate asserts every theme redeclares the full
+       token set, so this block can never fall behind the @theme above. */
+    --color-danger: oklch(0.5 0.19 25);
+    --color-success: oklch(0.48 0.13 150);
   }
   body {
     background-color: var(--color-canvas);

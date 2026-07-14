@@ -46,6 +46,8 @@ Usage:
            seeded, project-owned file or whole subtree — e.g. a trailing '/'
            dir: overwrite when untouched, park on drift)
   doctor   [--dir .]
+  graduate [--dir .]  (advance baseVersion once the ramped v0.1.6 checks are
+           clean — runs validate, refuses while any ramp NOTE remains)
   enable   <module>   (ci-windows-release, ci-windows-e2e, ci-macos, ci-provenance,
            mutation, gate-a11y-deep, crash-reporting, ops-backup, eval-live,
            observability)
@@ -67,6 +69,9 @@ try {
   } else if (command === 'doctor') {
     const { doctor } = await import('./commands/doctor.mjs')
     code = await doctor(opts)
+  } else if (command === 'graduate') {
+    const { graduate } = await import('./commands/graduate.mjs')
+    code = await graduate(opts)
   } else if (command === 'enable' || command === 'disable') {
     const { enable } = await import('./commands/enable.mjs')
     code = await enable(opts, positionals[1], command === 'enable')

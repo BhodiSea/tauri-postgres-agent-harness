@@ -354,6 +354,30 @@ jobs:
           grep -E 'long task|latency' perf-canary.log | tail -n 5 || true
           git checkout -q -- apps/desktop/src/main.tsx
           echo 'canary OK: perf lane went red under the injected busy loop'
+      - name: "Canary 8: replace a route's EmptyState with a bare-word div, or its Skeleton with a silent spinner, or a route panel wider than the 640px min window, or remove the :focus-visible outline → the e2e lane (states/reflow/a11y quality checks, all iterating ROUTES) must FAIL"
+        if: matrix.node == 22
+        working-directory: .selftest/boot
+        run: |
+          # G20: gut the home route's EmptyState down to a bare-word div. The states
+          # quality check drives the REAL render, so "empty == a single label" must red —
+          # a manifest-satisfying but below-tier surface can no longer ship green.
+          node -e '
+            const fs = require("node:fs");
+            const f = "apps/desktop/src/features/notes/NotesPanel.tsx";
+            let s = fs.readFileSync(f, "utf8");
+            s = s.replace(/<EmptyState\s+data-testid=\{HOME\.states\.empty\}[\s\S]*?\/>/, "<div data-testid={HOME.states.empty}>None</div>");
+            fs.writeFileSync(f, s);
+          '
+          # The change invalidates the e2e stamp (desktop src hash moved), so the gate
+          # re-runs the browser suite instead of short-circuiting.
+          if env -u GITHUB_BASE_REF node tools/check-e2e.mjs > e2e-canary.log 2>&1; then
+            tail -n 50 e2e-canary.log
+            echo '::error::E2E CANARY: the lane PASSED with a bare-word empty state — the route-state quality check cannot fail'
+            exit 1
+          fi
+          grep -E 'title AND a description|EmptyState' e2e-canary.log | tail -n 5 || true
+          git checkout -q -- apps/desktop/src/features/notes/NotesPanel.tsx
+          echo 'canary OK: e2e lane went red on a below-tier empty state'
       - name: RLS runner FAILS CLOSED without a database (CI=true)
         working-directory: .selftest/boot
         run: |

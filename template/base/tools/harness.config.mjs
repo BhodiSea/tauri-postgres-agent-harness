@@ -57,4 +57,10 @@ export const STOP_HOOK_STEPS = [
   // included), read from the coverage-final.json the unit step just wrote — a
   // new module cannot land 0%-covered inside a green aggregate.
   ['diff-coverage', 'node tools/check-diff-coverage.mjs'],
+  // Copy-paste rot: a token clone detector over apps/*/src + packages/*/src. A
+  // Stop-chain step, NOT a floor member (the 22-gate floor stays frozen) — fast and
+  // deterministic, ramped so a pre-0.1.6 consumer's existing duplication is a NOTE
+  // until deliberately graduated. CI enforces it in the `unit` job alongside
+  // diff-coverage.
+  ['duplication', 'node tools/check-duplication.mjs'],
 ]

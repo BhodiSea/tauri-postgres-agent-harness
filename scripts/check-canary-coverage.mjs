@@ -79,13 +79,15 @@ const CHILD_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('NODE_TEST')),
 )
 /**
- * A zero-test file emits exactly one synthetic TAP point naming the path node was given.
- * Matching the EXACT ref (not `*.mjs`) is what stops a real test titled after a file — or an
- * empty non-.mjs proof — from being misjudged.
+ * A zero-test file emits exactly one synthetic TAP point naming the path node resolved. That
+ * path may use the OS separator (Windows renders `\`, not `/`) and may be absolute, so `ref` is
+ * matched as a separator-agnostic SUFFIX. Requiring the ref's DIRECTORY segment is what stops a
+ * real test merely TITLED after a bare filename (node renders `test('check-route-manifest.mjs')`
+ * as `ok 1 - check-route-manifest.mjs`) — or an empty non-.mjs proof — from being misjudged.
  */
 const ranAsEmpty = (tap, ref) => {
-  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(String.raw`^(?:not )?ok \d+ - ${escaped}\s*$`, 'm').test(tap)
+  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '[/\\\\]')
+  return new RegExp(String.raw`^(?:not )?ok \d+ - (?:.*[/\\])?${escaped}\s*$`, 'm').test(tap)
 }
 const ran = new Set()
 let spawned = 0

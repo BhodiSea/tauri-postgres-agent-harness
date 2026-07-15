@@ -431,19 +431,24 @@ jobs:
         if: matrix.node == 22
         working-directory: .selftest/boot
         run: |
-          # Replace the catalog lookup {t('home.title')} with a string the code assembles at
-          # runtime, so the static gate cannot see it. Injected via a quoted heredoc (<<'NODE')
-          # so the JS keeps its single quotes verbatim — a shell-single-quoted `node -e` would
-          # break on the nested ' and hand node malformed JS (SyntaxError). Renders "Ready to
-          # build" on screen.
+          # APPEND — next to the existing {t('home.title')} — the SAME catalog string
+          # (en['home.title'] === "Ready to build") assembled from char codes at RUNTIME. Two
+          # reasons it must APPEND, not replace: (a) the static scan (tools/check-i18n.mjs) reds a
+          # catalog key nothing renders, so removing the t() call would fail HALF ONE for the
+          # wrong reason; (b) there is NO string literal here — only numbers — so the scan's
+          # literal check is blind, which is the blind spot HALF ONE asserts. The rendered text is
+          # byte-for-byte the catalog fragment, so under en-XA the e2e pseudo-locale lane sees
+          # "Ready to build" survive un-mangled and reds (HALF TWO). Heredoc so the JS reaches
+          # node verbatim.
           node <<'NODE'
           const fs = require("node:fs");
           const f = "apps/desktop/src/screens/HomeScreen.tsx";
           let s = fs.readFileSync(f, "utf8");
-          s = s.replace("{t('home.title')}", "{['Ready', 'to', 'build'].join(' ')}");
+          const codes = "Ready to build".split("").map((c) => c.charCodeAt(0)).join(",");
+          s = s.replace("{t('home.title')}", "{t('home.title')}{String.fromCharCode(" + codes + ")}");
           fs.writeFileSync(f, s);
           NODE
-          grep -q "join(' ')" apps/desktop/src/screens/HomeScreen.tsx \
+          grep -q "String.fromCharCode" apps/desktop/src/screens/HomeScreen.tsx \
             || { echo '::error::the canary injection did not apply — HomeScreen no longer renders t(home.title)'; exit 1; }
 
           # HALF ONE: the static gate must stay GREEN. This is the blind spot, asserted.
@@ -454,7 +459,7 @@ jobs:
           fi
 
           # HALF TWO: the behavioural lane must go RED, and must NAME the string.
-          if env -u GITHUB_BASE_REF pnpm exec playwright test --project chromium e2e/i18n.spec.ts > i18n-e2e.log 2>&1; then
+          if env -u GITHUB_BASE_REF pnpm exec playwright test --project=chromium e2e/i18n.spec.ts > i18n-e2e.log 2>&1; then
             tail -n 40 i18n-e2e.log
             echo '::error::I18N CANARY: the pseudo-locale lane PASSED with a hardcoded English string on screen — nothing in the harness can see a string that bypasses the catalog'
             exit 1

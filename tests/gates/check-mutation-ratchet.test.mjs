@@ -139,7 +139,10 @@ test('a LINE SHIFT does not invalidate the baseline (identity is position-indepe
 
   // Someone adds a two-line header. Every line number in the file moves. Under the old
   // file:line:column identity this alone reported the survivor as brand new.
+  // REUSE-IgnoreStart — the tag below is TEST DATA (a header an author might add), not a
+  // real license declaration for this file; the reuse tool otherwise parses it as one.
   const shifted = `// (c) 2026\n// SPDX-License-Identifier: 0BSD\n${ERRORS_TS}`
+  // REUSE-IgnoreEnd
   const report = reportFor(shifted)
   const m = report.files['apps/server/src/errors.ts'].mutants
   m[0].location = { start: { line: 6, column: 7 }, end: { line: 6, column: 25 } }

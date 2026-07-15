@@ -99,7 +99,14 @@ function project({ commands, benched = commands, subjects, budget, estimates, ma
  * empty string on exactly the failures it exists to prove.
  */
 function run(dir, args = []) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8' })
+  // These tests assert the gate's LOCAL behaviour (self-disable when no bench ran). The
+  // canary-coverage step SPAWNS this suite inside CI, where `CI=true` would make inCI() true
+  // and flip the "self-disables locally" cases to fail-closed — so the child env must never
+  // inherit the ambient CI signals. The one test that needs inCI() true sets CI explicitly.
+  const env = { ...process.env }
+  delete env.CI
+  delete env.HARNESS_REQUIRE_TOOLCHAINS
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env })
   return { status: r.status, out: `${r.stdout}${r.stderr}` }
 }
 

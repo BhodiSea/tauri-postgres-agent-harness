@@ -108,6 +108,16 @@ export const SEEDED_FILES = new Set([
   // DAL methods, so only the project can write it. seedOnInitOnly — `update` withholds it
   // and the probe self-disables with an adoption NOTE rather than ambushing an upgrade.
   'tests/rls/dal-shapes.ts',
+  // e2e exemplars that COUPLE to the seedOnInitOnly i18n surface (0.1.6): they import
+  // src/i18n/catalog and read route.labelKey / en['<key>']. `update` withholds i18n/ and
+  // routes' labelKey field from a pre-i18n consumer, so auto-planting these owned specs
+  // would dangle those imports and red `lint`/`types` on the next validate. Seeded +
+  // seedOnInitOnly, exactly like dal-shapes.ts: planted fresh, withheld on upgrade until
+  // the project adopts i18n (then `update --refresh-seeded e2e/<spec>`). The generic route
+  // sweeps (a11y/matrix/states/…) stay owned — they read only pre-i18n route fields.
+  'e2e/i18n.spec.ts',
+  'e2e/memory.spec.ts',
+  'e2e/mutation.spec.ts',
 ])
 
 // The gate config is seeded (projects tune it) but hash-tracked so `doctor`

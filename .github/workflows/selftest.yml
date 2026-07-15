@@ -370,14 +370,17 @@ jobs:
         run: |
           # A screen-level effect (HomeScreen mounts and unmounts on every cycle) that
           # subscribes to window and returns no cleanup — the canonical React leak.
-          node -e '
-            const fs = require("node:fs");
-            const f = "apps/desktop/src/screens/HomeScreen.tsx";
-            let s = fs.readFileSync(f, "utf8");
-            s = s.replace(/(export function HomeScreen\(\)[^{]*\{\n)/,
-              "$1  useEffect(() => {\n    const onKey = () => undefined\n    window.addEventListener('keydown', onKey)\n  }, [])\n");
-            fs.writeFileSync(f, s);
-          '
+          # Injected via a quoted heredoc (<<'NODE'): the body reaches node verbatim, so the JS
+          # keeps its natural quotes and $1 backref. A shell-single-quoted `node -e` would mangle
+          # a nested ' — and shellcheck (SC2016/SC2026) flags $, backticks or ' inside one.
+          node <<'NODE'
+          const fs = require("node:fs");
+          const f = "apps/desktop/src/screens/HomeScreen.tsx";
+          let s = fs.readFileSync(f, "utf8");
+          s = s.replace(/(export function HomeScreen\(\)[^{]*\{\n)/,
+            "$1  useEffect(() => {\n    const onKey = () => undefined\n    window.addEventListener('keydown', onKey)\n  }, [])\n");
+          fs.writeFileSync(f, s);
+          NODE
           if pnpm exec playwright test --project perf --workers 1 > memory-canary.log 2>&1; then
             tail -n 50 memory-canary.log
             echo '::error::MEMORY CANARY: the lane PASSED while every HomeScreen mount leaked a window listener — the memory ceiling cannot fail'
@@ -428,13 +431,18 @@ jobs:
         if: matrix.node == 22
         working-directory: .selftest/boot
         run: |
-          node -e '
-            const fs = require("node:fs");
-            const f = "apps/desktop/src/screens/HomeScreen.tsx";
-            let s = fs.readFileSync(f, "utf8");
-            s = s.replace("{t('home.title')}", "{['Ready', 'to', 'build'].join(' ')}");
-            fs.writeFileSync(f, s);
-          '
+          # Replace the catalog lookup {t('home.title')} with a string the code assembles at
+          # runtime, so the static gate cannot see it. Injected via a quoted heredoc (<<'NODE')
+          # so the JS keeps its single quotes verbatim — a shell-single-quoted `node -e` would
+          # break on the nested ' and hand node malformed JS (SyntaxError). Renders "Ready to
+          # build" on screen.
+          node <<'NODE'
+          const fs = require("node:fs");
+          const f = "apps/desktop/src/screens/HomeScreen.tsx";
+          let s = fs.readFileSync(f, "utf8");
+          s = s.replace("{t('home.title')}", "{['Ready', 'to', 'build'].join(' ')}");
+          fs.writeFileSync(f, s);
+          NODE
           grep -q "join(' ')" apps/desktop/src/screens/HomeScreen.tsx \
             || { echo '::error::the canary injection did not apply — HomeScreen no longer renders t(home.title)'; exit 1; }
 
@@ -506,10 +514,20 @@ jobs:
             exit 1
           fi
           grep -E "forbidden plan node|Sort|notesDal.list" plan-canary.log | tail -n 6 || true
-          # The bare-policy probe MUST still be green in that log: it is the proof that the
-          # old check structurally could not see this, which is the whole point of the new one.
-          grep -q 'policy shape' plan-canary.log \
-            || { echo '::error::the policy-shape probe did not run — cannot demonstrate what the old check missed'; exit 1; }
+          # The DAL plan probe RED on the Sort, and its failure NAMES the query — which also
+          # proves the suite file executed (the prerequisite for the green assertion below).
+          grep -Eq 'notesDal\.list|forbidden plan node' plan-canary.log \
+            || { tail -n 60 plan-canary.log; echo '::error::the suite failed, but NOT on the DAL plan probe — the canary is not exercising G06'; exit 1; }
+          # ...while the bare policy-shape probe stayed GREEN — the proof the OLD check is
+          # structurally blind to a missing keyset index. vitest names only FAILED tests, and the
+          # DAL failure above proves the file ran, so the ABSENCE of a 'policy shape' failure here
+          # IS that probe passing (a red one would be named). Grepping for a green test name never
+          # worked: the default reporter does not print passing tests.
+          if grep -qi 'policy shape' plan-canary.log; then
+            tail -n 60 plan-canary.log
+            echo '::error::the policy-shape probe RED too — with only the owner index it must stay green, or the canary cannot show what the DAL probe uniquely catches'
+            exit 1
+          fi
           git checkout -q -- packages/schema/drizzle/
           echo 'canary OK: the DAL plan probe went red on the v0.1.5 index, while the old policy probe stayed green'
 
@@ -566,6 +584,13 @@ jobs:
       - name: 'Canary 11: add ONE untested branch to a 99%-covered file → the mutation lane must FAIL while every other gate stays GREEN'
         working-directory: .selftest/mut
         run: |
+          # Git baseline so the diff-scoped gates below (diff-coverage, test-quality) judge
+          # EXACTLY the one file this canary injects — not every untracked scaffold file.
+          # Matches bootstrap-linux; without it changedFiles falls back to "all untracked" and
+          # reds on apps/desktop/src/test-setup.ts (a vitest setupFile, absent from coverage).
+          git init -q -b main
+          git add -A
+          git -c user.email=selftest@localhost -c user.name=selftest commit -qm 'scaffold baseline'
           python3 - <<'PY'
           p = 'apps/server/src/auth/verify.ts'
           s = open(p).read()
@@ -585,9 +610,12 @@ jobs:
           #     what mutation testing uniquely adds over them.
           pnpm exec vitest run --coverage --silent \
             || { echo '::error::MUTATION CANARY: the unit suite reddened. The injection must be executed-but-unverified, not broken — the canary is not demonstrating the coverage/verification gap'; exit 1; }
-          node tools/check-diff-coverage.mjs \
+          # env -u GITHUB_BASE_REF: the diff-scoped gates read GITHUB_BASE_REF, which belongs to
+          # the harness checkout, not this scaffold's git repo — leaving it set makes changedFiles
+          # try to merge-base against an origin ref the scaffold has never heard of.
+          env -u GITHUB_BASE_REF node tools/check-diff-coverage.mjs \
             || { echo '::error::MUTATION CANARY: diff-coverage reddened; the injection was supposed to slip THROUGH the per-file floors'; exit 1; }
-          node tools/check-test-quality.mjs \
+          env -u GITHUB_BASE_REF node tools/check-test-quality.mjs \
             || { echo '::error::MUTATION CANARY: test-quality reddened; the injection adds no test, it does not remove an assertion'; exit 1; }
 
           # (2) …and the mutation lane must catch what all of them missed.
@@ -1189,7 +1217,7 @@ jobs:
             --set PROJECT_NAME="All Modules" \
             --set GITHUB_OWNER=selftest-owner \
             --set SECURITY_OWNERS=@selftest-owner
-          for m in ci-windows-release ci-windows-e2e ci-macos ci-provenance mutation \
+          for m in ci-windows-release ci-windows-e2e ci-macos ci-provenance \
                    gate-a11y-deep crash-reporting ops-backup eval-live observability; do
             node installer/cli.mjs enable "$m" --dir "$RUNNER_TEMP/allmods"
           done

@@ -79,15 +79,30 @@ const CHILD_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('NODE_TEST')),
 )
 /**
- * A zero-test file emits exactly one synthetic TAP point naming the path node resolved. That
- * path may use the OS separator (Windows renders `\`, not `/`) and may be absolute, so `ref` is
- * matched as a separator-agnostic SUFFIX. Requiring the ref's DIRECTORY segment is what stops a
- * real test merely TITLED after a bare filename (node renders `test('check-route-manifest.mjs')`
- * as `ok 1 - check-route-manifest.mjs`) — or an empty non-.mjs proof — from being misjudged.
+ * A zero-test file emits exactly one synthetic TAP point named after the file node ran. How that
+ * path is RENDERED is not portable: node varies it by platform (Windows separators, relative vs
+ * absolute, a leading `file://`) and may append a ` # time=…` TAP comment. So we do not pattern
+ * the text — we RESOLVE each point's name against ROOT and compare it to the resolved ref. A
+ * full-path match (not a basename) still stops a real test merely TITLED after a bare filename
+ * (`test('check-route-manifest.mjs')` → `ok 1 - check-route-manifest.mjs`) from being misjudged:
+ * that resolves to ROOT/<name>, not to the ref's own directory.
  */
 const ranAsEmpty = (tap, ref) => {
-  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '[/\\\\]')
-  return new RegExp(String.raw`^(?:not )?ok \d+ - (?:.*[/\\])?${escaped}\s*$`, 'm').test(tap)
+  const target = resolve(ROOT, ref).toLowerCase() // Windows paths are case-insensitive
+  for (const raw of tap.split('\n')) {
+    const m = raw.match(/^(?:not )?ok \d+ - (.+?)(?:\s+#.*)?\s*$/)
+    if (!m) continue
+    let name = m[1].trim()
+    if (name.startsWith('file://')) {
+      try {
+        name = fileURLToPath(name)
+      } catch {
+        // not a valid file URL — fall through and let the compare reject it
+      }
+    }
+    if (resolve(ROOT, name).toLowerCase() === target) return true
+  }
+  return false
 }
 const ran = new Set()
 let spawned = 0

@@ -3,6 +3,96 @@
 All notable changes to the harness are documented here. Consuming projects
 pick up fixes with `npx --yes github:BhodiSea/tauri-postgres-agent-harness update`.
 
+## [0.1.6] — 2026-07-15
+
+The four pillars become floors. A 50-agent adversarial audit of v0.1.5
+(8 read-only lens assessors → 30 deduped findings → one skeptic per finding
+instructed to *refute* → completeness critic → grade synthesis; record in
+`design/v0.1.6-audit.md`) found the enforcement was real but **pinned to the two
+shipped exemplar surfaces** and **defeatable at the trust root** — and the
+flagship write-UX exemplar 401'd against its own server while all 22 gates, 45
+e2e tests and the perf lane stayed green. Every confirmed path got a
+deterministic countermeasure (gate/hook **or blocking CI lane** — the harness's
+own doctrine). The 22-step floor is unchanged; the work is depth inside existing
+gates, new CI lanes, four new Stop-chain non-floor steps, and the scaffold itself
+fixed to be the benchmark it claims.
+
+Honest note on how this release was built: the same adversarial method was turned
+on the *new* work. Two review passes over the machinery-self-bar changes alone
+found nine real defects in code that had already passed every gate — a hidden
+auth bypass, a mutation lane that had never run, a complexity ratchet that could
+be fooled by a same-named function, a canary check that misjudged an empty proof.
+Each is fixed and canary-proven. Where a control cannot deliver its full promise,
+the docs now say so plainly rather than over-claim.
+
+**What `update` does for an existing 0.1.5 install**: owned surfaces refresh as
+usual, and **a clean 0.1.5 (or 0.1.4) consumer stays green** — the update-skew
+matrix gained a **v0.1.5 leg** alongside 0.1.4. Every new v0.1.6 check activates
+by data shape you control or is `rampNote`-gated to `baseVersion >= 0.1.6`: it
+prints `NOTE — (ramp)` on your pre-0.1.6 vintage and turns fatal only after you
+graduate deliberately (`npx … graduate`, which refuses while any ramp NOTE
+stands). The native perf floor is withheld whole (its budget names *your*
+`#[tauri::command]` surface and its bench lives in the crate — adopt with
+`update --refresh-seeded tools/native-perf-budget.json apps/desktop/src-tauri/benches/`),
+i18n's turn-fatal gate ramps so your existing English literals don't ambush an
+upgrade, and the new seeded clusters (status-color tokens, the i18n catalog, the
+authenticated api-client, the DAL query-shape registry, the mutation baseline)
+are `seedOnInitOnly` — the selftest gate makes forgetting one machine-impossible.
+
+- **Trust root closed** (the criticals): the write-guard now `realpath`-resolves a
+  target before matching the protected set, so a symlink can no longer shadow a
+  gate script; `.harness/manifest.json` gained a root of trust (git-verified
+  monotonic `baseVersion`, consumer-CI regeneration from the SHA-pinned tag, and
+  its own metadata folded into `gate-integrity`), so a hand-lowered `baseVersion`
+  can no longer silently downgrade live checks in CI. `tsconfig(.base).json`
+  joined the protected files; interpreter/patch write-classes (`node -e`,
+  `git apply`, `dd of=`, …) joined the bash-guard; and the seeded escape lists
+  (`rls-exempt.json` and kin) are now tamper-evident.
+- **Research-grade**: the citation obligation extends past the six hard-wired
+  stack classes — a project's own `research/` constants carry a citation duty via
+  a write-guard-protected decision-group file, groups-less corpus entries are now
+  a hard error (the ~25 universal justifiers are gone), and the semantic checks
+  auto-graduate instead of noting forever. The produced artifact is finally
+  citable: seeded LICENSE + CITATION.cff + `license` field, a claims gate that
+  recomputes the machine-derivable README/CHANGELOG numbers (it caught a real
+  cold/warm contradiction between the two docs), and a network fidelity job that
+  fetches every corpus URL (it caught a dead `tauri/isolation` link).
+- **UI/UX**: the flagship exemplar actually works — one authenticated api-client
+  primitive attaches the host-held bearer token, and a new blocking integration
+  lane drives create → list → paginate through the *real* desktop fetch → Hono →
+  Postgres seam (it also surfaced that the server shipped with **no CORS at
+  all**). Semantic status color arrives as contrast-computed `--color-danger` /
+  `--color-success` tokens (a failed-write toast is no longer identical to a
+  confirmation), a status-channel scan reds a colorless `role=alert`, and route
+  quality generalizes off ROUTES: empty/loading states must render through
+  `EmptyState`/`Skeleton`, per-route keyboard focus and a 640×480 reflow sweep run
+  over every registered screen. i18n is a turn-fatal seam (typed catalog, `Intl`
+  formatting, `lang`/`dir` management) with a pseudo-locale + RTL e2e lane.
+- **Performance**: the native host is measured for the first time. Criterion
+  benches drive the **real** `#[tauri::command]` invoke path and the real boot
+  chain (a Stop-chain closure requires *every* command to be benched and
+  budgeted), with budgets expressed as **ratios** to the cheapest command — a
+  design chosen only after measuring that a synthetic-calibration normalizer was
+  worse than none. A real-binary cold-start TTI budget runs nightly. Perf closure
+  generalizes off ROUTES + `subjects[]` (a dense screen an agent adds is now
+  measured), a marker-scale anti-vacuity check kills the 1-row degenerate subject,
+  a CI-side render/gzip baseline ratchet closes the drift band, a CDP heap loop
+  catches leaks, and every DAL query shape is `EXPLAIN`-probed at scale for a Seq
+  Scan or external sort.
+- **Maintainability**: mutation testing goes default-on (StrykerJS, a set-based
+  ratchet against a reasoned baseline, blocking per-PR on the critical set +
+  nightly full) — it found a **JWT audience bypass**, a missing `DELETE` CORS
+  method, a `500`-where-`400`, and a password-leaking crash redactor, all with
+  every gate green. Coverage's blind spot is covered by a Stop-chain
+  assertion-presence gate (honestly documented as gameable alone — mutation is the
+  real control). A jscpd duplication gate and a bounded-DTO `.max()` sweep land.
+  And **the machinery finally obeys its own bar**: a data-driven complexity
+  ratchet replaces the prose promise that `init()` "may not grow" (nothing had
+  enforced it — four machinery checks were in fact red), the canary registry now
+  *executes* each red-proof instead of checking it exists, and a config-rule
+  integrity check pins the depcruise/eslint boundary rules a deleted or
+  regex-narrowed rule could silently neuter.
+
 ## [0.1.5] — 2026-07-12
 
 The promise becomes checkable. A 42-agent audit (8 lens assessors → 30

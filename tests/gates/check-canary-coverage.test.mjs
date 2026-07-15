@@ -86,6 +86,29 @@ test('RED (spawn, G28): a proof that RUNS but declares zero tests fails — empt
   assert.ok(r.out.includes('declares ZERO tests'), r.out)
 })
 
+test('GREEN (spawn, G28): a real proof whose test is TITLED after a .mjs file is NOT falsely called empty', () => {
+  // Regression guard against a false-RED an adversarial review found: the emptiness signal used
+  // to match any `ok N - <something>.mjs` line, but node renders `test('foo.mjs', ...)` as exactly
+  // that — and titling a test after the file it exercises is idiomatic in this repo. The fix
+  // matches the EXACT proof ref (which has a directory), so a bare-filename title cannot collide.
+  const dir = mkdtempSync(join(tmpdir(), 'tpah-cancov-title-'))
+  const titledRel = 'tests/gates/.tmp-titled-proof.test.mjs'
+  writeFileSync(
+    join(ROOT_DIR, titledRel),
+    "import { test } from 'node:test'\nimport assert from 'node:assert/strict'\n" +
+      "test('check-route-manifest.mjs', () => assert.equal(1, 1))\ntest('second', () => assert.equal(2, 2))\n",
+  )
+  try {
+    const reg = { steps: { styleguide: [{ kind: 'fixture', ref: titledRel }] } }
+    writeFileSync(join(dir, 'titled.json'), JSON.stringify(reg))
+    const r = run(join(dir, 'titled.json'), undefined, { spawn: true })
+    // Other closure gaps are expected noise; the point is this proof is NOT called empty.
+    assert.ok(!r.out.includes(`${titledRel} runs but declares ZERO tests`), r.out)
+  } finally {
+    rmSync(join(ROOT_DIR, titledRel), { force: true })
+  }
+})
+
 test('RED (spawn, G28): a proof BROKEN so it fails when run reds, naming the proof', () => {
   // The other spawn verdict: a proof the gate-under-test's refactor has broken now fails at
   // runtime. Point a step at a real fixture whose assertions we cannot satisfy by writing a

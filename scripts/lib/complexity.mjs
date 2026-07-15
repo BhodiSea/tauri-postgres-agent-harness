@@ -23,28 +23,35 @@ export function identify(line) {
 }
 
 /**
- * Build the measured Map from `{ base, score }` entries IN FILE ORDER, disambiguating
- * collisions with a `#N` suffix.
+ * Build the measured Map from `{ base, score }` entries, FAILING LOUD on any collision.
  *
- * `identify()` yields a bare name, and two functions in one file can share it (a `handle(x)`
- * method beside a `handle(y)` method; two same-named nested helpers). A plain Map keyed on the
- * bare `file::name` keeps only the LAST — last-write-wins silently drops the other, and THAT
- * function could then grow unwatched, defeating the whole ratchet. So the second and later
- * collisions get `#1`, `#2`, … (mirroring the mutation ratchet's occurrence identity). Order is
- * the file order, stable unless a human REORDERS the functions — a reviewable event, not a
- * silent shift.
+ * `identify()` yields a bare name, and two OVER-LIMIT functions in one file can share it (a
+ * `handle(x)` method beside a `handle(y)` method; two same-named nested helpers). A plain Map
+ * would keep only the last (last-write-wins), silently dropping the other so it could grow
+ * unwatched.
+ *
+ * The first fix here numbered collisions by occurrence (`#1`, `#2`). An adversarial review broke
+ * it: ESLint only reports the functions that are ALREADY over the limit, so the occurrence index
+ * is computed over an UNSTABLE population. When a same-named sibling crosses the limit (a refactor
+ * pushes one under, or pushes another over), the indices renumber and a real regression can slide
+ * into a vacated slot and read as "improved". No stable position-independent identity exists from
+ * a bare name plus an unstable population.
+ *
+ * So collisions are not guessed — they are REFUSED. Two over-limit functions the ratchet cannot
+ * tell apart is an identity failure, and the honest response is to say so and have the human give
+ * them distinct names (or extract one). The harness's own 11 grandfathered functions have no
+ * collisions, so this never fires in practice; a consumer who hits it has two same-named
+ * over-limit functions in one file, which is a smell worth surfacing anyway.
  * @param {{ base: string, score: number }[]} entries
- * @returns {Map<string, number>}
+ * @returns {{ measured: Map<string, number>, collisions: string[] }}
  */
-export function keyByOccurrence(entries) {
-  const seen = new Map()
+export function keyScores(entries) {
+  const counts = new Map()
+  for (const { base } of entries) counts.set(base, (counts.get(base) ?? 0) + 1)
   const measured = new Map()
-  for (const { base, score } of entries) {
-    const n = seen.get(base) ?? 0
-    seen.set(base, n + 1)
-    measured.set(n === 0 ? base : `${base}#${String(n)}`, score)
-  }
-  return measured
+  for (const { base, score } of entries) if (counts.get(base) === 1) measured.set(base, score)
+  const collisions = [...counts.entries()].filter(([, n]) => n > 1).map(([base]) => base)
+  return { measured, collisions }
 }
 
 /** "…reduce its Cognitive Complexity from 133 to the 15 allowed." */

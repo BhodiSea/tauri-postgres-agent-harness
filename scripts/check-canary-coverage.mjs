@@ -58,12 +58,18 @@ for (const name of Object.keys(registry.steps ?? {})) {
 //
 // Emptiness is detected structurally, NOT by the test count: `node --test` reports "# tests 1"
 // for a zero-test file (the file execution itself counts), so a count is useless at the 0/1
-// boundary. Instead we look for node's synthetic `ok N - <path>` line, which it emits ONLY when
-// a file declared zero tests. And NODE_TEST_* is stripped from the child env: without that, a
-// checker spawned from inside `node --test` (the repo test suite) makes its OWN child run as a
-// nested subtest, which suppresses that synthetic line — so the emptiness signal would flip
-// depending on who invoked the checker. Stripping it makes the child behave identically
-// standalone (real CI) and under the suite.
+// boundary. When a file declares ZERO tests, node emits ONE synthetic point naming THE PATH IT
+// WAS GIVEN — `ok N - <proof.ref>`. We match that exact ref, NOT a generic `*.mjs` pattern:
+//   - a REAL test whose title happens to be a bare filename (`test('check-route-manifest.mjs', …)`
+//     renders as `ok 1 - check-route-manifest.mjs`) would collide with a `*.mjs` pattern and be
+//     falsely called empty — and titling a test after the file it exercises is idiomatic here;
+//   - a `*.mjs` pattern also silently ignores an empty `.js`/`.cjs` proof.
+// Matching the exact ref (which includes a directory, so a bare title cannot equal it) fixes both.
+//
+// NODE_TEST_* is stripped from the child env: without that, a checker spawned from inside
+// `node --test` (the repo test suite) makes its OWN child run as a nested subtest, which
+// suppresses the synthetic line — so the signal would flip depending on who invoked the checker.
+// Stripping it makes the child behave identically standalone (real CI) and under the suite.
 //
 // --no-spawn keeps the fast static path for callers that only want the lockstep check (the
 // gate-integrity hash surface, the docs-sync lockstep) and for the test suite itself.
@@ -72,8 +78,15 @@ const selftest = readFileSync(join(ROOT, '.github/workflows/selftest.yml'), 'utf
 const CHILD_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('NODE_TEST')),
 )
-/** node emits `ok N - <file>.mjs` (a path, not a prose title) ONLY for a zero-test file. */
-const ranAsEmpty = (tap) => /^(?:not )?ok \d+ - \S*\.mjs\s*$/m.test(tap)
+/**
+ * A zero-test file emits exactly one synthetic TAP point naming the path node was given.
+ * Matching the EXACT ref (not `*.mjs`) is what stops a real test titled after a file — or an
+ * empty non-.mjs proof — from being misjudged.
+ */
+const ranAsEmpty = (tap, ref) => {
+  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(String.raw`^(?:not )?ok \d+ - ${escaped}\s*$`, 'm').test(tap)
+}
 const ran = new Set()
 let spawned = 0
 
@@ -99,7 +112,7 @@ for (const [name, proofs] of Object.entries(registry.steps ?? {})) {
         errs.push(
           `step '${name}': red-proof ${proof.ref} FAILS when run — the proof itself is broken (likely by a refactor of the gate it covers), so the gate has no working proof:\n${out.slice(-800)}`,
         )
-      } else if (ranAsEmpty(out)) {
+      } else if (ranAsEmpty(out, proof.ref)) {
         errs.push(
           `step '${name}': red-proof ${proof.ref} runs but declares ZERO tests — an empty or gutted proof is not a proof. Restore its test bodies.`,
         )

@@ -25,7 +25,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { compareComplexity, identify, keyByOccurrence, scoreOf } from './lib/complexity.mjs'
+import { compareComplexity, identify, keyScores, scoreOf } from './lib/complexity.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const RECORD = 'scripts/complexity-ratchet.json'
@@ -46,20 +46,37 @@ if (eslint.stdout.trim() === '') {
 }
 
 const measured = new Map()
-// Collisions are disambiguated by occurrence (keyByOccurrence). Messages are sorted by line so
-// the occurrence order is the file order — stable unless a human reorders the functions.
+const collisions = []
 for (const file of JSON.parse(eslint.stdout)) {
   const rel = file.filePath.replace(ROOT, '')
-  const complexityMsgs = file.messages
-    .filter((m) => m.ruleId === RULE && scoreOf(m.message) !== null)
-    .sort((a, b) => a.line - b.line)
+  const complexityMsgs = file.messages.filter(
+    (m) => m.ruleId === RULE && scoreOf(m.message) !== null,
+  )
   if (complexityMsgs.length === 0) continue
   const lines = readFileSync(file.filePath, 'utf8').split('\n')
   const entries = complexityMsgs.map((m) => ({
     base: `${rel}::${identify(lines[m.line - 1] ?? '')}`,
     score: scoreOf(m.message),
   }))
-  for (const [key, score] of keyByOccurrence(entries)) measured.set(key, score)
+  const { measured: fileScores, collisions: fileCollisions } = keyScores(entries)
+  for (const [key, score] of fileScores) measured.set(key, score)
+  for (const base of fileCollisions) collisions.push(base)
+}
+
+// A collision is an identity failure the ratchet cannot resolve safely (see keyScores). It reds
+// BEFORE anything else, in both --write and check mode — writing a record over an ambiguous name
+// would bake the ambiguity in, and a false CLEAN is the exact failure mode this gate exists to
+// prevent.
+if (collisions.length > 0) {
+  console.error(`COMPLEXITY RATCHET: ${String(collisions.length)} unresolvable name collision(s):`)
+  for (const base of collisions) {
+    console.error(
+      `  - ${base}: two or more OVER-LIMIT functions map to this name in one file. The ratchet ` +
+        'cannot track same-named functions independently (ESLint only reports the ones already over ' +
+        'the limit, so an occurrence index is not stable). Give them distinct names, or extract one.',
+    )
+  }
+  process.exit(1)
 }
 
 const record = existsSync(RECORD)

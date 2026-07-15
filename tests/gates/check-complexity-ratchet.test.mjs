@@ -9,7 +9,7 @@
 // mergeClaudeSettings 19 -> 34: `eslint .` GREEN, ratchet RED); these pin the comparison.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compareComplexity, identify, keyByOccurrence, scoreOf } from '../../scripts/lib/complexity.mjs'
+import { compareComplexity, identify, keyScores, scoreOf } from '../../scripts/lib/complexity.mjs'
 
 const record = { limit: 15, functions: { 'a.mjs::foo': 20, 'b.mjs::bar': 30 } }
 
@@ -70,30 +70,29 @@ test('scoreOf: extracts the measured score, or null for an unrelated message', (
   assert.equal(scoreOf('some other lint message'), null)
 })
 
-test('keyByOccurrence: two functions that collide on the same name are BOTH kept, not last-write-wins', () => {
-  // The exact defect the adversarial review confirmed: a `handle(x)` beside a `handle(y)` both
-  // identify() to "a.mjs::handle". A plain Map would keep only the second (16), and the first
-  // (30) could then grow unwatched. Occurrence disambiguation keeps both, so growth of EITHER
-  // is visible.
-  const m = keyByOccurrence([
+test('keyScores: distinct names all measured; no collision', () => {
+  const { measured, collisions } = keyScores([
+    { base: 'a.mjs::foo', score: 30 },
+    { base: 'a.mjs::bar', score: 16 },
+  ])
+  assert.deepEqual(collisions, [])
+  assert.equal(measured.get('a.mjs::foo'), 30)
+  assert.equal(measured.get('a.mjs::bar'), 16)
+})
+
+test('keyScores: two OVER-LIMIT functions sharing a name are REFUSED, not guessed', () => {
+  // The occurrence-index scheme (the first fix) was itself broken by an adversarial review: a
+  // same-named sibling CROSSING the complexity limit renumbers the indices, so a real regression
+  // can slide into a vacated slot and read as "improved". ESLint only reports over-limit
+  // functions, so there is no stable occurrence population — the honest response is to refuse the
+  // ambiguity and make the human give them distinct names, never to pick one silently.
+  const { measured, collisions } = keyScores([
     { base: 'a.mjs::handle', score: 30 },
     { base: 'a.mjs::handle', score: 16 },
     { base: 'a.mjs::other', score: 20 },
   ])
-  assert.equal(m.size, 3)
-  assert.equal(m.get('a.mjs::handle'), 30)
-  assert.equal(m.get('a.mjs::handle#1'), 16)
-  assert.equal(m.get('a.mjs::other'), 20)
-})
-
-test('keyByOccurrence: growth of the SECOND occurrence is caught end-to-end via compareComplexity', () => {
-  const record = { limit: 15, functions: { 'a.mjs::handle': 30, 'a.mjs::handle#1': 16 } }
-  // The second `handle` grew 16 -> 40; the collapsed-Map bug made this invisible.
-  const measured = keyByOccurrence([
-    { base: 'a.mjs::handle', score: 30 },
-    { base: 'a.mjs::handle', score: 40 },
-  ])
-  const { problems } = compareComplexity(measured, record)
-  assert.equal(problems.length, 1)
-  assert.match(problems[0], /a\.mjs::handle#1: GREW to 40 from a recorded 16/)
+  assert.deepEqual(collisions, ['a.mjs::handle'])
+  // The colliding name is NOT in measured (it is reported as a collision, not scored).
+  assert.equal(measured.has('a.mjs::handle'), false)
+  assert.equal(measured.get('a.mjs::other'), 20)
 })

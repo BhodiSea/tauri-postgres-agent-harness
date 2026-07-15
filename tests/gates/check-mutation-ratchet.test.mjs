@@ -53,6 +53,7 @@ const reportFor = (source = ERRORS_TS) => ({
   },
 })
 
+/** @param {{ report?: any, baseline?: any }} [opts] */
 function fixture({ report = reportFor(), baseline } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-ratchet-'))
   mkdirSync(join(dir, 'reports/mutation'), { recursive: true })

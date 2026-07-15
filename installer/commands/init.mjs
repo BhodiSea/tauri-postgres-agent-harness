@@ -13,7 +13,7 @@ import { printReport } from '../lib/report.mjs'
 import { collectAnswers, parseSets } from '../lib/prompts.mjs'
 import { writeInstallFile } from '../lib/write-file.mjs'
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 133 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export async function init(opts) {
   const targetDir = opts.dir
   mkdirSync(targetDir, { recursive: true })

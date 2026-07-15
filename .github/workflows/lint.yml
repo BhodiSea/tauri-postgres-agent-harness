@@ -123,6 +123,17 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: machinery-eslint (complexity budget + ratchet; a stale disable is red)
         run: pnpm exec eslint .
+      # The CEILING the eslint disables cannot enforce (G16): a disabled function can grow
+      # without limit and `eslint .` stays green. This re-lints with --no-inline-config and
+      # fails if any ratcheted function grew past its committed record — the harness held to
+      # the cognitive-complexity <= 15 bar it enforces on every consumer.
+      - name: machinery-complexity-ratchet (no ratcheted function grew; G16)
+        run: node scripts/check-complexity-ratchet.mjs
+      # The boundary rules the runner-kind canaries cannot see fire (G28): a deleted or
+      # regex-narrowed depcruise architecture rule, or a disappeared eslint import-ban, leaves
+      # the gate green over code it should reject.
+      - name: machinery-rule-integrity (config-driven boundary rules intact; G28)
+        run: node scripts/check-rule-integrity.mjs
       - name: machinery-types (tsc --noEmit, allowJs+checkJs over the same globs)
         run: pnpm exec tsc --noEmit
       - name: machinery-knip (dead exports/files/deps across installer, scripts, tools)

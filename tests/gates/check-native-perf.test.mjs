@@ -54,6 +54,7 @@ const budgetJson = (subjects, extra = {}) => ({
  * A project tree the gate can run against: lib.rs (the command surface), benches/host.rs (the
  * bench list), the budget, and optionally criterion's estimates. Omitting `estimates` models a
  * local turn where nobody ran `cargo bench`.
+ * @param {{ commands: string[], benched?: string[] | null, subjects?: object, budget?: object | null, estimates?: Record<string, number>, manifest?: object }} opts
  */
 function project({ commands, benched = commands, subjects, budget, estimates, manifest }) {
   const dir = mkdtempSync(join(tmpdir(), 'native-perf-'))

@@ -86,7 +86,7 @@ function appendMapItems(text, section, lines) {
 // Minimal parser for the documented pnpm-workspace.yaml shape. Returns
 // { lists: {key: [...]}, maps: {key: {k: v}} } or null when it sees syntax
 // it does not fully understand (the caller then refuses to merge).
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 function parseSimpleYaml(text) {
   const lists = {}
   const maps = {}

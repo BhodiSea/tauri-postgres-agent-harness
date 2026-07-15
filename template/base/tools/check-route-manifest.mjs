@@ -137,7 +137,7 @@ const ids = new Set()
 const pathOwners = new Map()
 const stateIdOwners = new Map()
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 entries.forEach((entry, i) => {
   const id = entry.match(/\bid:\s*['"]([a-z0-9-]+)['"]/)?.[1]
   const name = id ?? `ROUTES[${i}]`

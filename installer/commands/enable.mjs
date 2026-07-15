@@ -11,7 +11,7 @@ import { writeInstallFile } from '../lib/write-file.mjs'
 // stays for future gate modules).
 const GATE_MODULES_NEEDING_CONFIG = new Map([])
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 54 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export async function enable(opts, moduleName, on) {
   if (RETIRED_MODULES.has(moduleName)) {
     throw new Error(`module '${moduleName}' was ${RETIRED_MODULES.get(moduleName)}`)

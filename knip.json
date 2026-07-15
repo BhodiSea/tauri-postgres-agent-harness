@@ -4,6 +4,7 @@
     "scripts/*.mjs",
     "tests/**/*.test.mjs",
     "template/base/tools/*.mjs",
+    "template/base/stryker.config.mjs",
     "template/base/tools/lib/perf-subject-cli.mjs",
     "template/base/tools/mcp/*.mjs",
     "template/base/.claude/hooks/*.mjs",
@@ -25,6 +26,6 @@
     "template/modules/**",
     "template/base/**/*.ts"
   ],
-  "ignoreDependencies": ["@modelcontextprotocol/sdk"],
-  "ignoreBinaries": ["playwright", "vitest", "biome"]
+  "ignoreDependencies": ["@modelcontextprotocol/sdk", "@stryker-mutator/api"],
+  "ignoreBinaries": ["playwright", "vitest", "biome", "stryker"]
 }

@@ -5,7 +5,7 @@
 // Semantics: theirs is the base; harness hooks / permissions / env / MCP
 // servers are ADDED, never replacing an existing choice. Returns null when
 // either side is not parseable JSON (caller parks ours as a conflict).
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 19 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export function mergeClaudeSettings(existingText, incomingText) {
   let theirs
   let ours

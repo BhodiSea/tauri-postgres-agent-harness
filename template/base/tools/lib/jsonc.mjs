@@ -2,7 +2,7 @@
 // legally carries // and /* */ comments and trailing commas, which JSON.parse
 // rejects. Strip them first. String-aware so a `//` inside a string value
 // (e.g. a path) is preserved.
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export function parseJsonc(text) {
   let out = ''
   let inStr = false

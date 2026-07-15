@@ -3,10 +3,14 @@
 // knip --strict on every consumer; this config holds the enforcement machinery
 // itself (installer/, scripts/, tests/, and the shipped gate scripts + hooks —
 // linted AS REPO SOURCE, zero consumer surface) to the same complexity bar.
-// Ratchet discipline: pre-existing over-budget functions carry an inline
-// `eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5)`
-// with today's measured score; reportUnusedDisableDirectives reds a stale one,
-// and any NEW over-budget function reds CI. Do not raise the budget.
+// Ratchet discipline. A NEW over-budget function reds CI here (no directive, so the
+// rule fires), and reportUnusedDisableDirectives reds a directive whose function has
+// dropped back under the bar. What ESLint ALONE cannot do is bound a function that is
+// already disabled: the directive suppresses the rule outright, so a ratcheted function
+// could grow without limit and this config stayed green. That ceiling is enforced by
+// `scripts/check-complexity-ratchet.mjs` (G16, blocking in machinery-lint), which re-lints
+// with --no-inline-config to read every real score and compares it against the committed
+// `scripts/complexity-ratchet.json`. The two controls are complementary; neither is enough.
 import js from '@eslint/js'
 import sonarjs from 'eslint-plugin-sonarjs'
 import globals from 'globals'

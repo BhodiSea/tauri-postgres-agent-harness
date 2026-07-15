@@ -293,7 +293,7 @@ test('RED: a present subject whose measurement spawn fails is a FAIL, never a sy
 const CLI = fileURLToPath(
   new URL('../../template/base/tools/lib/perf-subject-cli.mjs', import.meta.url),
 )
-/** @param {string} subjectSource @param {number} cells @param {number} runs @param {{ expect?: string }} [opts] */
+/** @param {string} subjectSource @param {number} cells @param {number} runs @param {{ expect?: string, markerScales?: boolean }} [opts] */
 function runCli(subjectSource, cells, runs, { expect, markerScales } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tpah-perfcli-'))
   const subj = join(dir, 'subject.mjs')

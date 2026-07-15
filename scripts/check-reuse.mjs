@@ -44,7 +44,7 @@ const ANNOTATION_KEYS = new Map([
   ['SPDX-License-Identifier', 'license'],
 ])
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 24 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export function parseReuseToml(text) {
   let version = null
   const annotations = []
@@ -161,7 +161,7 @@ export function licenseIdsFromExpression(expr) {
 // ---------------------------------------------------------------------------
 // 3+4. Structural problems, as data (the CLI prints them; tests assert them).
 // ---------------------------------------------------------------------------
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 22 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export function reuseProblems({ reuse, trackedPaths, licenseFiles, readme, citation, packageJson }) {
   const problems = []
 

@@ -26,12 +26,13 @@
 //   - packages/importer, packages/eval — pure data transforms, and not on the auth/data path.
 // SOURCE: docs/harness/gates-catalog.md (mutation-ratchet) [corpus: harness/doctrine]
 
+// Module-local, not exported: these two feed MUTATE_GLOBS and isCritical below and nothing
+// imports them. A consumer widening the mutated surface EDITS this array in place (that is the
+// "supported consumer decision" the header note means) — editing does not need an export, and
+// exporting an unimported constant is exactly the dead API `knip --strict` reds a consumer for.
+
 /** Directory roots (trailing slash) whose .ts files are mutated. */
-export const CRITICAL_ROOTS = [
-  'apps/server/src/',
-  'apps/desktop/src/auth/',
-  'apps/desktop/src/lib/',
-]
+const CRITICAL_ROOTS = ['apps/server/src/', 'apps/desktop/src/auth/', 'apps/desktop/src/lib/']
 
 /**
  * Carve-outs INSIDE those roots. Each is code no unit test can honestly reach, so every
@@ -43,7 +44,7 @@ export const CRITICAL_ROOTS = [
  *                       The RLS isolation suite proves it against real Postgres instead.
  * These are the same paths vitest.config.ts excludes from coverage, and for the same reason.
  */
-export const CRITICAL_EXCLUDES = [
+const CRITICAL_EXCLUDES = [
   'apps/server/src/index.ts',
   'apps/server/src/db/client.ts',
   'apps/server/src/db/context.ts',

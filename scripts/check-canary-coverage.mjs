@@ -8,13 +8,17 @@
 // unreferenced rule id reds the PR). A NEW gate/rule cannot merge without a
 // canary; a DELETED gate cannot leave a stale registry entry.
 //   usage: node scripts/check-canary-coverage.mjs [registry-path] [hook-contract-path]
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const REGISTRY = resolve(process.argv[2] ?? join(ROOT, 'tests/canary/injections.json'))
-const HOOK_CONTRACT = resolve(process.argv[3] ?? join(ROOT, 'tests/hooks/hook-contract.test.mjs'))
+// Flags and positionals are separated so `--no-spawn` may appear anywhere without being
+// mistaken for the registry path (argv[2]); the two positionals are the optional overrides.
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'))
+const REGISTRY = resolve(positional[0] ?? join(ROOT, 'tests/canary/injections.json'))
+const HOOK_CONTRACT = resolve(positional[1] ?? join(ROOT, 'tests/hooks/hook-contract.test.mjs'))
 const errs = []
 
 const registry = JSON.parse(readFileSync(REGISTRY, 'utf8'))
@@ -38,15 +42,71 @@ for (const name of Object.keys(registry.steps ?? {})) {
   }
 }
 
-// 2. Every proof reference resolves.
+// 2. Every proof reference resolves — and, unless --no-spawn, every runnable proof is RUN.
+//
+// G28: this used to be an existsSync() and nothing more. "The file is there" is a weaker claim
+// than "the file is a working proof": a fixture broken by a refactor, or one whose tests were
+// all deleted/commented-out, would satisfy existsSync while proving nothing. So each proof is
+// now EXECUTED, and must clear two RELIABLE bars:
+//   (1) it runs GREEN (exit 0) — catches a proof the gate-under-test's own refactor has broken;
+//   (2) it contains at least one REAL test — catches an empty or gutted fixture.
+//
+// HONEST LIMIT — this does NOT prove the proof drives the gate RED. That is a semantic property
+// no generic runner can verify (a test that asserts the gate PASSES also runs green with real
+// tests). Writing a proof that actually reds the gate remains the fixture author's job; this
+// check guarantees the proof is present, runnable and non-empty, not that it is correct.
+//
+// Emptiness is detected structurally, NOT by the test count: `node --test` reports "# tests 1"
+// for a zero-test file (the file execution itself counts), so a count is useless at the 0/1
+// boundary. Instead we look for node's synthetic `ok N - <path>` line, which it emits ONLY when
+// a file declared zero tests. And NODE_TEST_* is stripped from the child env: without that, a
+// checker spawned from inside `node --test` (the repo test suite) makes its OWN child run as a
+// nested subtest, which suppresses that synthetic line — so the emptiness signal would flip
+// depending on who invoked the checker. Stripping it makes the child behave identically
+// standalone (real CI) and under the suite.
+//
+// --no-spawn keeps the fast static path for callers that only want the lockstep check (the
+// gate-integrity hash surface, the docs-sync lockstep) and for the test suite itself.
+const SPAWN = !process.argv.includes('--no-spawn')
 const selftest = readFileSync(join(ROOT, '.github/workflows/selftest.yml'), 'utf8')
+const CHILD_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => !k.startsWith('NODE_TEST')),
+)
+/** node emits `ok N - <file>.mjs` (a path, not a prose title) ONLY for a zero-test file. */
+const ranAsEmpty = (tap) => /^(?:not )?ok \d+ - \S*\.mjs\s*$/m.test(tap)
+const ran = new Set()
+let spawned = 0
+
 for (const [name, proofs] of Object.entries(registry.steps ?? {})) {
   for (const proof of proofs ?? []) {
     if (proof.kind === 'fixture' || proof.kind === 'runner') {
       if (!existsSync(join(ROOT, proof.ref))) {
         errs.push(`step '${name}': ${proof.kind} proof ${proof.ref} does not exist`)
+        continue
+      }
+      // One spawn per distinct file: six runner-kind steps all point at validate-runner.test.mjs.
+      if (!SPAWN || ran.has(proof.ref)) continue
+      ran.add(proof.ref)
+      const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', proof.ref], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 300_000,
+        env: CHILD_ENV,
+      })
+      spawned += 1
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
+      if (r.status !== 0) {
+        errs.push(
+          `step '${name}': red-proof ${proof.ref} FAILS when run — the proof itself is broken (likely by a refactor of the gate it covers), so the gate has no working proof:\n${out.slice(-800)}`,
+        )
+      } else if (ranAsEmpty(out)) {
+        errs.push(
+          `step '${name}': red-proof ${proof.ref} runs but declares ZERO tests — an empty or gutted proof is not a proof. Restore its test bodies.`,
+        )
       }
     } else if (proof.kind === 'selftest') {
+      // A selftest proof names a job in a REAL scaffold on CI (postgres, a built binary, a
+      // Windows runner). It cannot be spawned from here; the workflow is the execution.
       if (!selftest.includes(proof.ref)) {
         errs.push(`step '${name}': selftest proof step "${proof.ref}" not found in .github/workflows/selftest.yml`)
       }
@@ -164,5 +224,6 @@ if (errs.length > 0) {
   process.exit(1)
 }
 console.log(
-  `CANARY COVERAGE: CLEAN (${stepNames.size} steps all provably red; ${ruleIds.length} guard rule ids all canaried)`,
+  `CANARY COVERAGE: CLEAN (${stepNames.size} steps each carry a red-proof; ${ruleIds.length} guard rule ids all canaried; ` +
+    `${String(spawned)} proof file(s) ${SPAWN ? 'EXECUTED green with real tests (not proof of redness — see G28 note)' : 'existence-checked only (--no-spawn)'})`,
 )

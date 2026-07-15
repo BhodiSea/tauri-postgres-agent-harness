@@ -35,7 +35,7 @@ import { classifyDrift } from '../lib/reconcile.mjs'
 import { printReport } from '../lib/report.mjs'
 import { writeInstallFile } from '../lib/write-file.mjs'
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- ratchet(v0.1.5): 66 today; do not raise
+// eslint-disable-next-line sonarjs/cognitive-complexity -- ceiling is machine-enforced by scripts/complexity-ratchet.json (G16); this directive only silences the rule, the ratchet is what stops the score growing
 export async function update(opts, { migrations = readTemplateMigrations() } = {}) {
   const targetDir = opts.dir
   const manifest = readManifest(targetDir)
